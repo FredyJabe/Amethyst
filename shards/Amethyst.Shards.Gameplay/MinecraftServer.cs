@@ -319,11 +319,10 @@ public sealed class MinecraftServer
         BlockUseOn hit, CancellationToken ct)
     {
         var (x, y, z) = BlockInteractionProtocol.Adjacent(hit.X, hit.Y, hit.Z, hit.Face);
+        ushort selected = 0;
         bool allowed = hit.ValidHit && hit.Hand == 0 &&
             CanEditAt(player, hit.X, hit.Y, hit.Z) && CanEditAt(player, x, y, z) &&
-            player.TryGetSelectedBlock(out ushort _);
-        ushort selected = 0;
-        if (allowed) allowed = player.TryGetSelectedBlock(out selected);
+            player.TryGetSelectedBlock(out selected);
         if (allowed) allowed = _world.GetBlockState(hit.X, hit.Y, hit.Z) != 0 &&
             _world.GetBlockState(x, y, z) == 0 && player.TryConsumeEditBudget();
         if (allowed)
