@@ -12,6 +12,6 @@
   <Target Name="InstallShard" AfterTargets="Build">
     <MakeDir Directories="$(MSBuildProjectDirectory)/../../shards/installed/gameplay" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/gameplay" />
-    <Copy SourceFiles="$(MSBuildProjectDirectory)/shard.yaml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/gameplay" Condition="!Exists('$(MSBuildProjectDirectory)/../../shards/installed/gameplay/shard.yaml')" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/shard.yaml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/gameplay" />
   </Target>
 </Project>
