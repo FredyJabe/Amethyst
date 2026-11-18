@@ -93,6 +93,12 @@ public sealed class ItemCatalog : IShardItemRegistry
             canonical = TryGetById(numeric, out original);
         if (canonical)
         {
+            // Numeric and namespaced roots can refer to the same vanilla
+            // item; report duplicate overrides instead of last-write-wins.
+            if (!touched.Add("protocol:" + original.ProtocolId.ToString(
+                    CultureInfo.InvariantCulture)))
+                throw new InvalidDataException(
+                    $"Vanilla item '{original.Identifier}' was configured more than once.");
             if (fields.Id is not null && !ResolvesTo(fields.Id, original.ProtocolId))
                 throw new InvalidDataException($"'{root}' in {file} cannot change its vanilla Id.");
             if (fields.ProtocolId is int supplied && supplied != original.ProtocolId)
@@ -130,6 +136,9 @@ public sealed class ItemCatalog : IShardItemRegistry
                 $"Custom alias '{root}' cannot override physical stack or block properties; " +
                 "item stacks do not yet carry an alias identity.");
         string aliasId = key.Contains(':') ? key : "amethyst:" + key;
+        if (_byName.ContainsKey(aliasId))
+            throw new InvalidDataException(
+                $"Custom alias '{aliasId}' was defined twice in YAML files.");
         var alias = ApplyMetadata(material with { Identifier = aliasId }, fields);
         _byName.Add(aliasId, alias);
         if (aliasId != key) _byName.Add(key, alias);
