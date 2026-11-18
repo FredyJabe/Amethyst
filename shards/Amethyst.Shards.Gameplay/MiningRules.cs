@@ -296,7 +296,7 @@ public static class MiningRules
         new(6866, 6866, 2.5f, 2, 405, 0), // crafting_table
         new(6867, 6874, 0f, 0, 0, 0), // wheat
         new(6875, 6882, 0.6f, 3, 0, 0), // farmland
-        new(6883, 6890, 3.5f, 1, 0, 127), // furnace
+        new(6883, 6890, 3.5f, 1, 407, 127), // furnace
         new(6891, 6922, 1f, 2, 0, 0), // oak_sign
         new(6923, 6954, 1f, 2, 0, 0), // spruce_sign
         new(6955, 6986, 1f, 2, 0, 0), // birch_sign
@@ -973,8 +973,8 @@ public static class MiningRules
         new(24063, 24094, 0f, 0, 0, 0), // scaffolding
         new(24095, 24098, 2.5f, 2, 0, 0), // loom
         new(24099, 24110, 2.5f, 2, 0, 0), // barrel
-        new(24111, 24118, 3.5f, 1, 0, 127), // smoker
-        new(24119, 24126, 3.5f, 1, 0, 127), // blast_furnace
+        new(24111, 24118, 3.5f, 1, 1507, 127), // smoker
+        new(24119, 24126, 3.5f, 1, 1508, 127), // blast_furnace
         new(24127, 24127, 2.5f, 2, 0, 0), // cartography_table
         new(24128, 24128, 2.5f, 2, 0, 0), // fletching_table
         new(24129, 24140, 2f, 1, 0, 127), // grindstone
