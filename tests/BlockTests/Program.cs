@@ -289,11 +289,49 @@ try
             updates[0].Index < acknowledgements[1].Index &&
             updates[1].Index < acknowledgements[3].Index,
             "Confirmed block updates precede their prediction acknowledgements");
+
+        // An efficient tool can finish a soft block on the FIRST client tick.
+        // Vanilla then sends only START (no STOP); previously the server
+        // incorrectly left the block in the world indefinitely.
+        Check(MiningRules.RequiredMilliseconds(267, 1054) <= 50,
+            "Diamond hoe instamines leaves in one client tick");
+        Check(player.Inventory.TryCreativeSet(36, 1054, 1, true),
+            "Prepare a simple diamond hoe stack for the one-tick test");
+        Check(world.TrySetBlockState(3, blockY, blockZ, 267, out _),
+            "Prepare a nearby leaves block");
+        int beforeInstant = checked((int)outgoing.Length);
+        await game.HandleBlockActionAsync(player,
+            new PlayerBlockAction(0, 3, blockY, blockZ, 1, 5),
+            CancellationToken.None);
+        Check(world.GetBlockState(3, blockY, blockZ) == 0,
+            "One-tick Survival START destroys leaves without waiting for STOP");
+        Check(world.GetBlockState(1, blockY, blockZ) == 0 &&
+            world.GetBlockState(2, blockY, blockZ) == 0,
+            "Previous Survival breaks stay committed after one-tick mining");
+        using (var instantStream = new MemoryStream(outgoing.ToArray().AsSpan(beforeInstant).ToArray()))
+        {
+            Packet? update = await Protocol.ReadPacketAsync(instantStream, CancellationToken.None);
+            Check(update is { Id: BlockInteractionProtocol.ClientboundBlockUpdate },
+                "One-tick break sends an authoritative block update");
+            if (update is { } airUpdate)
+            {
+                PacketReader fields = airUpdate.Reader();
+                var position = fields.ReadPosition();
+                Check(position == (3, blockY, blockZ) && fields.ReadVarInt() == 0,
+                    "One-tick break publishes air for exactly the mined position");
+            }
+            // With leaves drops deliberately unsupported, only an ACK follows.
+            Packet? ack = await Protocol.ReadPacketAsync(instantStream, CancellationToken.None);
+            Check(ack is { Id: BlockInteractionProtocol.ClientboundChangedAck } &&
+                ack.Value.Reader().ReadVarInt() == 5,
+                "One-tick START sequence is acknowledged after authoritative air");
+        }
     }
     await using (var world = new TerrainWorld(settings))
         Check(world.GetBlockState(1, blockY, blockZ) == 0 &&
-              world.GetBlockState(2, blockY, blockZ) == 0,
-            "Consecutively mined blocks persist after server restart");
+              world.GetBlockState(2, blockY, blockZ) == 0 &&
+              world.GetBlockState(3, blockY, blockZ) == 0,
+            "Timed and one-tick Survival breaks persist after world restart");
 }
 finally
 {
