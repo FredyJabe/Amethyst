@@ -11,6 +11,19 @@ public readonly record struct CreativeSlotUpdate(int Slot, int ItemId, int Count
 /// <summary>Java 26.3 (protocol 777) block interaction packets.</summary>
 public static class BlockInteractionProtocol
 {
+    // Java 26.3's ServerboundPlayerActionPacket.Action enum includes
+    // CHANGE_DESTROY_DIRECTION (ID 1). This shifts ABORT and STOP compared
+    // with older protocol references; status 3 is NOT a drop action.
+    public const int StartDestroyBlock = 0;
+    public const int ChangeDestroyDirection = 1;
+    public const int AbortDestroyBlock = 2;
+    public const int StopDestroyBlock = 3;
+    public const int DropAllItems = 4;
+    public const int DropItem = 5;
+    public const int ReleaseUseItem = 6;
+    public const int SwapItemWithOffhand = 7;
+    public const int Stab = 8;
+
     public const int ServerboundPlayerAction = 0x29;
     public const int ServerboundSetHeldItem = 0x36;
     public const int ServerboundCreativeSlot = 0x39;
