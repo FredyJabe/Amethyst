@@ -41,7 +41,7 @@ dotnet run --no-build --project src/Amethyst.csproj -- server.yaml
 
 Alternatively, on Linux/macOS use `./run.sh` (run `chmod +x run.sh` if needed); it builds the kernel and Shards before running. See [Shard API and development guide](SHARDS.md). The default `server.yaml` listens only on `127.0.0.1:25565` and has `onlineMode: true`. Adjust the bind address only after reviewing authentication and server security.
 
-The world seed, generator version, lighting, console, and chunk performance options live in `server.yaml`; the sensitive operator list lives in ignored `ops.yaml`. Generated world data under `worlds/` is also ignored.
+The world seed, generator version, default game mode (`defaultGameMode: survival` or `creative`), lighting, console, and chunk performance options live in `server.yaml`; the sensitive operator list lives in ignored `ops.yaml`. Generated world data under `worlds/` is also ignored.
 
 ```yaml
 operatorsFile: "ops.yaml"  # runtime operator list (ignored by Git)
