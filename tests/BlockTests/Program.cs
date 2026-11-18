@@ -435,6 +435,13 @@ try
     {
         using var channel = new PacketChannel(stream);
         await DroppedItemProtocol.SendSpawnAsync(channel, firstDrop, CancellationToken.None);
+        await DroppedItemProtocol.SendPositionAsync(channel,
+            firstDrop with { Y = 64.4, VelocityY = -0.14, OnGround = false },
+            CancellationToken.None);
+        await DroppedItemProtocol.SendPickupAsync(channel, firstDrop.EntityId, 2, 1,
+            CancellationToken.None);
+        await DroppedItemProtocol.SendRemoveAsync(channel, firstDrop.EntityId,
+            CancellationToken.None);
         stream.Position = 0;
         Packet? spawn = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
         Check(spawn is { Id: DroppedItemProtocol.AddEntity },
@@ -464,6 +471,42 @@ try
                 pr.ReadVarInt() == 3 && pr.ReadVarInt() == 55 &&
                 pr.ReadVarInt() == 0 && pr.ReadVarInt() == 0 &&
                 pr.ReadByte() == 0xFF, "Item metadata index 8 / serializer 7 is correctly framed");
+            pr.RequireEnd();
+        }
+        Packet? motion = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
+        Check(motion is { Id: DroppedItemProtocol.TeleportEntity },
+            "Item motion uses 26.3 entity teleport packet");
+        if (motion is { } movePacket)
+        {
+            PacketReader pr = movePacket.Reader();
+            Check(pr.ReadVarInt() == firstDrop.EntityId &&
+                pr.ReadDouble() == 10.5 && pr.ReadDouble() == 64.4 &&
+                pr.ReadDouble() == 10.5 && pr.ReadDouble() == 0 &&
+                pr.ReadDouble() == -0.14 && pr.ReadDouble() == 0 &&
+                pr.ReadFloat() == 0 && pr.ReadFloat() == 0 &&
+                pr.ReadInt32() == 0 && pr.ReadByte() == 0,
+                "Teleport payload conveys item position and velocity");
+            pr.RequireEnd();
+        }
+        Packet? pickup = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
+        Check(pickup is { Id: DroppedItemProtocol.TakeItemEntity },
+            "Pickup animation packet is emitted");
+        if (pickup is { } takePacket)
+        {
+            PacketReader pr = takePacket.Reader();
+            Check(pr.ReadVarInt() == firstDrop.EntityId &&
+                pr.ReadVarInt() == 2 && pr.ReadVarInt() == 1,
+                "Pickup names the dropped entity, collector and taken count");
+            pr.RequireEnd();
+        }
+        Packet? removal = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
+        Check(removal is { Id: DroppedItemProtocol.RemoveEntities },
+            "Consumed item entity is removed from other clients");
+        if (removal is { } removePacket)
+        {
+            PacketReader pr = removePacket.Reader();
+            Check(pr.ReadVarInt() == 1 && pr.ReadVarInt() == firstDrop.EntityId,
+                "Remove entities packet contains the correct ID");
             pr.RequireEnd();
         }
     }
