@@ -49,6 +49,7 @@ public sealed class ItemCatalog : IShardItemRegistry
             if (_byName.ContainsKey(key) || _byName.ContainsKey(root))
                 throw new InvalidDataException($"Duplicate vanilla item {key}.");
             definitions.Add(item);
+            _vanillaMax[item.ProtocolId] = max;
             _byName.Add(key, item);
             _byName.Add(Normalize(root), item);
         }
@@ -131,7 +132,7 @@ public sealed class ItemCatalog : IShardItemRegistry
         string aliasId = key.Contains(':') ? key : "amethyst:" + key;
         var alias = ApplyMetadata(material with { Identifier = aliasId }, fields);
         _byName.Add(aliasId, alias);
-        _byName.Add(key, alias);
+        if (aliasId != key) _byName.Add(key, alias);
     }
 
     private int VanillaMax(int id) => _vanillaMax[id];
