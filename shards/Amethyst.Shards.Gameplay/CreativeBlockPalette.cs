@@ -106,7 +106,10 @@ public static class CreativeBlockPalette
         [393] = 4924, // minecraft:mossy_cobblestone
         [394] = 4925, // minecraft:obsidian
         [399] = 16687, // minecraft:purpur_block
-        [405] = 6866, // minecraft:crafting_table (placement only; GUI not implemented)
+        [405] = 6866, // minecraft:crafting_table
+        [407] = 6884, // minecraft:furnace: north,lit=false
+        [1507] = 24112, // minecraft:smoker: north,lit=false
+        [1508] = 24120, // minecraft:blast_furnace: north,lit=false
         [412] = 8598, // minecraft:snow_block
         [415] = 8616, // minecraft:clay
         [433] = 8667, // minecraft:netherrack
@@ -213,6 +216,33 @@ public static class CreativeBlockPalette
             return true;
         }
         return TryGetState(itemId, out state);
+    }
+
+    public static bool TryGetState(int itemId, int face, float playerYaw, out ushort state)
+    {
+        // Furnaces face the placing player. Java 26.3's state range has two
+        // lit values per facing; north/south/west/east are in that order.
+        int minState = itemId switch
+        {
+            407 => 6883,
+            1507 => 24111,
+            1508 => 24119,
+            _ => -1
+        };
+        if (minState >= 0 && float.IsFinite(playerYaw))
+        {
+            int quadrant = (int)Math.Floor(playerYaw * 4.0 / 360.0 + 0.5) & 3;
+            int facingIndex = quadrant switch
+            {
+                0 => 0, // player faces south, furnace faces north
+                1 => 3, // player faces west, furnace faces east
+                2 => 1, // player faces north, furnace faces south
+                _ => 2 // player faces east, furnace faces west
+            };
+            state = (ushort)(minState + facingIndex * 2 + 1);
+            return true;
+        }
+        return TryGetState(itemId, face, out state);
     }
 
     public static bool TryGetState(int itemId, out ushort state) =>
