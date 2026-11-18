@@ -104,9 +104,11 @@ public sealed partial class RecipeCatalog
             if (!props.TryGetValue("Input", out var input) ||
                 !props.TryGetValue("Reagent", out var reagent))
                 throw Invalid(file, id, "Brewing requires Input and Reagent.");
-            (HashSet<int> inputIds, inputPotion) = ReadBrewingIngredient(input, file, id);
-            (HashSet<int> reagentIds, reagentPotion) =
+            var (inputIds, inputPotionName) = ReadBrewingIngredient(input, file, id);
+            var (reagentIds, reagentPotionName) =
                 ReadBrewingIngredient(reagent, file, id);
+            inputPotion = inputPotionName;
+            reagentPotion = reagentPotionName;
             inputs = [inputIds, reagentIds];
             string outputName = props.ContainsKey("Output") ? "Output" : "Result";
             if (props.ContainsKey("Output") && props.ContainsKey("Result"))
