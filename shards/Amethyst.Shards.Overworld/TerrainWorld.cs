@@ -93,7 +93,7 @@ public sealed class ChunkColumn
         Sections[(y - MinY) / 16].GetBlock(x, (y - MinY) % 16, z);
 }
 
-public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
+public sealed class TerrainWorld : Amethyst.Shards.IShardWorld, Amethyst.Shards.IShardBlockWorld
 {
     public const string Dimension = "minecraft:overworld";
     public const int PlatformY = 79;
@@ -641,7 +641,7 @@ public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
 // then fill the configured radius in batches as the client acknowledges each
 // completed batch. This prevents large bursts of chunks delaying spawn or
 // leaving the client with a partially loaded view.
-public sealed class PlayerChunkView : Amethyst.Shards.IShardChunkView
+public sealed class PlayerChunkView : Amethyst.Shards.IShardChunkView, Amethyst.Shards.IShardChunkSubscriptions
 {
     private readonly TerrainWorld _world;
     private const int RenderHaloChunks = 1;
