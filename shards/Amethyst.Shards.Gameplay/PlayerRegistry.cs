@@ -35,9 +35,15 @@ public sealed class ConnectedPlayer : IShardPlayer
     public bool TryGetSelectedBlock(int face, out ushort blockState) =>
         CreativeBlockPalette.TryGetState(Inventory.Held().ItemId, face, out blockState);
 
-    private (int X, int Y, int Z, ushort State, int HeldItem, long Started, int RequiredMs)? _mining;
+    // A vanilla 26.3 client emits 0x0D at the end of every gameplay tick.
+    // Count these in stream order so stalled packet processing does not make
+    // an entire real dig look like START and STOP in the same millisecond.
+    private long _clientTicks;
+    public void AdvanceClientTick() => _clientTicks++;
+    private (int X, int Y, int Z, ushort State, int HeldItem, long Started,
+        int RequiredMs, long ClientTicksAtStart)? _mining;
     public void StartMining(int x, int y, int z, ushort state, int itemId, int requiredMs) =>
-        _mining = (x, y, z, state, itemId, Environment.TickCount64, requiredMs);
+        _mining = (x, y, z, state, itemId, Environment.TickCount64, requiredMs, _clientTicks);
     public void CancelMining() => _mining = null;
     public bool FinishMining(int x, int y, int z, ushort state, int heldItem,
         out string reason)
@@ -67,13 +73,19 @@ public sealed class ConnectedPlayer : IShardPlayer
         // Vanilla accepts STOP at 70% progress. Leave one 50 ms tick of
         // allowance for the client's first mining tick and packet scheduling.
         long elapsed = Math.Max(0, Environment.TickCount64 - started.Started);
+        long ticks = Math.Max(0, _clientTicks - started.ClientTicksAtStart);
         long threshold = ((long)started.RequiredMs * 7 + 9) / 10;
-        if (elapsed + 50 < threshold)
+        // The stream is ordered, even if CPU/IO blocked the receive loop for
+        // an entire dig. The client has already counted these 50ms ticks.
+        // Include the initial mining tick, exactly as the vanilla client does.
+        // Retain wall-clock progress for protocol clients without tick markers.
+        long progressed = Math.Max(elapsed + 50, (ticks + 1) * 50);
+        if (progressed < threshold)
         {
-            reason = $"too early (elapsed={elapsed}ms, threshold={threshold}ms, expected={started.RequiredMs}ms)";
+            reason = $"too early (wall={elapsed}ms, clientTicks={ticks}, threshold={threshold}ms, expected={started.RequiredMs}ms)";
             return false;
         }
-        reason = $"complete (elapsed={elapsed}ms, expected={started.RequiredMs}ms)";
+        reason = $"complete (wall={elapsed}ms, clientTicks={ticks}, expected={started.RequiredMs}ms)";
         return true;
     }
 
