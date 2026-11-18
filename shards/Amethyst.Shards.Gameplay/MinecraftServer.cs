@@ -9,6 +9,7 @@ public sealed class MinecraftServer
 {
     private readonly ServerOptions _options;
     private readonly IShardWorld _world;
+    private readonly IShardBlockWorld? _blocks;
     private readonly WorldClock _clock;
     private readonly IShardPacketBus _packetBus;
     private readonly PlayerRegistry _players;
@@ -16,10 +17,12 @@ public sealed class MinecraftServer
     private CancellationTokenSource? _clockLifetime;
     private Task? _clockSync;
 
-    public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus)
+    public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
+        IShardBlockWorld? blocks = null)
     {
         _options = options;
         _world = world;
+        _blocks = blocks;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers);
         _operators = new OperatorStore(options.OperatorsFile);
@@ -283,9 +286,9 @@ public sealed class MinecraftServer
         await BroadcastChatAsync($"[Server] {player.Username} joined the game", ct);
     }
 
-    private static bool CanEditAt(ConnectedPlayer player, int x, int y, int z)
+    private bool CanEditAt(ConnectedPlayer player, int x, int y, int z)
     {
-        if (!player.Ready || player.GameMode != PlayerGameMode.Creative ||
+        if (_blocks is null || !player.Ready || player.GameMode != PlayerGameMode.Creative ||
             y is < -64 or > 319 || x is < -29_999_984 or > 29_999_984 ||
             z is < -29_999_984 or > 29_999_984) return false;
         PlayerPose pose = player.Pose;
@@ -305,13 +308,13 @@ public sealed class MinecraftServer
             player.TryConsumeEditBudget();
         bool changed = false;
         if (valid)
-            changed = _world.TrySetBlockState(action.X, action.Y, action.Z, 0, out _);
+            changed = _blocks!.TrySetBlockState(action.X, action.Y, action.Z, 0, out _);
         if (changed)
             await BroadcastBlockChangeAsync(action.X, action.Y, action.Z, 0, ct);
         else if (CanEditAt(player, action.X, action.Y, action.Z))
             await BlockInteractionProtocol.SendBlockUpdateAsync(player.Connection,
                 action.X, action.Y, action.Z,
-                _world.GetBlockState(action.X, action.Y, action.Z), ct);
+                _blocks!.GetBlockState(action.X, action.Y, action.Z), ct);
         await BlockInteractionProtocol.SendAckAsync(player.Connection, action.Sequence, ct);
     }
 
@@ -323,8 +326,8 @@ public sealed class MinecraftServer
         bool allowed = hit.ValidHit && hit.Hand == 0 &&
             CanEditAt(player, hit.X, hit.Y, hit.Z) && CanEditAt(player, x, y, z) &&
             player.TryGetSelectedBlock(out selected);
-        if (allowed) allowed = _world.GetBlockState(hit.X, hit.Y, hit.Z) != 0 &&
-            _world.GetBlockState(x, y, z) == 0 && player.TryConsumeEditBudget();
+        if (allowed) allowed = _blocks!.GetBlockState(hit.X, hit.Y, hit.Z) != 0 &&
+            _blocks.GetBlockState(x, y, z) == 0 && player.TryConsumeEditBudget();
         if (allowed)
         {
             PlayerPose pose = player.Pose;
@@ -334,7 +337,7 @@ public sealed class MinecraftServer
                 pose.Y < y + 1 && pose.Y + 1.8 > y)
                 allowed = false;
         }
-        bool changed = allowed && _world.TrySetBlockState(x, y, z, selected, out _);
+        bool changed = allowed && _blocks!.TrySetBlockState(x, y, z, selected, out _);
         if (changed)
             await BroadcastBlockChangeAsync(x, y, z, selected, ct);
         else
@@ -344,10 +347,10 @@ public sealed class MinecraftServer
             if (CanEditAt(player, hit.X, hit.Y, hit.Z))
                 await BlockInteractionProtocol.SendBlockUpdateAsync(player.Connection,
                     hit.X, hit.Y, hit.Z,
-                    _world.GetBlockState(hit.X, hit.Y, hit.Z), ct);
+                    _blocks!.GetBlockState(hit.X, hit.Y, hit.Z), ct);
             if (CanEditAt(player, x, y, z))
                 await BlockInteractionProtocol.SendBlockUpdateAsync(player.Connection,
-                    x, y, z, _world.GetBlockState(x, y, z), ct);
+                    x, y, z, _blocks!.GetBlockState(x, y, z), ct);
         }
         await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
     }
@@ -360,7 +363,8 @@ public sealed class MinecraftServer
         {
             try
             {
-                if (await viewer.View.HasLoadedChunkAsync(chunkX, chunkZ, ct))
+                if (viewer.View is IShardChunkSubscriptions subscriber &&
+                    await subscriber.HasLoadedChunkAsync(chunkX, chunkZ, ct))
                     await BlockInteractionProtocol.SendBlockUpdateAsync(viewer.Connection,
                         x, y, z, state, ct);
             }
