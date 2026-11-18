@@ -90,13 +90,14 @@ public sealed partial class RecipeCatalog : IShardRecipeRegistry
 
         Recipe[] sorted = entries.Values.OrderByDescending(r => r.Priority)
             .ThenBy(r => r.Id, StringComparer.OrdinalIgnoreCase).ToArray();
-        _crafting = sorted.Where(r => r.Kind is RecipeKind.Shaped or RecipeKind.Shapeless).ToArray();
-        _cooking = sorted.Where(r => r.Kind is RecipeKind.Furnace or RecipeKind.Smoker
-            or RecipeKind.BlastFurnace or RecipeKind.Campfire).ToArray();
-        _stonecutting = sorted.Where(r => r.Kind == RecipeKind.Stonecutting).ToArray();
-        _smithing = sorted.Where(r => r.Kind is RecipeKind.SmithingTransform
-            or RecipeKind.SmithingTrim).ToArray();
-        _brewing = sorted.Where(r => r.Kind == RecipeKind.Brewing).ToArray();
+        _crafting = sorted.Where(r => r.IsExecutable && r.Kind is RecipeKind.Shaped or RecipeKind.Shapeless).ToArray();
+        _cooking = sorted.Where(r => r.IsExecutable &&
+            r.Kind is (RecipeKind.Furnace or RecipeKind.Smoker or
+                RecipeKind.BlastFurnace or RecipeKind.Campfire)).ToArray();
+        _stonecutting = sorted.Where(r => r.IsExecutable && r.Kind == RecipeKind.Stonecutting).ToArray();
+        _smithing = sorted.Where(r => r.IsExecutable &&
+            r.Kind is (RecipeKind.SmithingTransform or RecipeKind.SmithingTrim)).ToArray();
+        _brewing = sorted.Where(r => r.IsExecutable && r.Kind == RecipeKind.Brewing).ToArray();
         _definitions = new ReadOnlyCollection<ShardRecipeDescriptor>(
             sorted.Select(r => new ShardRecipeDescriptor(r.Id,
                 (ShardRecipeType)r.Kind, r.IsExecutable)).ToArray());
@@ -220,17 +221,9 @@ public sealed partial class RecipeCatalog : IShardRecipeRegistry
             RecipeKind.Campfire))
             return ParseAdvancedRecipe(id, node, file, kind, props, defaultPriority);
 
-        if (!props.TryGetValue("Result", out var resultNode) ||
-            resultNode is not YamlMappingNode resultMap)
-            throw Invalid(file, id, "Result must be { Id: ..., Amount: ... }.");
-        var resultFields = Fields(resultMap, file, id + ".Result", "Id", "Amount");
-        if (!resultFields.TryGetValue("Id", out var resultId))
-            throw Invalid(file, id, "Missing Result.Id.");
-        int output = ItemId(resultId, file, id);
-        int amount = resultFields.TryGetValue("Amount", out var amountNode)
-            ? Integer(amountNode, file, id) : 1;
-        if (!_items.IsValidStack(output, amount))
-            throw Invalid(file, id, "Result amount exceeds the configured item's stack limit.");
+        if (!props.TryGetValue("Result", out var resultNode))
+            throw Invalid(file, id, "Missing Result.");
+        ShardRecipeStack output = ReadOutput(resultNode, file, id);
 
         int priority = props.TryGetValue("Priority", out var priorityNode)
             ? Integer(priorityNode, file, id) : defaultPriority;
@@ -303,9 +296,9 @@ public sealed partial class RecipeCatalog : IShardRecipeRegistry
         }
         return new Recipe
         {
-            Id = id, Kind = kind, Result = new ShardRecipeStack(output, amount),
+            Id = id, Kind = kind, Result = output,
             Priority = priority, CookingTicks = cooking, Inputs = inputs,
-            Width = width, Height = height
+            Width = width, Height = height, IsExecutable = output.Components is null
         };
     }
 
