@@ -58,10 +58,6 @@ public interface IShardWorld : IAsyncDisposable
     double SpawnYPosition { get; }
     double SpawnZPosition { get; }
     int GetGroundHeight(int x, int z);
-    /// <summary>Read the authoritative global state ID (air = 0).</summary>
-    ushort GetBlockState(int x, int y, int z);
-    /// <summary>Atomically replace a block, returning false for no-op/out-of-bounds.</summary>
-    bool TrySetBlockState(int x, int y, int z, ushort state, out ushort previousState);
     IShardChunkView CreateView();
     string GetPerformanceReport();
     string GetCacheSummary();
@@ -73,7 +69,19 @@ public interface IShardChunkView
 {
     Task UpdateAsync(PacketChannel connection, PlayerPose pose, CancellationToken ct);
     Task OnBatchReceivedAsync(PacketChannel connection, float chunksPerTick, CancellationToken ct);
-    /// <summary>Whether this connection has received the target chunk.</summary>
+}
+
+/// <summary>Optional extension for world providers that support runtime block edits.
+/// Implement and register separately from IShardWorld to preserve existing Shard ABI.</summary>
+public interface IShardBlockWorld
+{
+    ushort GetBlockState(int x, int y, int z);
+    bool TrySetBlockState(int x, int y, int z, ushort state, out ushort previousState);
+}
+
+/// <summary>Optional query for loaded chunks; used for targeted broadcasts.</summary>
+public interface IShardChunkSubscriptions
+{
     Task<bool> HasLoadedChunkAsync(int chunkX, int chunkZ, CancellationToken ct);
 }
 
