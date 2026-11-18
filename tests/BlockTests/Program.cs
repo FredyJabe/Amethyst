@@ -169,4 +169,136 @@ finally
     try { Directory.Delete(playerRoot, recursive: true); }
     catch (IOException) { }
 }
+// The Java client uses a 70%-of-expected-progress STOP threshold. Breaking a
+// second block must not resurrect the first via a stale predicted-state ACK.
+string miningRoot = Path.Combine(Path.GetTempPath(),
+    "amethyst-sequential-mining-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(miningRoot);
+try
+{
+    var settings = new ServerOptions
+    {
+        GeneratorVersion = 5,
+        Seed = 123456789,
+        ViewDistance = 2,
+        SaveGeneratedChunks = true,
+        AsyncWorldSaves = false,
+        WorldPath = Path.Combine(miningRoot, "world"),
+        OperatorsFile = Path.Combine(miningRoot, "ops.yaml"),
+        DefaultGameMode = "survival"
+    };
+
+    // Default gamemode must be configurable without modifying world identity.
+    Check(new ServerOptions().DefaultGameMode == "creative",
+        "Default config preserves existing Creative behavior");
+    string yaml = Path.Combine(miningRoot, "server.yaml");
+    foreach (string mode in new[] { "survival", "creative", "adventure", "spectator" })
+    {
+        File.WriteAllText(yaml, $"defaultGameMode: {mode}\n");
+        Check(ServerOptions.Load(yaml).DefaultGameMode == mode,
+            $"YAML accepts default gamemode {mode}");
+    }
+    File.WriteAllText(yaml, "defaultGameMode: invalid\n");
+    bool invalidModeRejected = false;
+    try { _ = ServerOptions.Load(yaml); }
+    catch (ArgumentException) { invalidModeRejected = true; }
+    Check(invalidModeRejected, "Invalid default gamemode fails validation");
+
+    const int blockY = 81, blockZ = 1;
+    await using (var world = new TerrainWorld(settings))
+    {
+        Check(world.TrySetBlockState(1, blockY, blockZ, 10, out _) &&
+            world.TrySetBlockState(2, blockY, blockZ, 10, out _),
+            "Prepare adjacent dirt blocks for consecutive Survival mining");
+
+        using var outgoing = new MemoryStream();
+        using var channel = new PacketChannel(outgoing);
+        var player = new ConnectedPlayer(Guid.NewGuid(), "MiningTester",
+            Array.Empty<ProfileProperty>(), 1, channel, world,
+            Path.Combine(miningRoot, "playerdata"));
+        player.MarkReady();
+        player.SetGameMode(PlayerGameMode.Survival);
+        // The handler does not use the packet bus when invoked directly.
+        var game = new MinecraftServer(settings, world, null!, world);
+
+        for (int x = 1; x <= 2; x++)
+        {
+            int startSequence = x * 2 - 1, stopSequence = x * 2;
+            await game.HandleBlockActionAsync(player,
+                new PlayerBlockAction(0, x, blockY, blockZ, 1, startSequence),
+                CancellationToken.None);
+            // START has no predicted removal in Survival. Do not send a stale
+            // block-state correction; only acknowledge the action.
+            byte[] beforeStop = outgoing.ToArray();
+            using (var startStream = new MemoryStream(beforeStop))
+            {
+                var packets = new List<Packet>();
+                Packet? packet;
+                while ((packet = await Protocol.ReadPacketAsync(startStream,
+                    CancellationToken.None)) is { } read) packets.Add(read);
+                Check(!packets.Any(p => p.Id == BlockInteractionProtocol.ClientboundBlockUpdate),
+                    "Survival START does not send a stale block correction");
+            }
+
+            // 520ms is over the 70% server threshold for 750ms dirt, but
+            // below the old exact 100% threshold which caused client rollbacks.
+            await Task.Delay(520);
+            await game.HandleBlockActionAsync(player,
+                new PlayerBlockAction(2, x, blockY, blockZ, 1, stopSequence),
+                CancellationToken.None);
+            Check(world.GetBlockState(x, blockY, blockZ) == 0,
+                $"Survival STOP authoritatively removed block {x}");
+        }
+        Check(world.GetBlockState(1, blockY, blockZ) == 0 &&
+              world.GetBlockState(2, blockY, blockZ) == 0,
+            "First block remains air after breaking second");
+
+        var updates = new List<(int X, int Y, int Z, int State, int Index)>();
+        var acknowledgements = new List<(int Sequence, int Index)>();
+        using (var stream = new MemoryStream(outgoing.ToArray()))
+        {
+            int index = 0;
+            Packet? packet;
+            while ((packet = await Protocol.ReadPacketAsync(stream, CancellationToken.None)) is { } read)
+            {
+                PacketReader fields = read.Reader();
+                if (read.Id == BlockInteractionProtocol.ClientboundBlockUpdate)
+                {
+                    var (x, y, z) = fields.ReadPosition();
+                    int state = fields.ReadVarInt();
+                    fields.RequireEnd();
+                    updates.Add((x, y, z, state, index));
+                }
+                if (read.Id == BlockInteractionProtocol.ClientboundChangedAck)
+                {
+                    int sequence = fields.ReadVarInt();
+                    fields.RequireEnd();
+                    acknowledgements.Add((sequence, index));
+                }
+                index++;
+            }
+        }
+        Check(updates.Count == 2 &&
+            updates[0] is (1, blockY, blockZ, 0, _) &&
+            updates[1] is (2, blockY, blockZ, 0, _),
+            "Both successful breaks send authoritative air, never stale dirt");
+        Check(acknowledgements.Count == 4 &&
+            acknowledgements[1].Sequence == 2 &&
+            acknowledgements[3].Sequence == 4 &&
+            updates[0].Index < acknowledgements[1].Index &&
+            updates[1].Index < acknowledgements[3].Index,
+            "Confirmed block updates precede their prediction acknowledgements");
+    }
+    await using (var world = new TerrainWorld(settings))
+        Check(world.GetBlockState(1, blockY, blockZ) == 0 &&
+              world.GetBlockState(2, blockY, blockZ) == 0,
+            "Consecutively mined blocks persist after server restart");
+}
+finally
+{
+    try { Directory.Delete(miningRoot, recursive: true); }
+    catch (IOException) { }
+}
+Console.WriteLine("PASS: consecutive Survival breaks, client reconciliation, default gamemode config");
+
 Console.WriteLine("PASS: block codec, modes, item stacks, timed mining, edit overlay and persistence");
