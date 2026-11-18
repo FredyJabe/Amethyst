@@ -31,6 +31,7 @@ public sealed partial class RecipeCatalog : IShardRecipeRegistry
         public int Width { get; init; }
         public int Height { get; init; }
         public bool IsExecutable { get; init; } = true;
+        public IReadOnlyDictionary<string, string>? Parameters { get; init; }
         public string? InputPotion { get; init; }
         public string? ReagentPotion { get; init; }
         public IReadOnlyDictionary<string, string>? ResultComponents { get; init; }
@@ -100,7 +101,8 @@ public sealed partial class RecipeCatalog : IShardRecipeRegistry
         _brewing = sorted.Where(r => r.IsExecutable && r.Kind == RecipeKind.Brewing).ToArray();
         _definitions = new ReadOnlyCollection<ShardRecipeDescriptor>(
             sorted.Select(r => new ShardRecipeDescriptor(r.Id,
-                (ShardRecipeType)r.Kind, r.IsExecutable)).ToArray());
+                (ShardRecipeType)r.Kind, r.IsExecutable)
+                { Parameters = r.Parameters }).ToArray());
         _ids = new ReadOnlyCollection<string>(sorted.Select(x => x.Id).ToArray());
     }
 
@@ -208,7 +210,12 @@ public sealed partial class RecipeCatalog : IShardRecipeRegistry
             "Type", "Pattern", "Key", "Ingredients", "Ingredient", "Result",
             "CookingTime", "Enabled", "Priority",
             "Input", "Output", "Template", "Base", "Addition", "Reagent",
-            "Material", "Category", "Group", "Experience", "Components");
+            "Material", "Category", "Group", "Experience", "Components",
+            "ShowNotification", "show_notification", "Target", "Dye", "Source",
+            "Banner", "Back", "Left", "Right", "Front", "Shell", "Fuel", "Star",
+            "Trail", "Twinkle", "Shapes", "Map", "AllowedGenerations",
+            "allowed_generations", "MaterialCount", "material_count",
+            "AddMaterialCountToResult", "add_material_count_to_result");
         if (props.TryGetValue("Enabled", out var enableNode) &&
             !Boolean(enableNode, file, id)) return null;
 
