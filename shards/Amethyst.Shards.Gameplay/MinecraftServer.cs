@@ -18,11 +18,13 @@ public sealed class MinecraftServer
     private readonly PlayerRegistry _players;
     private readonly OperatorStore _operators;
     private readonly GroundItemStore? _groundItems;
+    private readonly PlayerPositionStore _positions;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private CancellationTokenSource? _clockLifetime;
     private Task? _clockSync;
     private Task? _itemsSync;
+    private Task? _positionSync;
 
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null)
@@ -35,6 +37,7 @@ public sealed class MinecraftServer
         _players = new PlayerRegistry(options.MaxPlayers);
         _operators = new OperatorStore(options.OperatorsFile);
         _clock = new WorldClock(options);
+        _positions = new PlayerPositionStore(inventoryDirectory, options.WorldPath, world);
         if (_blocks is not null)
             _groundItems = new GroundItemStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId);
@@ -52,6 +55,8 @@ public sealed class MinecraftServer
         _clockSync = BroadcastWorldTimeAsync(_clockLifetime.Token);
         if (_groundItems is not null)
             _itemsSync = RunGroundItemsAsync(_clockLifetime.Token);
+        if (_positions.Enabled)
+            _positionSync = SavePositionsPeriodicallyAsync(_clockLifetime.Token);
         Console.WriteLine($"[gameplay] Enabled: chat={_options.ChatEnabled}, " +
             $"operators={_operators.Snapshot().Length}, viewDistance={_world.ViewDistance}");
     }
@@ -67,9 +72,12 @@ public sealed class MinecraftServer
                 try { await _clockSync; } catch (OperationCanceledException) { }
             if (_itemsSync is not null)
                 try { await _itemsSync; } catch (OperationCanceledException) { }
+            if (_positionSync is not null)
+                try { await _positionSync; } catch (OperationCanceledException) { }
             _groundItems?.Save();
             _itemViews.Clear();
             _itemsSync = null;
+            _positionSync = null;
             _clockLifetime.Dispose();
             _clockLifetime = null;
             _clockSync = null;
@@ -84,6 +92,17 @@ public sealed class MinecraftServer
         // Set the game mode before SpawnPackets.SendAsync constructs the Join Game
         // packet, player abilities, and the initial tab-list state.
         player.SetGameMode(Enum.Parse<PlayerGameMode>(_options.DefaultGameMode, ignoreCase: true));
+        // Initialize to the actual world spawn, not the ConnectedPlayer's
+        // historical (0.5,80,0.5) placeholder. Saved locations are only
+        // restored for the same world, seed and dimension.
+        player.SetPose(new PlayerPose(_world.SpawnXPosition, _world.SpawnYPosition,
+            _world.SpawnZPosition, 0, 0, true));
+        if (_positions.TryLoad(profile.Uuid, out PlayerPose lastPosition))
+        {
+            player.SetPose(lastPosition);
+            Console.WriteLine($"[position] Restored {player.Username} at " +
+                $"{lastPosition.X:F2}, {lastPosition.Y:F2}, {lastPosition.Z:F2}");
+        }
         player.SetChatMode(chatMode);
         return _players.TryAdd(player, out reason);
     }
@@ -111,9 +130,32 @@ public sealed class MinecraftServer
     {
         ConnectedPlayer? player = _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == uuid);
         if (player is null) return;
+        // The Play receive loop has finished by this point. Save only players
+        // who completed login; rejected/half-loaded sessions must not overwrite
+        // a valid previous save with the initial spawn placeholder.
+        TrySavePosition(player);
         _players.Remove(player.ConnectionId);
         await NotifyDepartureAsync(player);
         Console.WriteLine($"[leave] {player.Username}; {_players.Snapshot().Length} connected");
+    }
+
+    private void TrySavePosition(ConnectedPlayer player)
+    {
+        try { player.PersistPosition(_positions); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"[position] Unable to save {player.Username}: {ex.Message}");
+        }
+    }
+
+    private async Task SavePositionsPeriodicallyAsync(CancellationToken ct)
+    {
+        // In addition to saving on logout, recover recent positions if the
+        // process terminates unexpectedly. Avoid disk I/O on every move packet.
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        while (await timer.WaitForNextTickAsync(ct))
+            foreach (ConnectedPlayer player in _players.Snapshot())
+                TrySavePosition(player);
     }
 
     public IReadOnlyList<string> CompleteConsole(string prefix) =>
