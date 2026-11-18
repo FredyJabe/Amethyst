@@ -881,6 +881,48 @@ try
         .SnapshotStation(furnacePos).Length == 0,
         "Destroyed furnace does not reappear in saved workstation storage");
 
+    // Exercise the actual Gameplay Shard use-on-block path in both modes.
+    // A station should open its GUI instead of trying to place the held item.
+    using (var gameplayOutput = new MemoryStream())
+    using (var gameplayChannel = new PacketChannel(gameplayOutput))
+    {
+        var stationPlayer = new ConnectedPlayer(Guid.NewGuid(), "StationTester",
+            Array.Empty<ProfileProperty>(), 77, gameplayChannel,
+            stationWorld, null);
+        stationPlayer.MarkReady();
+        var gameplay = new MinecraftServer(settings, stationWorld, null!,
+            stationWorld, Path.Combine(stationsRoot, "gameplay-integration"));
+        int seq = 1;
+        foreach (var (kind, mode, state, position) in new[]
+        {
+            (StationKind.Crafting, PlayerGameMode.Creative, (ushort)6866, new StationPos(1, 88, 1)),
+            (StationKind.Furnace, PlayerGameMode.Survival, (ushort)6884, new StationPos(2, 88, 1)),
+            (StationKind.Smoker, PlayerGameMode.Creative, (ushort)24112, new StationPos(3, 88, 1)),
+            (StationKind.BlastFurnace, PlayerGameMode.Survival, (ushort)24120, new StationPos(4, 88, 1))
+        })
+        {
+            Check(stationWorld.TrySetBlockState(position.X, position.Y,
+                position.Z, state, out _), "Install workstation block in test world");
+            stationPlayer.SetGameMode(mode);
+            stationPlayer.SetPose(new PlayerPose(position.X + 0.5,
+                position.Y + 1, position.Z + 0.5, 0, 0, true));
+            await gameplay.HandleBlockUseAsync(stationPlayer,
+                new BlockUseOn(0, position.X, position.Y, position.Z,
+                    1, seq++, true), CancellationToken.None);
+            Check(gameplay.StationsForTests.GetMenu(stationPlayer.PlayerUuid) is
+                { Kind: var openedKind, Position: var openedPos } &&
+                openedKind == kind && openedPos == position,
+                $"Gameplay opens {kind} menu in {mode}");
+            Check(stationWorld.GetBlockState(position.X,
+                position.Y, position.Z) == state,
+                "Opening station does not accidentally replace its world block");
+        }
+        gameplayOutput.Position = 0;
+        Packet? firstStationPacket = await Protocol.ReadPacketAsync(gameplayOutput, CancellationToken.None);
+        Check(firstStationPacket is { Id: StationProtocol.OpenScreen },
+            "Real server use-on-block sends the Open Screen packet first");
+    }
+
     using (var stream = new MemoryStream())
     {
         using var wire = new PacketChannel(stream);
