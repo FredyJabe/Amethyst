@@ -54,7 +54,7 @@ dotnet run --no-build --project src/Amethyst.csproj -- server.yaml
 
 On Linux, `./run.sh` does both steps automatically. **Do not run only `dotnet run --project src/Amethyst.csproj` on a fresh checkout**: it builds only the network kernel, not the Shard assemblies.
 
-`shards/installed/` and `shards/data/` are ignored by Git. Configure their paths through `shardsDirectory` and `shardsDataDirectory` in `server.yaml`. The build targets always copy Shard DLLs. Gameplay and Items also refresh their manifests on each build so required capability changes are applied. Overworld and Hello keep existing manifests when present; local `enabled` edits to those two survive rebuilds. Shard-specific writable data belongs in `shards/data/<shard-id>/`; saves and operators remain at their existing paths.
+`shards/installed/` and `shards/data/` are ignored by Git. Configure their paths through `shardsDirectory` and `shardsDataDirectory` in `server.yaml`. The build targets always copy Shard DLLs. Gameplay refreshes its manifest on each build so its new required capability is applied to existing installations. Items, Overworld and Hello preserve existing installed manifests; local `enabled` edits to those providers survive rebuilds. Shard-specific writable data belongs in `shards/data/<shard-id>/`; saves and operators remain at their existing paths.
 
 ## Shard manifest
 
