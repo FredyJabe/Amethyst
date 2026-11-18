@@ -20,28 +20,33 @@ public sealed class ConnectedPlayer : IShardPlayer
         if ((int)mode is < 0 or > 3)
             throw new ArgumentOutOfRangeException(nameof(mode));
         Volatile.Write(ref _gameMode, (int)mode);
+        CancelMining();
     }
-    // This is deliberately a minimal Creative-only hotbar, not a general
-    // inventory. Component-bearing stacks are not trusted until item parsing exists.
-    private readonly int[] _creativeHotbar = new int[9];
-    private int _selectedHotbar;
+    public PlayerInventory Inventory { get; }
     private long _editWindowStarted;
     private int _editCount;
 
-    public void SelectHotbar(int index)
-    {
-        if (index is >= 0 and < 9) _selectedHotbar = index;
-    }
+    public void SelectHotbar(int index) => Inventory.SelectHotbar(index);
 
-    public void SetCreativeHotbarSlot(int inventorySlot, int itemId, bool plainItem)
-    {
-        if (GameMode != PlayerGameMode.Creative ||
-            inventorySlot is < 36 or > 44) return;
-        _creativeHotbar[inventorySlot - 36] = plainItem ? itemId : 0;
-    }
+    public bool SetCreativeSlot(int slot, int itemId, int count, bool plainItem) =>
+        GameMode == PlayerGameMode.Creative &&
+        Inventory.TryCreativeSet(slot, itemId, count, plainItem);
 
     public bool TryGetSelectedBlock(out ushort blockState) =>
-        CreativeBlockPalette.TryGetState(_creativeHotbar[_selectedHotbar], out blockState);
+        CreativeBlockPalette.TryGetState(Inventory.Held().ItemId, out blockState);
+
+    private (int X, int Y, int Z, ushort State, int HeldItem, long Started, int RequiredMs)? _mining;
+    public void StartMining(int x, int y, int z, ushort state, int itemId, int requiredMs) =>
+        _mining = (x, y, z, state, itemId, Environment.TickCount64, requiredMs);
+    public void CancelMining() => _mining = null;
+    public bool FinishMining(int x, int y, int z, ushort state, int heldItem)
+    {
+        var mining = _mining;
+        _mining = null;
+        return mining is { } started && started.X == x && started.Y == y &&
+            started.Z == z && started.State == state && started.HeldItem == heldItem &&
+            Environment.TickCount64 - started.Started + 75 >= started.RequiredMs;
+    }
 
     public bool TryConsumeEditBudget()
     {
@@ -80,10 +85,11 @@ public sealed class ConnectedPlayer : IShardPlayer
         lock (_poseLock) { PlayerPose previous = _pose; _pose = pose; return previous; }
     }
     public ConnectedPlayer(Guid id, string name, ProfileProperty[] properties, int entityId,
-        PacketChannel connection, IShardWorld world)
+        PacketChannel connection, IShardWorld world, string? inventoryDirectory = null)
     {
         PlayerUuid = id; Username = name; Properties = properties;
         EntityId = entityId; Connection = connection; View = world.CreateView();
+        Inventory = new PlayerInventory(inventoryDirectory, id);
     }
 }
 
