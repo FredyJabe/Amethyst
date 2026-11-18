@@ -417,4 +417,105 @@ finally
 }
 Console.WriteLine("PASS: consecutive Survival breaks, client reconciliation, default gamemode config");
 
+// Verify protocol 777 dropped-item packets with Mojang's entity type and
+// metadata serializer, plus the server-side collision/pickup lifecycle.
+string dropsRoot = Path.Combine(Path.GetTempPath(), "amethyst-ground-items-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(dropsRoot);
+try
+{
+    int entitySequence = 50;
+    long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    var drops = new GroundItemStore(dropsRoot, "test-world", () => ++entitySequence);
+    Check(drops.TrySpawn(55, 3, 10.5, 65.4, 10.5, out GroundItem firstDrop, now),
+        "Breaking a block can create a persistent physical item entity");
+    Check(drops.Snapshot() is [{ ItemId: 55, Count: 3 }],
+        "Item stack remains in world rather than inventory");
+
+    using (var stream = new MemoryStream())
+    {
+        using var channel = new PacketChannel(stream);
+        await DroppedItemProtocol.SendSpawnAsync(channel, firstDrop, CancellationToken.None);
+        stream.Position = 0;
+        Packet? spawn = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
+        Check(spawn is { Id: DroppedItemProtocol.AddEntity },
+            "Item spawn uses Java 26.3 add_entity");
+        if (spawn is { } entityPacket)
+        {
+            PacketReader pr = entityPacket.Reader();
+            Check(pr.ReadVarInt() == firstDrop.EntityId &&
+                pr.ReadUuid() == firstDrop.Uuid &&
+                pr.ReadVarInt() == DroppedItemProtocol.ItemEntityType &&
+                pr.ReadDouble() == 10.5 &&
+                pr.ReadDouble() == 65.4 &&
+                pr.ReadDouble() == 10.5 &&
+                pr.ReadByte() == 0, "Item entity spawn contains ID 72 and correct position");
+            pr.ReadByte(); pr.ReadByte(); pr.ReadByte(); // orientation
+            Check(pr.ReadVarInt() == 0, "Item spawn has no auxiliary data");
+            pr.RequireEnd();
+        }
+        Packet? metadata = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
+        Check(metadata is { Id: DroppedItemProtocol.SetEntityData },
+            "Item stack is sent as entity metadata");
+        if (metadata is { } stackPacket)
+        {
+            PacketReader pr = stackPacket.Reader();
+            Check(pr.ReadVarInt() == firstDrop.EntityId &&
+                pr.ReadByte() == 8 && pr.ReadVarInt() == 7 &&
+                pr.ReadVarInt() == 3 && pr.ReadVarInt() == 55 &&
+                pr.ReadVarInt() == 0 && pr.ReadVarInt() == 0 &&
+                pr.ReadByte() == 0xFF, "Item metadata index 8 / serializer 7 is correctly framed");
+            pr.RequireEnd();
+        }
+    }
+
+    var ground = new TestFlatBlockWorld();
+    for (int tick = 1; tick <= 25; tick++)
+        drops.Simulate(ground, now + tick * 50);
+    Check(drops.Snapshot() is [{ OnGround: true }],
+        "Loose items fall under gravity until hitting world blocks");
+    var inventory = new PlayerInventory(null, Guid.NewGuid());
+    Check(drops.TryCollect(firstDrop.EntityId, inventory, out _, now + 300) == 0 &&
+        inventory.Held().Count == 0, "Item cannot be picked up before its delay");
+
+    // Fill all regular slots so a mined item cannot simply disappear when
+    // the player lacks capacity; then free exactly one item slot.
+    for (int slotIndex = 9; slotIndex <= 44; slotIndex++)
+        Check(inventory.TryCreativeSet(slotIndex, 1, 64, true),
+            "Fill inventory slot to test full-inventory pickup");
+    Check(drops.TryCollect(firstDrop.EntityId, inventory, out _, now + 2000) == 0 &&
+        drops.Snapshot().Length == 1, "Full inventory leaves the drop on the ground");
+    Check(inventory.TryCreativeSet(36, 55, 63, true), "Create one matching stack vacancy");
+    Check(drops.TryCollect(firstDrop.EntityId, inventory, out GroundItem leftover, now + 2100) == 1 &&
+        leftover.Count == 2 && inventory.Held() == new ItemStack(55, 64),
+        "Partial pickup fills inventory and preserves leftover ground items");
+    var reloaded = new GroundItemStore(dropsRoot, "test-world", () => ++entitySequence);
+    Check(reloaded.Snapshot() is [{ ItemId: 55, Count: 2 }],
+        "Uncollected items persist across server restarts");
+    Check(inventory.TryCreativeSet(9, 0, 0, true), "Free another inventory slot");
+    Check(reloaded.TryCollect(reloaded.Snapshot()[0].EntityId, inventory,
+            out GroundItem finalStack, now + 2200) == 2 &&
+        finalStack.Count == 0 && reloaded.Snapshot().Length == 0,
+        "Nearby player can pick up remaining items and remove entity");
+    var emptyReload = new GroundItemStore(dropsRoot, "test-world", () => ++entitySequence);
+    Check(emptyReload.Snapshot().Length == 0,
+        "Collected items do not reappear after restart");
+}
+finally
+{
+    try { Directory.Delete(dropsRoot, recursive: true); }
+    catch (IOException) { }
+}
+
+Console.WriteLine("PASS: dropped items, item-entity packets, gravity, pickup and persistence");
 Console.WriteLine("PASS: block codec, modes, item stacks, timed mining, edit overlay and persistence");
+
+sealed class TestFlatBlockWorld : Amethyst.Shards.IShardBlockWorld
+{
+    public ushort GetBlockState(int x, int y, int z) => y <= 63 ? (ushort)1 : (ushort)0;
+    public bool TrySetBlockState(int x, int y, int z, ushort state, out ushort previous)
+    {
+        previous = GetBlockState(x, y, z);
+        return false;
+    }
+}
+
