@@ -8,6 +8,13 @@ public static class CreativeBlockPalette
 {
     private static readonly Dictionary<int, ushort> States = new()
     {
+        [215] = 292, // minecraft:oak_leaves: distance=7,persistent=true,waterlogged=false
+        [216] = 320, // minecraft:spruce_leaves: distance=7,persistent=true,waterlogged=false
+        [217] = 348, // minecraft:birch_leaves: distance=7,persistent=true,waterlogged=false
+        [218] = 376, // minecraft:jungle_leaves: distance=7,persistent=true,waterlogged=false
+        [219] = 404, // minecraft:acacia_leaves: distance=7,persistent=true,waterlogged=false
+        [221] = 460, // minecraft:dark_oak_leaves: distance=7,persistent=true,waterlogged=false
+        [222] = 516, // minecraft:mangrove_leaves: distance=7,persistent=true,waterlogged=false
         [1] = 1, // minecraft:stone
         [2] = 2, // minecraft:granite
         [3] = 3, // minecraft:polished_granite
@@ -177,6 +184,34 @@ public static class CreativeBlockPalette
         [1541] = 25599, // minecraft:polished_blackstone
         [1545] = 25600, // minecraft:polished_blackstone_bricks
     };
+
+
+    // Logs are placed with the axis selected by the clicked face.
+    private static readonly Dictionary<int, (ushort X, ushort Y, ushort Z)> Logs = new()
+    {
+        [163] = (139, 140, 141), // minecraft:oak_log
+        [164] = (142, 143, 144), // minecraft:spruce_log
+        [165] = (145, 146, 147), // minecraft:birch_log
+        [166] = (148, 149, 150), // minecraft:jungle_log
+        [167] = (151, 152, 153), // minecraft:acacia_log
+        [170] = (157, 158, 159), // minecraft:dark_oak_log
+        [171] = (163, 164, 165), // minecraft:mangrove_log
+    };
+
+    public static bool TryGetState(int itemId, int face, out ushort state)
+    {
+        if (Logs.TryGetValue(itemId, out var axes))
+        {
+            state = face switch
+            {
+                2 or 3 => axes.Z,
+                4 or 5 => axes.X,
+                _ => axes.Y
+            };
+            return true;
+        }
+        return TryGetState(itemId, out state);
+    }
 
     public static bool TryGetState(int itemId, out ushort state) =>
         States.TryGetValue(itemId, out state);
