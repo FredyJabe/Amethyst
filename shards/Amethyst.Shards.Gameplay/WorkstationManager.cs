@@ -372,6 +372,13 @@ public sealed class WorkstationManager
                 Persist();
             }
             menu.Revision++;
+            // Other viewers of the same furnace must not keep a stale
+            // container state ID after this player's transaction.
+            if (block is not null)
+                foreach (StationMenu observer in _menus.Values)
+                    if (!ReferenceEquals(observer, menu) &&
+                        observer.Position == menu.Position)
+                        observer.Revision++;
             return true;
         }
     }
@@ -413,6 +420,9 @@ public sealed class WorkstationManager
                 // Unloaded/broken stations may be retained in the save;
                 // prune them without producing invisible free items.
                 int beforeBurn = state.BurnRemaining, beforeCook = state.CookProgress;
+                ItemStack oldInput = state.Slots[0];
+                ItemStack oldFuel = state.Slots[1];
+                ItemStack oldOutput = state.Slots[2];
                 if (state.BurnRemaining > 0) state.BurnRemaining--;
                 ItemStack result = ItemStack.Empty;
                 int duration = 200;
@@ -447,8 +457,13 @@ public sealed class WorkstationManager
                     }
                 }
                 else state.CookProgress = 0;
+                bool inventoryChanged = oldInput != state.Slots[0] ||
+                    oldFuel != state.Slots[1] || oldOutput != state.Slots[2];
+                if (inventoryChanged)
+                    foreach (StationMenu viewer in _menus.Values)
+                        if (viewer.Position == state.Position) viewer.Revision++;
                 if (state.CookProgress != beforeCook ||
-                    state.BurnRemaining != beforeBurn || persist)
+                    state.BurnRemaining != beforeBurn || inventoryChanged)
                     changed.Add(state.Position);
             }
             if (persist || ++_ticks % 20 == 0) Persist();
