@@ -36,6 +36,14 @@ try
           Lore:
             - "Configured before the Shard loads"
         """);
+    string recipeDir = Path.Combine(temp, "shards", "items", "recipes");
+    Directory.CreateDirectory(recipeDir);
+    File.WriteAllText(Path.Combine(recipeDir, "custom.yml"), """
+        shovel_from_dirt:
+          Type: Shapeless
+          Ingredients: [dirt]
+          Result: { Id: iron_shovel, Amount: 1 }
+        """);
     await using var host = new ShardHost(options, installed, Path.Combine(temp, "shards"));
     await host.LoadAsync();
     Check(host.GetService<IShardWorld>() is not null, "default overworld provider enabled");
@@ -45,6 +53,19 @@ try
     Check(items.MinecraftVersion == "26.3" && items.Count == 1658 &&
         items.All.Count == 1658,
         "Items Shard auto-enabled and complete 26.3 definitions published");
+    IShardRecipeRegistry recipes = host.GetService<IShardRecipeRegistry>() ??
+        throw new Exception("FAIL: Items Shard recipe provider not registered");
+    var recipeGrid = new ShardRecipeStack[9];
+    recipeGrid[4] = new ShardRecipeStack(55, 1); // dirt
+    Check(recipes.RecipeCount >= 70 &&
+        recipes.TryMatchCrafting(recipeGrid, out var definedRecipe) &&
+        definedRecipe.RecipeId == "shovel_from_dirt" &&
+        items.TryGetByIdentifier("iron_shovel", out var shovel) &&
+        definedRecipe.Result == new ShardRecipeStack(shovel.ProtocolId, 1),
+        "Items Shard loads user-defined YAML recipes before Gameplay enables");
+    Check(host.RegisteredConsoleCommands.Contains("recipes") &&
+        await host.TryExecuteConsoleAsync("recipes shovel", CancellationToken.None),
+        "Recipe listing command is registered by the Items Shard");
     Check(items.TryGetById(405, out var table) &&
         table.Identifier == "minecraft:crafting_table" &&
         table.MaxStackSize == 64 && table.IsBlockItem &&
@@ -90,6 +111,8 @@ try
     Check(host.GetService<IShardGameplay>() is null, "gameplay service removed");
     await host.DisableAsync("items");
     Check(host.GetService<IShardItemRegistry>() is null &&
+        host.GetService<IShardRecipeRegistry>() is null &&
+        !host.RegisteredConsoleCommands.Contains("recipes") &&
         !host.RegisteredConsoleCommands.Contains("iteminfo"),
         "Disabling Items Shard unregisters its definitions and iteminfo command");
     await host.DisableAsync("overworld");
@@ -98,8 +121,9 @@ try
     await host.EnableAsync("gameplay");
     Check(host.GetService<IShardWorld>() is not null &&
         host.GetService<IShardGameplay>() is not null &&
-        host.GetService<IShardItemRegistry>() is not null,
-        "Enabling Gameplay automatically enables both World and Items providers");
+        host.GetService<IShardItemRegistry>() is not null &&
+        host.GetService<IShardRecipeRegistry>() is not null,
+        "Enabling Gameplay automatically enables World, Items, and Recipe providers");
 }
 finally
 {
