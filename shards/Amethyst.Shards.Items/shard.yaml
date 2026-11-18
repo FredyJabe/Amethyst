@@ -1,0 +1,9 @@
+id: items
+apiVersion: 1
+assembly: Amethyst.Shards.Items.dll
+entryType: Amethyst.BuiltinShards.ItemsShard
+enabled: true
+provides:
+  - items
+requires: []
+dependsOn: []
