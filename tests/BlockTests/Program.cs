@@ -316,8 +316,8 @@ try
             if (update is { } airUpdate)
             {
                 PacketReader fields = airUpdate.Reader();
-                var position = fields.ReadPosition();
-                Check(position == (3, blockY, blockZ) && fields.ReadVarInt() == 0,
+                var instantPosition = fields.ReadPosition();
+                Check(instantPosition == (3, blockY, blockZ) && fields.ReadVarInt() == 0,
                     "One-tick break publishes air for exactly the mined position");
             }
             // With leaves drops deliberately unsupported, only an ACK follows.
