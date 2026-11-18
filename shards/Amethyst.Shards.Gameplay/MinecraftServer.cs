@@ -43,6 +43,8 @@ public sealed class MinecraftServer
     public ShardPlayerSummary[] OnlinePlayers => _players.Snapshot()
         .Select(p => new ShardPlayerSummary(p.Username, p.PlayerUuid)).ToArray();
 
+    internal GroundItem[] GroundItemsForTests => _groundItems?.Snapshot() ?? [];
+
     public void Start()
     {
         if (_clockLifetime is not null) throw new InvalidOperationException("Already started.");
