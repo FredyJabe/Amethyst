@@ -45,7 +45,8 @@ public sealed class PlayerInventory
     public bool TryCreativeSet(int slot, int itemId, int count, bool plain)
     {
         if (slot is < 9 or > 44 || !plain ||
-            count is < 0 or > 64 || itemId is < 0 or > 1657) return false;
+            count is < 0 or > 64 || itemId is < 0 or > 1657 ||
+            (itemId == 0) != (count == 0)) return false;
         lock (_sync)
         {
             var original = _slots[slot];
@@ -77,7 +78,7 @@ public sealed class PlayerInventory
     /// ground entity yet, until item entities are implemented.</returns>
     public int Give(int itemId, int count)
     {
-        if (itemId <= 0 || count <= 0) return 0;
+        if (itemId is <= 0 or > 1657 || count <= 0) return 0;
         lock (_sync)
         {
             var backup = (ItemStack[])_slots.Clone();
