@@ -414,9 +414,11 @@ public sealed class WorkstationManager
                 // prune them without producing invisible free items.
                 int beforeBurn = state.BurnRemaining, beforeCook = state.CookProgress;
                 if (state.BurnRemaining > 0) state.BurnRemaining--;
+                ItemStack result = ItemStack.Empty;
+                int duration = 200;
                 bool valid = state.Slots[0].Count > 0 &&
                     StationRecipes.TryCook(state.Kind, state.Slots[0].ItemId,
-                        out ItemStack result, out int duration) &&
+                        out result, out duration) &&
                     (state.Slots[2].Count == 0 ||
                      state.Slots[2].ItemId == result.ItemId &&
                      state.Slots[2].Count + result.Count <= 64);
