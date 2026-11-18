@@ -129,3 +129,39 @@ The public API is **experimental** and will evolve. Do not rely on internal engi
 Existing `ops.yaml`, world directories, v7 seeds, and `.mc26` chunk files are unchanged. For upgrading from a pre-Shards build, **use a clean source checkout** and copy over `server.yaml`, `ops.yaml` and your saved world directories. Avoid extracting over a modified tree with stray source files; `Amethyst.csproj` excludes known legacy source locations, but a clean checkout is still safer.
 
 The Minecraft protocol's server-list status uses JSON on the wire because the vanilla client requires it. All project configuration files remain YAML.
+
+
+## Creative block editing (experimental)
+
+Creative-mode players can break blocks and place a **curated set of 168 simple
+vanilla blocks** using the Creative inventory and hotbar. This release introduces
+`IShardBlockWorld` as an optional capability registered by the Overworld Shard,
+without adding gameplay responsibilities to Core or changing the existing
+`IShardWorld` ABI. World Shards may provide their own implementation.
+
+Player actions are range-checked, restricted to Creative mode, rate-limited
+(64 edits/s/player), synchronized with `block_update`, and acknowledged using
+the client's prediction sequence ID. Supported placed blocks are a version-locked
+subset without complex block properties or block entities. Creative hotbar items
+with data-component patches are not yet supported; a general inventory will
+require a separate parser and persistence model.
+
+**Edits storage:** generated `.mc26` snapshots remain immutable. When
+`saveGeneratedChunks: true` and `generatorVersion` is 5–7, sparse edits are
+atomically saved in `worldPath/edits/<chunkX>.<chunkZ>.amedit`. Back up both
+`chunks/` and `edits/` together. If persistence is disabled (or generator
+version is 1–4), edits are session-only. Corrupt sidecar files fail loudly rather
+than being silently overwritten. Frame and lighting caches are revisioned so
+future chunk loads incorporate edits.
+
+**Limitations:** no Survival mining progression, drops, inventory consumption,
+multiblock placement, block physics, fluid updates or neighboring block behaviors.
+Existing clients receive block-state changes immediately; full dynamic relighting
+of their already-loaded chunks remains follow-up work.
+
+To run the automated regression tests:
+
+```bash
+dotnet build Amethyst.slnx
+dotnet run --project tests/BlockTests/BlockTests.csproj
+```
