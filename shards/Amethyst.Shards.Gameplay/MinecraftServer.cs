@@ -210,6 +210,28 @@ public sealed class MinecraftServer
                     case ChatProtocol.ServerboundSessionUpdate:
                         ChatProtocol.ParseSessionUpdate(packet.Value);
                         break;
+                    case BlockInteractionProtocol.ServerboundSetHeldItem:
+                        player.SelectHotbar(BlockInteractionProtocol.ReadHeldItem(packet.Value));
+                        break;
+                    case BlockInteractionProtocol.ServerboundCreativeSlot:
+                    {
+                        CreativeSlotUpdate update = BlockInteractionProtocol.ReadCreativeSlot(packet.Value);
+                        if (player.Ready)
+                            player.SetCreativeHotbarSlot(update.Slot, update.ItemId, update.PlainItem);
+                        break;
+                    }
+                    case BlockInteractionProtocol.ServerboundPlayerAction:
+                    {
+                        PlayerBlockAction action = BlockInteractionProtocol.ReadAction(packet.Value);
+                        await HandleBlockActionAsync(player, action, lifetime.Token);
+                        break;
+                    }
+                    case BlockInteractionProtocol.ServerboundUseItemOn:
+                    {
+                        BlockUseOn hit = BlockInteractionProtocol.ReadUseOn(packet.Value);
+                        await HandleBlockUseAsync(player, hit, lifetime.Token);
+                        break;
+                    }
                     case 0x0E: // Client information (Play): chat visibility preference
                     {
                         ApplyClientInformation(player, packet.Value);
@@ -224,8 +246,7 @@ public sealed class MinecraftServer
                         break;
                     }
                     default:
-                        // Inventory, chat, block interactions, player abilities etc.
-                        // Not implemented yet; do not interpret them as movement.
+                        // Other inventory, entity interactions and abilities are not yet implemented.
                         break;
                 }
                 if (teleportConfirmed && playerLoaded && !player.Ready)
@@ -260,6 +281,93 @@ public sealed class MinecraftServer
         player.MarkReady();
         Console.WriteLine($"[ready] {player.Username} can see {peers.Length} player(s)");
         await BroadcastChatAsync($"[Server] {player.Username} joined the game", ct);
+    }
+
+    private static bool CanEditAt(ConnectedPlayer player, int x, int y, int z)
+    {
+        if (!player.Ready || player.GameMode != PlayerGameMode.Creative ||
+            y is < -64 or > 319 || x is < -29_999_984 or > 29_999_984 ||
+            z is < -29_999_984 or > 29_999_984) return false;
+        PlayerPose pose = player.Pose;
+        double dx = x + 0.5 - pose.X;
+        double dy = y + 0.5 - (pose.Y + 1.62);
+        double dz = z + 0.5 - pose.Z;
+        return dx * dx + dy * dy + dz * dz <= 36; // Creative interaction range
+    }
+
+    private async Task HandleBlockActionAsync(ConnectedPlayer player,
+        PlayerBlockAction action, CancellationToken ct)
+    {
+        // Creative instamine is START (0); Survival mining and drops are a
+        // separate milestone. We still acknowledge/reconcile every prediction.
+        bool valid = action.Status == 0 && action.Face is >= 0 and <= 5 &&
+            CanEditAt(player, action.X, action.Y, action.Z) &&
+            player.TryConsumeEditBudget();
+        bool changed = false;
+        if (valid)
+            changed = _world.TrySetBlockState(action.X, action.Y, action.Z, 0, out _);
+        if (changed)
+            await BroadcastBlockChangeAsync(action.X, action.Y, action.Z, 0, ct);
+        else if (CanEditAt(player, action.X, action.Y, action.Z))
+            await BlockInteractionProtocol.SendBlockUpdateAsync(player.Connection,
+                action.X, action.Y, action.Z,
+                _world.GetBlockState(action.X, action.Y, action.Z), ct);
+        await BlockInteractionProtocol.SendAckAsync(player.Connection, action.Sequence, ct);
+    }
+
+    private async Task HandleBlockUseAsync(ConnectedPlayer player,
+        BlockUseOn hit, CancellationToken ct)
+    {
+        var (x, y, z) = BlockInteractionProtocol.Adjacent(hit.X, hit.Y, hit.Z, hit.Face);
+        bool allowed = hit.ValidHit && hit.Hand == 0 &&
+            CanEditAt(player, hit.X, hit.Y, hit.Z) && CanEditAt(player, x, y, z) &&
+            player.TryGetSelectedBlock(out ushort _);
+        ushort selected = 0;
+        if (allowed) allowed = player.TryGetSelectedBlock(out selected);
+        if (allowed) allowed = _world.GetBlockState(hit.X, hit.Y, hit.Z) != 0 &&
+            _world.GetBlockState(x, y, z) == 0 && player.TryConsumeEditBudget();
+        if (allowed)
+        {
+            PlayerPose pose = player.Pose;
+            // Do not enclose the player's body in a newly placed solid block.
+            if (pose.X > x - 0.3 && pose.X < x + 1.3 &&
+                pose.Z > z - 0.3 && pose.Z < z + 1.3 &&
+                pose.Y < y + 1 && pose.Y + 1.8 > y)
+                allowed = false;
+        }
+        bool changed = allowed && _world.TrySetBlockState(x, y, z, selected, out _);
+        if (changed)
+            await BroadcastBlockChangeAsync(x, y, z, selected, ct);
+        else
+        {
+            // Corrections must precede the sequence acknowledgement. The client
+            // predicts placements, but the ack itself carries no accept/reject bit.
+            if (CanEditAt(player, hit.X, hit.Y, hit.Z))
+                await BlockInteractionProtocol.SendBlockUpdateAsync(player.Connection,
+                    hit.X, hit.Y, hit.Z,
+                    _world.GetBlockState(hit.X, hit.Y, hit.Z), ct);
+            if (CanEditAt(player, x, y, z))
+                await BlockInteractionProtocol.SendBlockUpdateAsync(player.Connection,
+                    x, y, z, _world.GetBlockState(x, y, z), ct);
+        }
+        await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
+    }
+
+    private async Task BroadcastBlockChangeAsync(int x, int y, int z,
+        ushort state, CancellationToken ct)
+    {
+        int chunkX = (int)Math.Floor(x / 16.0), chunkZ = (int)Math.Floor(z / 16.0);
+        foreach (ConnectedPlayer viewer in _players.Snapshot().Where(p => p.Ready))
+        {
+            try
+            {
+                if (await viewer.View.HasLoadedChunkAsync(chunkX, chunkZ, ct))
+                    await BlockInteractionProtocol.SendBlockUpdateAsync(viewer.Connection,
+                        x, y, z, state, ct);
+            }
+            catch (IOException) { /* disconnected viewer */ }
+            catch (ObjectDisposedException) { }
+        }
     }
 
     private static void ApplyClientInformation(ConnectedPlayer player, Packet packet)
