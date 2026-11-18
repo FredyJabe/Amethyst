@@ -10,6 +10,7 @@ public sealed class MinecraftServer
     private readonly ServerOptions _options;
     private readonly IShardWorld _world;
     private readonly IShardBlockWorld? _blocks;
+    private readonly string? _inventoryDirectory;
     private readonly WorldClock _clock;
     private readonly IShardPacketBus _packetBus;
     private readonly PlayerRegistry _players;
@@ -18,11 +19,12 @@ public sealed class MinecraftServer
     private Task? _clockSync;
 
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
-        IShardBlockWorld? blocks = null)
+        IShardBlockWorld? blocks = null, string? inventoryDirectory = null)
     {
         _options = options;
         _world = world;
         _blocks = blocks;
+        _inventoryDirectory = inventoryDirectory;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers);
         _operators = new OperatorStore(options.OperatorsFile);
@@ -60,7 +62,7 @@ public sealed class MinecraftServer
     public bool TryAdmit(VerifiedProfile profile, PacketChannel channel, int chatMode, out string reason)
     {
         var player = new ConnectedPlayer(profile.Uuid, profile.Username, profile.Properties,
-            _players.AllocateEntityId(), channel, _world);
+            _players.AllocateEntityId(), channel, _world, _inventoryDirectory);
         player.SetChatMode(chatMode);
         return _players.TryAdd(player, out reason);
     }
@@ -76,6 +78,7 @@ public sealed class MinecraftServer
         ConnectedPlayer player = _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == profile.Uuid)
             ?? throw new InvalidOperationException("Player admission was not completed.");
         await SpawnPackets.SendAsync(player, _world, _options, _clock, ct);
+        await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
         int actualOpLevel = _options.OnlineMode ? _operators.Level(player.PlayerUuid) : 0;
         await GameModeProtocol.SendClientPermissionsAsync(player.Connection, player.EntityId, actualOpLevel, ct);
         await CommandTree.SendAsync(player.Connection, actualOpLevel, ct);
@@ -220,7 +223,29 @@ public sealed class MinecraftServer
                     {
                         CreativeSlotUpdate update = BlockInteractionProtocol.ReadCreativeSlot(packet.Value);
                         if (player.Ready)
-                            player.SetCreativeHotbarSlot(update.Slot, update.ItemId, update.PlainItem);
+                        {
+                            player.SetCreativeSlot(update.Slot, update.ItemId,
+                                update.Count, update.PlainItem);
+                            await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
+                        }
+                        break;
+                    }
+                    case InventoryProtocol.ServerboundContainerClick:
+                    {
+                        InventoryClick click = InventoryProtocol.ReadClick(packet.Value);
+                        if (player.Ready)
+                        {
+                            player.Inventory.ApplyClick(click);
+                            await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
+                        }
+                        break;
+                    }
+                    case InventoryProtocol.ServerboundContainerClose:
+                    {
+                        int window = reader.ReadVarInt();
+                        reader.RequireEnd();
+                        if (window == 0 && player.Ready)
+                            await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
                         break;
                     }
                     case BlockInteractionProtocol.ServerboundPlayerAction:
@@ -288,7 +313,7 @@ public sealed class MinecraftServer
 
     private bool CanEditAt(ConnectedPlayer player, int x, int y, int z)
     {
-        if (_blocks is null || !player.Ready || player.GameMode != PlayerGameMode.Creative ||
+        if (_blocks is null || !player.Ready || player.GameMode is PlayerGameMode.Adventure or PlayerGameMode.Spectator ||
             y is < -64 or > 319 || x is < -29_999_984 or > 29_999_984 ||
             z is < -29_999_984 or > 29_999_984) return false;
         PlayerPose pose = player.Pose;
@@ -301,20 +326,67 @@ public sealed class MinecraftServer
     private async Task HandleBlockActionAsync(ConnectedPlayer player,
         PlayerBlockAction action, CancellationToken ct)
     {
-        // Creative instamine is START (0); Survival mining and drops are a
-        // separate milestone. We still acknowledge/reconcile every prediction.
-        bool valid = action.Status == 0 && action.Face is >= 0 and <= 5 &&
-            CanEditAt(player, action.X, action.Y, action.Z) &&
-            player.TryConsumeEditBudget();
+        // Statuses 3/4 are item drops; no item entities exist yet, so explicitly
+        // resync rather than deleting items from the inventory.
+        if (action.Status is 3 or 4)
+        {
+            await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+            return;
+        }
+        if (action.Status is < 0 or > 2) return;
+        bool valid = action.Face is >= 0 and <= 5 &&
+            CanEditAt(player, action.X, action.Y, action.Z);
+        ushort state = valid ? _blocks!.GetBlockState(action.X, action.Y, action.Z) : (ushort)0;
         bool changed = false;
-        if (valid)
-            changed = _blocks!.TrySetBlockState(action.X, action.Y, action.Z, 0, out _);
+        bool survival = player.GameMode == PlayerGameMode.Survival;
+        switch (action.Status)
+        {
+            case 0: // Start digging; Creative is instant, Survival is timed.
+            {
+                player.CancelMining();
+                if (!valid || state == 0 || !player.TryConsumeEditBudget()) break;
+                int duration = player.GameMode == PlayerGameMode.Creative ? 0 :
+                    MiningRules.RequiredMilliseconds(state, player.Inventory.Held().ItemId);
+                if (duration == int.MaxValue) break; // bedrock, barrier, etc.
+                if (duration == 0)
+                    changed = _blocks!.TrySetBlockState(action.X, action.Y, action.Z, 0, out _);
+                else if (survival)
+                    player.StartMining(action.X, action.Y, action.Z, state,
+                        player.Inventory.Held().ItemId, duration);
+                break;
+            }
+            case 1: // Abort digging
+                player.CancelMining();
+                break;
+            case 2: // Finish digging after a validated session
+                if (!survival || !valid || state == 0 || !player.TryConsumeEditBudget())
+                {
+                    player.CancelMining();
+                    break;
+                }
+                int held = player.Inventory.Held().ItemId;
+                if (!player.FinishMining(action.X, action.Y, action.Z, state, held))
+                    break;
+                changed = _blocks!.TrySetBlockState(action.X, action.Y, action.Z, 0, out _);
+                break;
+        }
         if (changed)
+        {
             await BroadcastBlockChangeAsync(action.X, action.Y, action.Z, 0, ct);
-        else if (CanEditAt(player, action.X, action.Y, action.Z))
+            if (survival)
+            {
+                MiningRules.BlockInfo info = MiningRules.ForState(state);
+                if (info.DropItem > 0 && MiningRules.IsHarvestable(info, player.Inventory.Held().ItemId))
+                {
+                    if (player.Inventory.Give(info.DropItem, 1) > 0)
+                        await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+                }
+            }
+        }
+        else if (valid)
             await BlockInteractionProtocol.SendBlockUpdateAsync(player.Connection,
-                action.X, action.Y, action.Z,
-                _blocks!.GetBlockState(action.X, action.Y, action.Z), ct);
+                action.X, action.Y, action.Z, state, ct);
+        // Acknowledge after authoritative changes or corrections.
         await BlockInteractionProtocol.SendAckAsync(player.Connection, action.Sequence, ct);
     }
 
@@ -337,9 +409,18 @@ public sealed class MinecraftServer
                 pose.Y < y + 1 && pose.Y + 1.8 > y)
                 allowed = false;
         }
-        bool changed = allowed && _blocks!.TrySetBlockState(x, y, z, selected, out _);
+        ItemStack held = player.Inventory.Held();
+        bool changed = allowed && player.Inventory.Held().Count > 0 &&
+            _blocks!.TrySetBlockState(x, y, z, selected, out _);
         if (changed)
+        {
+            // The world mutation is durable before inventory consumption.
+            // Only Survival consumes items; Creative has infinite placement.
             await BroadcastBlockChangeAsync(x, y, z, selected, ct);
+            if (player.Inventory.ConsumeHeld(player.GameMode == PlayerGameMode.Creative, held.ItemId))
+                await InventoryProtocol.SendSlotAsync(player.Connection, player.Inventory,
+                    player.Inventory.SelectedSlot, ct);
+        }
         else
         {
             // Corrections must precede the sequence acknowledgement. The client
