@@ -149,9 +149,24 @@ Survival tracks start/cancel/finish dig actions per player, checks block hardnes
 and selected tool type/tier against Java Edition 26.3 data, and validates
 elapsed time before accepting a break. STOP is accepted at 70% of the expected
 mining duration, allowing for the vanilla client's tick-based completion and
-minor packet scheduling skew. The server sends confirmed block updates to the
-breaker **before** acknowledging prediction sequences to prevent previously
-mined blocks from reappearing when the next action arrives. The current mining model is
+minor packet scheduling skew. It also commits **one-tick instant breaks
+directly on START**: vanilla does not send a STOP packet for blocks mined in
+one tick. The server sends confirmed block updates to the breaker **before**
+acknowledging prediction sequences to prevent previously mined blocks from
+reappearing when the next action arrives.
+
+If a client still sees ghost blocks, enable action-level diagnostics:
+
+```bash
+AMETHYST_TRACE_MINING=1 ./run.sh
+```
+
+For each dig the console prints the received START/CANCEL/STOP, position,
+selected item, server block state, whether the edit was committed, and a
+specific rejection reason. A committed block reports `changed=True`,
+`after=0`; an uncommitted block shows why (missing START, target mismatch,
+too early, unbreakable, out of range, or edit throttled). This is an
+opt-in diagnostic flag, not a general verbose-packet capture. The current mining model is
 *approximate*: it does not yet model enchantments, haste, mining fatigue,
 underwater penalties, status effects, tool durability, or all vanilla exceptions.
 
