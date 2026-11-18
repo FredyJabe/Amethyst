@@ -284,6 +284,112 @@ Declare `requires: [recipes]` in consumers' manifests.
 The console command `recipes` lists up to 30 available recipes;
 `recipes shovel` filters by recipe ID.
 
+## Minecraft Java 26.3 recipe serializer catalog
+
+The registry now recognizes **all 22 serializers** used by Java 26.3
+(including their `minecraft:` namespaced values in `Type`). This is a
+catalog/schema feature, **not** a claim that every kind can be crafted in
+Gameplay today.
+
+| Vanilla serializer | Amethyst YAML `Type` | Current behavior |
+| --- | --- | --- |
+| `crafting_shaped` | `Shaped` | Crafting-table matching and consumption |
+| `crafting_shapeless` | `Shapeless` | Crafting-table matching and consumption |
+| `smelting` | `Furnace` | Furnace processing |
+| `smoking` | `Smoker` | Smoker processing |
+| `blasting` | `BlastFurnace` | Blast furnace processing |
+| `campfire_cooking` | `Campfire` | Registry cooking lookup; no campfire world interaction yet |
+| `stonecutting` | `Stonecutting` | Registry provides **all** output choices; no stonecutter menu yet |
+| `smithing_transform` | `SmithingTransform` | Registry matches three inputs and copies base components; no smithing menu yet |
+| `smithing_trim` | `SmithingTrim` | Registered only; trim components must be constructed |
+| `brewing` | `Brewing` | Registry matches input/reagent and potion predicates; no brewing stand yet |
+| `crafting_transmute` | `CraftingTransmute` | Registered only; needs input component propagation |
+| `crafting_dye` | `CraftingDye` | Registered only; needs dynamic dye component calculation |
+| `crafting_imbue` | `CraftingImbue` | Registered only; needs source potion component copying |
+| `crafting_decorated_pot` | `CraftingDecoratedPot` | Registered only; needs pot-decoration assembly |
+| `crafting_special_bannerduplicate` | `SpecialBannerDuplicate` | Registered only; dynamic component logic |
+| `crafting_special_bookcloning` | `SpecialBookCloning` | Registered only; dynamic component logic |
+| `crafting_special_firework_rocket` | `SpecialFireworkRocket` | Registered only; dynamic component logic |
+| `crafting_special_firework_star` | `SpecialFireworkStar` | Registered only; dynamic component logic |
+| `crafting_special_firework_star_fade` | `SpecialFireworkStarFade` | Registered only; dynamic component logic |
+| `crafting_special_mapextending` | `SpecialMapExtending` | Registered only; dynamic component logic |
+| `crafting_special_repairitem` | `SpecialRepairItem` | Registered only; dynamic durability logic |
+| `crafting_special_shielddecoration` | `SpecialShieldDecoration` | Registered only; dynamic component logic |
+
+### Extended YAML examples
+
+All versions below use root recipe IDs (no `Recipes:` wrapper), and
+`Type` also accepts the vanilla serializer name (for example,
+`minecraft:stonecutting`).
+
+```yaml
+stone_bricks_from_stone:
+  Type: Stonecutting
+  Ingredient: minecraft:stone
+  Result: { Id: minecraft:stone_bricks, Amount: 1 }
+
+campfire_beef:
+  Type: Campfire
+  Ingredient: minecraft:beef
+  CookingTime: 600
+  Result: { Id: minecraft:cooked_beef, Amount: 1 }
+
+upgrade_sword:
+  Type: SmithingTransform
+  Template: minecraft:netherite_upgrade_smithing_template
+  Base: minecraft:diamond_sword
+  Addition: minecraft:netherite_ingot
+  Result: { Id: minecraft:netherite_sword, Amount: 1 }
+
+sword_trim:
+  Type: SmithingTrim
+  Template: minecraft:sentry_armor_trim_smithing_template
+  Base: minecraft:iron_chestplate
+  Addition: minecraft:diamond
+
+water_to_awkward:
+  Type: Brewing
+  Input:
+    Item: minecraft:potion
+    PotionContents: { Potion: minecraft:water }
+  Reagent: { Item: minecraft:nether_wart }
+  Output:
+    Id: minecraft:potion
+    Components:
+      'minecraft:potion_contents': { potion: minecraft:awkward }
+
+sample_transmute:
+  Type: CraftingTransmute
+  Input: minecraft:stone
+  Material: minecraft:diamond
+  Result: { Id: minecraft:diamond, Amount: 1 }
+
+special_rocket:
+  Type: minecraft:crafting_special_firework_rocket
+```
+
+Existing `RecipeCatalog` methods are preserved. The new
+`IShardRecipeRegistry.Definitions` exposes every parsed recipe's
+`ShardRecipeType` and an `IsExecutable` bit. This bit describes whether
+the *registry can compute a result*, **not** whether Gameplay provides
+the associated container or wire serialization. The new
+`GetStonecuttingRecipes`, `TryMatchSmithing` and `TryMatchBrewing`
+methods are available to other Shards.
+
+Recipe output components are retained as JSON payloads in
+`ShardRecipeStack.Components`. Current Gameplay inventories and packets
+still transport `ItemStack` as just an ID/count. Crafting/cooking recipes
+with component-bearing results are therefore excluded from legacy
+workstation matching, to avoid silently deleting components.
+
+**Outstanding work for in-game parity:** block interactions and menus for
+stonecutting/smithing/brewing, campfire world cooking, generic item-tag
+ingredient resolution, complete component-based ingredient predicates and
+serialization/persistence, vanilla special-recipe algorithms, and import
+of the remaining Java 26.3 data-pack recipes. The bundled 73 recipes
+are still a starter subset; registering a serializer does not create
+all its vanilla recipes.
+
 ## Public Shard API
 
 ```csharp
