@@ -21,7 +21,38 @@ writer.WriteByte(2);
 writer.WriteVarInt(15);
 var action = BlockInteractionProtocol.ReadAction(
     new Packet(BlockInteractionProtocol.ServerboundPlayerAction, writer.ToArray()));
-Check(action == new PlayerBlockAction(0, -1, 79, -16, 2, 15), "Creative break decode");
+Check(action == new PlayerBlockAction(BlockInteractionProtocol.StartDestroyBlock,
+    -1, 79, -16, 2, 15), "Creative break decode");
+Check(BlockInteractionProtocol.StartDestroyBlock == 0 &&
+    BlockInteractionProtocol.ChangeDestroyDirection == 1 &&
+    BlockInteractionProtocol.AbortDestroyBlock == 2 &&
+    BlockInteractionProtocol.StopDestroyBlock == 3 &&
+    BlockInteractionProtocol.DropAllItems == 4 &&
+    BlockInteractionProtocol.DropItem == 5 &&
+    BlockInteractionProtocol.ReleaseUseItem == 6 &&
+    BlockInteractionProtocol.SwapItemWithOffhand == 7 &&
+    BlockInteractionProtocol.Stab == 8,
+    "Java 26.3 nine player-action IDs are version-pinned");
+
+writer = new PacketWriter();
+writer.WriteVarInt(3); // 26.3 STOP, not item drop!
+writer.WritePosition(6, 78, 0);
+writer.WriteByte(1);
+writer.WriteVarInt(2);
+Check(BlockInteractionProtocol.ReadAction(
+        new Packet(BlockInteractionProtocol.ServerboundPlayerAction, writer.ToArray()))
+    == new PlayerBlockAction(BlockInteractionProtocol.StopDestroyBlock, 6, 78, 0, 1, 2),
+    "Actual Survival STOP packet from client logs decodes as mining completion");
+
+writer = new PacketWriter();
+writer.WriteVarInt(2); // 26.3 ABORT, not STOP!
+writer.WritePosition(5, 78, 0);
+writer.WriteByte(0);
+writer.WriteVarInt(0);
+Check(BlockInteractionProtocol.ReadAction(
+        new Packet(BlockInteractionProtocol.ServerboundPlayerAction, writer.ToArray()))
+    == new PlayerBlockAction(BlockInteractionProtocol.AbortDestroyBlock, 5, 78, 0, 0, 0),
+    "Actual Survival ABORT packet from client logs decodes as cancellation");
 
 writer = new PacketWriter();
 writer.WriteVarInt(0);
@@ -226,7 +257,7 @@ try
             int startSequence = x * 2 - 1, stopSequence = x * 2;
             int startOffset = checked((int)outgoing.Length);
             await game.HandleBlockActionAsync(player,
-                new PlayerBlockAction(0, x, blockY, blockZ, 1, startSequence),
+                new PlayerBlockAction(BlockInteractionProtocol.StartDestroyBlock, x, blockY, blockZ, 1, startSequence),
                 CancellationToken.None);
             // START has no predicted removal in Survival. Do not send a stale
             // block-state correction; only acknowledge the action.
@@ -245,7 +276,7 @@ try
             // below the old exact 100% threshold which caused client rollbacks.
             await Task.Delay(520);
             await game.HandleBlockActionAsync(player,
-                new PlayerBlockAction(2, x, blockY, blockZ, 1, stopSequence),
+                new PlayerBlockAction(BlockInteractionProtocol.StopDestroyBlock, x, blockY, blockZ, 1, stopSequence),
                 CancellationToken.None);
             Check(world.GetBlockState(x, blockY, blockZ) == 0,
                 $"Survival STOP authoritatively removed block {x}");
@@ -296,15 +327,37 @@ try
         Check(world.TrySetBlockState(3, blockY, blockZ, 10, out _),
             "Prepare a dirt block for queued-tick mining");
         await game.HandleBlockActionAsync(player,
-            new PlayerBlockAction(0, 3, blockY, blockZ, 1, 5),
+            new PlayerBlockAction(BlockInteractionProtocol.StartDestroyBlock, 3, blockY, blockZ, 1, 5),
             CancellationToken.None);
         for (int tick = 0; tick < 14; tick++)
             player.AdvanceClientTick();
         await game.HandleBlockActionAsync(player,
-            new PlayerBlockAction(2, 3, blockY, blockZ, 1, 6),
+            new PlayerBlockAction(BlockInteractionProtocol.ChangeDestroyDirection,
+                3, blockY, blockZ, 2, 0), CancellationToken.None);
+        Check(world.GetBlockState(3, blockY, blockZ) == 10,
+            "CHANGE_DESTROY_DIRECTION does not destroy or cancel the active mining target");
+        await game.HandleBlockActionAsync(player,
+            new PlayerBlockAction(BlockInteractionProtocol.StopDestroyBlock, 3, blockY, blockZ, 1, 6),
             CancellationToken.None);
         Check(world.GetBlockState(3, blockY, blockZ) == 0,
             "Queued valid client ticks allow a finished dig without relying on wall-clock time");
+
+        // A status=2 ABORT with sequence=0 (exactly like the user's real
+        // client log) must clear the mining session rather than mining air.
+        Check(world.TrySetBlockState(5, blockY, blockZ, 10, out _),
+            "Prepare a dirt block for abort/late-stop validation");
+        await game.HandleBlockActionAsync(player,
+            new PlayerBlockAction(BlockInteractionProtocol.StartDestroyBlock,
+                5, blockY, blockZ, 1, 8), CancellationToken.None);
+        await game.HandleBlockActionAsync(player,
+            new PlayerBlockAction(BlockInteractionProtocol.AbortDestroyBlock,
+                5, blockY, blockZ, 0, 0), CancellationToken.None);
+        for (int tick = 0; tick < 14; tick++) player.AdvanceClientTick();
+        await game.HandleBlockActionAsync(player,
+            new PlayerBlockAction(BlockInteractionProtocol.StopDestroyBlock,
+                5, blockY, blockZ, 1, 9), CancellationToken.None);
+        Check(world.GetBlockState(5, blockY, blockZ) == 10,
+            "ABORT cancels a dig and a subsequent STOP cannot break it");
 
         // An efficient tool can finish a soft block on the FIRST client tick.
         // Vanilla then sends only START (no STOP); previously the server
@@ -317,7 +370,7 @@ try
             "Prepare a nearby leaves block");
         int beforeInstant = checked((int)outgoing.Length);
         await game.HandleBlockActionAsync(player,
-            new PlayerBlockAction(0, 4, blockY, blockZ, 1, 7),
+            new PlayerBlockAction(BlockInteractionProtocol.StartDestroyBlock, 4, blockY, blockZ, 1, 7),
             CancellationToken.None);
         Check(world.GetBlockState(4, blockY, blockZ) == 0,
             "One-tick Survival START destroys leaves without waiting for STOP");
