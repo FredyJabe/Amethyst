@@ -21,6 +21,39 @@ public sealed class ConnectedPlayer : IShardPlayer
             throw new ArgumentOutOfRangeException(nameof(mode));
         Volatile.Write(ref _gameMode, (int)mode);
     }
+    // This is deliberately a minimal Creative-only hotbar, not a general
+    // inventory. Component-bearing stacks are not trusted until item parsing exists.
+    private readonly int[] _creativeHotbar = new int[9];
+    private int _selectedHotbar;
+    private long _editWindowStarted;
+    private int _editCount;
+
+    public void SelectHotbar(int index)
+    {
+        if (index is >= 0 and < 9) _selectedHotbar = index;
+    }
+
+    public void SetCreativeHotbarSlot(int inventorySlot, int itemId, bool plainItem)
+    {
+        if (GameMode != PlayerGameMode.Creative ||
+            inventorySlot is < 36 or > 44) return;
+        _creativeHotbar[inventorySlot - 36] = plainItem ? itemId : 0;
+    }
+
+    public bool TryGetSelectedBlock(out ushort blockState) =>
+        CreativeBlockPalette.TryGetState(_creativeHotbar[_selectedHotbar], out blockState);
+
+    public bool TryConsumeEditBudget()
+    {
+        long now = Environment.TickCount64;
+        if (now - _editWindowStarted >= 1000)
+        {
+            _editWindowStarted = now;
+            _editCount = 0;
+        }
+        return ++_editCount <= 64;
+    }
+
     private int _chatMode;
     private long _lastChatAt;
     private readonly CancellationTokenSource _disconnect = new();
