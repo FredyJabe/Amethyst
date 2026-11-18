@@ -358,7 +358,33 @@ public sealed class ItemsShard : IShard
                 #     - "An alias of the vanilla pickaxe; NOT a new protocol item."
                 """ + Environment.NewLine);
         var catalog = new ItemCatalog(Path.Combine(directory, "items-26.3.yml"), definitions);
+        string recipeDirectory = Path.Combine(ctx.DataDirectory, "recipes");
+        Directory.CreateDirectory(recipeDirectory);
+        string exampleRecipe = Path.Combine(recipeDirectory, "example-recipes.yml");
+        if (!File.Exists(exampleRecipe))
+            File.WriteAllText(exampleRecipe, """
+                # Each YAML root key is a recipe ID. Uncomment to enable.
+                # custom_torches:
+                #   Type: Shapeless
+                #   Ingredients:
+                #     - minecraft:coal
+                #     - minecraft:stick
+                #   Result: { Id: minecraft:torch, Amount: 8 }
+                #
+                # alternative_furnace:
+                #   Type: Furnace
+                #   Ingredient: minecraft:dirt
+                #   Result: { Id: minecraft:clay, Amount: 1 }
+                #   CookingTime: 100
+                #
+                # To disable an included recipe by its root ID:
+                # furnace:
+                #   Enabled: false
+                """ + Environment.NewLine);
+        var recipes = new RecipeCatalog(catalog,
+            Path.Combine(directory, "recipes-26.3.yml"), recipeDirectory);
         ctx.RegisterService<IShardItemRegistry>(catalog);
+        ctx.RegisterService<IShardRecipeRegistry>(recipes);
         ctx.RegisterConsoleCommand("iteminfo", (args, token) =>
         {
             string query = args.Trim();
@@ -379,8 +405,21 @@ public sealed class ItemsShard : IShard
                 return true;
             }
         });
+        ctx.RegisterConsoleCommand("recipes", (args, token) =>
+        {
+            string filter = args.Trim();
+            string[] ids = recipes.RecipeIds
+                .Where(id => filter.Length == 0 ||
+                    id.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                .Take(30).ToArray();
+            ctx.Log($"Recipes ({recipes.RecipeCount} enabled): " +
+                (ids.Length == 0 ? "no matches" : string.Join(", ", ids)) +
+                (ids.Length == 30 ? " … (showing first 30)" : ""));
+            return Task.CompletedTask;
+        });
         ctx.Log($"Registered {catalog.Count} vanilla Java {catalog.MinecraftVersion} " +
-            $"item definitions; YAML overrides: {definitions}.");
+            $"item definitions and {recipes.RecipeCount} YAML recipes; " +
+            $"item overrides: {definitions}; recipe overrides: {recipeDirectory}.");
         return Task.CompletedTask;
     }
 
