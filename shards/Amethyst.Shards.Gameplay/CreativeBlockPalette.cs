@@ -29,6 +29,7 @@ public static class CreativeBlockPalette
         [17] = 27220, // minecraft:polished_tuff
         [21] = 27632, // minecraft:tuff_bricks
         [53] = 33565, // minecraft:dripstone_block
+        [54] = 9, // minecraft:grass_block (snowy=false)
         [55] = 10, // minecraft:dirt
         [56] = 11, // minecraft:coarse_dirt
         [58] = 33771, // minecraft:rooted_dirt
@@ -105,6 +106,7 @@ public static class CreativeBlockPalette
         [393] = 4924, // minecraft:mossy_cobblestone
         [394] = 4925, // minecraft:obsidian
         [399] = 16687, // minecraft:purpur_block
+        [405] = 6866, // minecraft:crafting_table (placement only; GUI not implemented)
         [412] = 8598, // minecraft:snow_block
         [415] = 8616, // minecraft:clay
         [433] = 8667, // minecraft:netherrack
