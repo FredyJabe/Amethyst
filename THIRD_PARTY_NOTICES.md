@@ -13,6 +13,11 @@ The Amethyst server implementation is independently written in C# / .NET.
   a version-pinned file from `ezchr/go-mcjava` at runtime or during setup.
   The fetched binary is intentionally excluded from Git; no upstream binary
   data is checked in.
+- **Creative block item/state mappings:** the version-pinned, curated simple-block
+  subset in `CreativeBlockPalette.cs` was generated from
+  [RosegoldMC/minecraft-data.cr](https://github.com/RosegoldMC/minecraft-data.cr)
+  `data/26.3/items.json` and `data/26.3/blocks.json`. The source dataset
+  and its upstream notices should be consulted when updating protocol versions.
 - **YamlDotNet:** external NuGet dependency; see
   [YamlDotNet](https://github.com/aaubry/YamlDotNet) for its license.
 
