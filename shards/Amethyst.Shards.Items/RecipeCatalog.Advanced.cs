@@ -55,17 +55,46 @@ public sealed partial class RecipeCatalog
         string[] fields = kind switch
         {
             RecipeKind.Stonecutting =>
-                ["Type", "Enabled", "Priority", "Ingredient", "Result", "Group"],
+                ["Type", "Enabled", "Priority", "ShowNotification", "show_notification",
+                 "Ingredient", "Result", "Group"],
             RecipeKind.SmithingTransform or RecipeKind.SmithingTrim =>
-                ["Type", "Enabled", "Priority", "Template", "Base", "Addition", "Result"],
+                ["Type", "Enabled", "Priority", "ShowNotification", "show_notification",
+                 "Template", "Base", "Addition", "Result"],
             RecipeKind.Brewing =>
                 ["Type", "Enabled", "Priority", "Input", "Reagent", "Output", "Result"],
             RecipeKind.CraftingTransmute =>
-                ["Type", "Enabled", "Priority", "Input", "Material", "Result", "Category", "Group"],
-            RecipeKind.CraftingDye or RecipeKind.CraftingImbue or RecipeKind.CraftingDecoratedPot =>
-                ["Type", "Enabled", "Priority", "Ingredient", "Ingredients", "Input",
-                 "Material", "Result", "Category", "Group"],
-            _ => ["Type", "Enabled", "Priority", "Category", "Group"]
+                ["Type", "Enabled", "Priority", "ShowNotification", "show_notification",
+                 "Input", "Material", "Result", "Category", "Group",
+                 "MaterialCount", "material_count", "AddMaterialCountToResult",
+                 "add_material_count_to_result"],
+            RecipeKind.CraftingDye =>
+                ["Type", "Enabled", "Priority", "ShowNotification", "show_notification",
+                 "Target", "Dye", "Result", "Category", "Group"],
+            RecipeKind.CraftingImbue =>
+                ["Type", "Enabled", "Priority", "ShowNotification", "show_notification",
+                 "Source", "Material", "Result", "Category", "Group"],
+            RecipeKind.CraftingDecoratedPot =>
+                ["Type", "Enabled", "Priority", "Back", "Left", "Right", "Front", "Result"],
+            RecipeKind.SpecialBannerDuplicate =>
+                ["Type", "Enabled", "Priority", "Banner", "Result"],
+            RecipeKind.SpecialBookCloning =>
+                ["Type", "Enabled", "Priority", "Source", "Material",
+                 "AllowedGenerations", "allowed_generations", "Result"],
+            RecipeKind.SpecialFireworkRocket =>
+                ["Type", "Enabled", "Priority", "Shell", "Fuel", "Star", "Result"],
+            RecipeKind.SpecialFireworkStar =>
+                ["Type", "Enabled", "Priority", "Trail", "Twinkle", "Fuel",
+                 "Dye", "Shapes", "Result"],
+            RecipeKind.SpecialFireworkStarFade =>
+                ["Type", "Enabled", "Priority", "Target", "Dye", "Result"],
+            RecipeKind.SpecialMapExtending =>
+                ["Type", "Enabled", "Priority", "Map", "Material", "Result"],
+            RecipeKind.SpecialRepairItem =>
+                ["Type", "Enabled", "Priority", "Ingredient", "Target",
+                 "Material", "Result"],
+            RecipeKind.SpecialShieldDecoration =>
+                ["Type", "Enabled", "Priority", "Banner", "Target", "Result"],
+            _ => ["Type", "Enabled", "Priority"]
         };
         // Validate the type-specific shape, rather than silently accepting
         // misspelled or inapplicable keys from a recipe file.
@@ -134,12 +163,19 @@ public sealed partial class RecipeCatalog
             output = ReadOutput(rawResult, file, id);
         }
 
+        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in props)
+        {
+            if (key is "Type" or "Priority" or "Enabled") continue;
+            parameters[key] = JsonSerializer.Serialize(YamlValue(value, file, id));
+        }
+
         return new Recipe
         {
             Id = id, Kind = kind, Result = output, Priority = priority,
             CookingTicks = 0, Inputs = inputs, IsExecutable = executable,
             InputPotion = inputPotion, ReagentPotion = reagentPotion,
-            ResultComponents = output.Components
+            ResultComponents = output.Components, Parameters = parameters
         };
     }
 
