@@ -556,6 +556,174 @@ public sealed class MinecraftServer
         await BlockInteractionProtocol.SendAckAsync(player.Connection, action.Sequence, ct);
     }
 
+    private async Task OpenStationAsync(ConnectedPlayer player,
+        StationPos pos, StationKind kind, CancellationToken ct)
+    {
+        if (_stations.GetMenu(player.PlayerUuid) is not null)
+            await CloseStationAsync(player, false, ct);
+        StationMenu menu = _stations.Open(player.PlayerUuid, pos, kind);
+        await StationProtocol.OpenAsync(player.Connection, menu.WindowId,
+            StationProtocol.MenuType(kind), StationProtocol.Title(kind), ct);
+        await SendStationContentAsync(player, ct);
+    }
+
+    private async Task SendStationContentAsync(ConnectedPlayer player, CancellationToken ct)
+    {
+        var content = _stations.Content(player.PlayerUuid, player.Inventory);
+        if (content is not { } menu) return;
+        await StationProtocol.SendContentAsync(player.Connection, menu.WindowId,
+            menu.Revision, menu.Slots, menu.Cursor, ct);
+        if (_stations.GetMenu(player.PlayerUuid)?.Kind != StationKind.Crafting)
+        {
+            var data = _stations.Data(player.PlayerUuid);
+            await StationProtocol.SendDataAsync(player.Connection, menu.WindowId, 0, data.Burn, ct);
+            await StationProtocol.SendDataAsync(player.Connection, menu.WindowId, 1, data.TotalBurn, ct);
+            await StationProtocol.SendDataAsync(player.Connection, menu.WindowId, 2, data.Progress, ct);
+            await StationProtocol.SendDataAsync(player.Connection, menu.WindowId, 3, data.TotalProgress, ct);
+        }
+    }
+
+    private async Task HandleStationClickAsync(ConnectedPlayer player,
+        InventoryClick click, CancellationToken ct)
+    {
+        StationMenu? active = _stations.GetMenu(player.PlayerUuid);
+        if (active is null || click.Window != active.WindowId)
+        {
+            // A forged/stale window may not mutate either inventory or a
+            // removed block entity. Resynchronize the normal inventory.
+            if (click.Window != 0)
+                await StationProtocol.CloseAsync(player.Connection, click.Window, ct);
+            await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+            return;
+        }
+        bool changed = _stations.Click(player.PlayerUuid, player.Inventory, click);
+        // Even rejected predictions need an authoritative menu resync.
+        await SendStationContentAsync(player, ct);
+        if (!changed || active.Kind == StationKind.Crafting) return;
+        foreach (ConnectedPlayer observer in _players.Snapshot().Where(p =>
+            p.Ready && p.ConnectionId != player.ConnectionId &&
+            _stations.GetMenu(p.PlayerUuid)?.Position == active.Position))
+        {
+            try { await SendStationContentAsync(observer, ct); }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private void ReturnCraftingInputs(ConnectedPlayer player, ItemStack[] stacks)
+    {
+        PlayerPose pose = player.Pose;
+        foreach (ItemStack item in stacks)
+        {
+            int inserted = player.Inventory.Give(item.ItemId, item.Count);
+            int left = item.Count - inserted;
+            if (left > 0 && (_groundItems is null ||
+                !_groundItems.TrySpawn(item.ItemId, left, pose.X, pose.Y + 0.2,
+                    pose.Z, out _)))
+                Console.WriteLine($"[station] Unable to return {left} of item {item.ItemId} " +
+                    $"for {player.Username}");
+        }
+    }
+
+    private void CloseStation(ConnectedPlayer player)
+    {
+        ItemStack[] returned = _stations.Close(player.PlayerUuid);
+        ReturnCraftingInputs(player, returned);
+    }
+
+    private async Task CloseStationAsync(ConnectedPlayer player,
+        bool sendClose, CancellationToken ct)
+    {
+        StationMenu? active = _stations.GetMenu(player.PlayerUuid);
+        if (active is null) return;
+        CloseStation(player);
+        if (sendClose)
+            await StationProtocol.CloseAsync(player.Connection, active.WindowId, ct);
+        await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+    }
+
+    private async Task BreakStationAsync(int x, int y, int z, CancellationToken ct)
+    {
+        StationPos pos = new(x, y, z);
+        var (contents, viewers) = _stations.Break(pos);
+        foreach (ItemStack item in contents)
+        {
+            if (_groundItems is null || !_groundItems.TrySpawn(item.ItemId,
+                item.Count, x + 0.5, y + 0.4, z + 0.5, out _))
+                Console.WriteLine($"[station] Unable to drop station contents {item.ItemId}");
+        }
+        foreach (Guid id in viewers)
+        {
+            ConnectedPlayer? player = _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == id);
+            if (player is null) continue;
+            try { await CloseStationAsync(player, true, ct); }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task RunStationTicksAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
+        while (await timer.WaitForNextTickAsync(ct))
+        {
+            StationPos[] changed = _stations.Tick();
+            if (changed.Length == 0) continue;
+            ConnectedPlayer[] players = _players.Snapshot().Where(p => p.Ready).ToArray();
+            foreach (StationPos pos in changed)
+            {
+                StationState? station = _stations.SnapshotState(pos);
+                if (station is null) continue;
+                // Keep block's actual lit property in sync with burn state.
+                // The Java 26.3 registry stores lit=true before lit=false
+                // for each of the four facing variants.
+                int start = station.Kind switch
+                {
+                    StationKind.Furnace => 6883,
+                    StationKind.Smoker => 24111,
+                    StationKind.BlastFurnace => 24119,
+                    _ => -1
+                };
+                if (start >= 0 && _blocks is not null)
+                {
+                    ushort current = _blocks.GetBlockState(pos.X, pos.Y, pos.Z);
+                    if (WorkstationManager.FromBlockState(current) == station.Kind)
+                    {
+                        int desired = start + ((current - start) / 2) * 2 +
+                            (station.BurnRemaining > 0 ? 0 : 1);
+                        if (current != desired &&
+                            _blocks.TrySetBlockState(pos.X, pos.Y, pos.Z,
+                                (ushort)desired, out _))
+                        {
+                            int chunkX = (int)Math.Floor(pos.X / 16.0);
+                            int chunkZ = (int)Math.Floor(pos.Z / 16.0);
+                            foreach (ConnectedPlayer viewer in players)
+                            {
+                                try
+                                {
+                                    if (viewer.View is IShardChunkSubscriptions chunks &&
+                                        !await chunks.HasLoadedChunkAsync(chunkX, chunkZ, ct)) continue;
+                                    await BlockInteractionProtocol.SendBlockUpdateAsync(
+                                        viewer.Connection, pos.X, pos.Y, pos.Z,
+                                        (ushort)desired, ct);
+                                }
+                                catch (IOException) { }
+                                catch (ObjectDisposedException) { }
+                            }
+                        }
+                    }
+                }
+                foreach (ConnectedPlayer player in players.Where(p =>
+                    _stations.GetMenu(p.PlayerUuid)?.Position == pos))
+                {
+                    try { await SendStationContentAsync(player, ct); }
+                    catch (IOException) { }
+                    catch (ObjectDisposedException) { }
+                }
+            }
+        }
+    }
+
     internal async Task HandleBlockUseAsync(ConnectedPlayer player,
         BlockUseOn hit, CancellationToken ct)
     {
