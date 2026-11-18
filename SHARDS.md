@@ -200,11 +200,14 @@ logic and merge behavior remain future work. Very large numbers of entities
 are capped at 8192 per world; excess drop creations are logged.
 Do not expect complete vanilla-equivalent Survival progression yet.
 
-Creative can place its palette of simple blocks, plus axis-aware wooden logs
-and persistent leaves. Survival can place those blocks only if present in its
-selected hotbar stack; placing consumes one item. Multi-block structures,
-interactable blocks, containers, furniture, slab/stair shape selection, fluids,
-falling block physics and redstone behavior remain unsupported.
+Creative can place its palette of simple blocks, including grass blocks
+(`snowy=false`) and crafting tables, plus axis-aware wooden logs and
+persistent leaves. Survival can place these blocks only when present in its
+selected hotbar stack; placing consumes one item. Crafting tables can be placed,
+broken and picked up as items, but **their crafting UI and recipes are not
+implemented yet**. Multi-block structures, interactive container menus,
+furniture, slab/stair shape selection, fluids, falling block physics and
+redstone behavior remain unsupported.
 
 ### Inventory
 
