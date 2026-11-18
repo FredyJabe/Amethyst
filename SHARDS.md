@@ -201,13 +201,50 @@ are capped at 8192 per world; excess drop creations are logged.
 Do not expect complete vanilla-equivalent Survival progression yet.
 
 Creative can place its palette of simple blocks, including grass blocks
-(`snowy=false`) and crafting tables, plus axis-aware wooden logs and
-persistent leaves. Survival can place these blocks only when present in its
-selected hotbar stack; placing consumes one item. Crafting tables can be placed,
-broken and picked up as items, but **their crafting UI and recipes are not
-implemented yet**. Multi-block structures, interactive container menus,
-furniture, slab/stair shape selection, fluids, falling block physics and
-redstone behavior remain unsupported.
+(`snowy=false`), crafting tables and the furnace family, plus axis-aware
+wooden logs and persistent leaves. Furnaces, smokers, and blast furnaces use
+the placing player's horizontal facing. Survival can place these blocks only
+when present in its selected hotbar stack; placing consumes one item.
+Multi-block structures, unrelated container menus, furniture, slab/stair
+shape selection, fluids, falling block physics and redstone remain unsupported.
+
+### Workstations (first functional milestone)
+
+Right-click these blocks to open a **real Minecraft Java 26.3 window**:
+
+- **Crafting table (menu ID 12):** 3×3 grid, server-calculated output,
+  consuming ingredients on pickup, and returning unconsumed ingredients on
+  menu close or logout. Includes an initial subset of shaped recipes:
+  planks from common logs, sticks, crafting tables, chests, furnaces,
+  torches, smokers, blast furnaces, wooden/stone/iron pickaxes, axes and
+  shovels. The client recipe book is not populated yet; manually place
+  ingredients on the grid.
+- **Furnace (menu ID 14):** Shared persistent input, fuel and output slots.
+  Supports a conservative vanilla subset of ore smelting (iron/gold/copper),
+  sand→glass, cobblestone→stone, stone→smooth stone, charcoal from logs and
+  simple cooking recipes. One cooking operation normally takes 200 server
+  ticks (10 seconds).
+- **Smoker (menu ID 22):** Food recipes only, twice as fast (100 ticks).
+- **Blast furnace (menu ID 10):** Ore and raw-metal recipes only, twice as
+  fast (100 ticks).
+
+Furnaces consume fuel (coal/charcoal, logs, planks and sticks in this first
+version), display burn/progress bars, and toggle their world block's lit state.
+Cooking continues while menus are closed and the items/progress are persisted
+atomically under
+`<shardsDataDirectory>/gameplay/stations/<world-path-hash>.bin`.
+Multiple players may open the same station. Breaking a station drops its
+contents as ground items and closes any viewers' menus.
+
+**Gameplay constraints:** The server validates the window ID, state revision,
+slot transaction, current ingredients and output instead of trusting client
+item claims. Basic left/right click, inventory hotbar swaps and shift transfers
+are supported; advanced drag, recipe-book autoplace, number-of-recipes
+completeness, tool durability, XP, fuel remainders, NBT/component recipes,
+and other job-site blocks (anvils, smithing tables, brewing stands,
+stonecutters, etc.) are not implemented yet. This is intentionally not the
+full vanilla recipe set. Crafting's 3×3 inputs are temporary and returned
+on close; furnace storage is tied to the block position.
 
 ### Inventory
 
