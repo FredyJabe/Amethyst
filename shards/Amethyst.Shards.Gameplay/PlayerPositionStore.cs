@@ -61,13 +61,10 @@ public sealed class PlayerPositionStore
                 return true;
             }
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or InvalidDataException
+            or ArgumentException or UnauthorizedAccessException)
         {
-            Console.WriteLine($"[position] Ignoring unreadable save for {playerId}: {ex.Message}");
-        }
-        catch (ArgumentException ex)
-        {
-            Console.WriteLine($"[position] Ignoring invalid save for {playerId}: {ex.Message}");
+            Console.WriteLine($"[position] Ignoring invalid or unreadable save for {playerId}: {ex.Message}");
         }
         return false;
     }
