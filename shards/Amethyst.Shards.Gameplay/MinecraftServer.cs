@@ -326,7 +326,7 @@ public sealed class MinecraftServer
         return dx * dx + dy * dy + dz * dz <= 36; // Creative interaction range
     }
 
-    private async Task HandleBlockActionAsync(ConnectedPlayer player,
+    internal async Task HandleBlockActionAsync(ConnectedPlayer player,
         PlayerBlockAction action, CancellationToken ct)
     {
         // Statuses 3/4 are item drops; no item entities exist yet, so explicitly
@@ -375,7 +375,7 @@ public sealed class MinecraftServer
         }
         if (changed)
         {
-            await BroadcastBlockChangeAsync(action.X, action.Y, action.Z, 0, ct);
+            await BroadcastBlockChangeAsync(player, action.X, action.Y, action.Z, 0, ct);
             if (survival)
             {
                 MiningRules.BlockInfo info = MiningRules.ForState(state);
@@ -386,9 +386,15 @@ public sealed class MinecraftServer
                 }
             }
         }
-        else if (valid)
+        else if (valid && action.Status == 2)
+        {
+            // A rejected STOP must reconcile the client's predicted air
+            // before its prediction sequence is acknowledged. A normal START
+            // only begins cracking; sending a block correction there could
+            // overwrite a later predicted break when the client settles.
             await BlockInteractionProtocol.SendBlockUpdateAsync(player.Connection,
                 action.X, action.Y, action.Z, state, ct);
+        }
         // Acknowledge after authoritative changes or corrections.
         await BlockInteractionProtocol.SendAckAsync(player.Connection, action.Sequence, ct);
     }
@@ -419,7 +425,7 @@ public sealed class MinecraftServer
         {
             // The world mutation is durable before inventory consumption.
             // Only Survival consumes items; Creative has infinite placement.
-            await BroadcastBlockChangeAsync(x, y, z, selected, ct);
+            await BroadcastBlockChangeAsync(player, x, y, z, selected, ct);
             if (player.Inventory.ConsumeHeld(player.GameMode == PlayerGameMode.Creative, held.ItemId))
                 await InventoryProtocol.SendSlotAsync(player.Connection, player.Inventory,
                     player.Inventory.SelectedSlot, ct);
@@ -439,11 +445,16 @@ public sealed class MinecraftServer
         await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
     }
 
-    private async Task BroadcastBlockChangeAsync(int x, int y, int z,
-        ushort state, CancellationToken ct)
+    private async Task BroadcastBlockChangeAsync(ConnectedPlayer actor,
+        int x, int y, int z, ushort state, CancellationToken ct)
     {
+        // Always send the actor the confirmed state BEFORE the sequence ACK.
+        // A chunk subscription may still be pending during Play startup, but
+        // that must never allow the ACK to restore a predicted broken block.
+        await BlockInteractionProtocol.SendBlockUpdateAsync(actor.Connection, x, y, z, state, ct);
         int chunkX = (int)Math.Floor(x / 16.0), chunkZ = (int)Math.Floor(z / 16.0);
-        foreach (ConnectedPlayer viewer in _players.Snapshot().Where(p => p.Ready))
+        foreach (ConnectedPlayer viewer in _players.Snapshot().Where(p =>
+                     p.Ready && p.ConnectionId != actor.ConnectionId))
         {
             try
             {
