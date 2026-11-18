@@ -42,7 +42,12 @@ public readonly record struct ShardBrewingMatch(
 /// algorithms are retained in the catalog, but cannot be executed by the
 /// current component-free Gameplay workstation implementation.</summary>
 public readonly record struct ShardRecipeDescriptor(
-    string Id, ShardRecipeType Type, bool IsExecutable);
+    string Id, ShardRecipeType Type, bool IsExecutable)
+{
+    /// <summary>Serializer-specific YAML properties as JSON values.
+    /// Specialized Shards can inspect them without losing recipe metadata.</summary>
+    public IReadOnlyDictionary<string, string>? Parameters { get; init; }
+}
 
 public interface IShardRecipeRegistry
 {
