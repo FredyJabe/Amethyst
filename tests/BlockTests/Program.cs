@@ -1207,6 +1207,38 @@ try
     Check(stations.Close(playerId).Length == 0,
         "Closing furnace leaves shared block inventory in place");
 
+    // A user-defined YAML cooking recipe must run through the real
+    // WorkstationManager, not only succeed in direct catalog lookup.
+    string furnaceRecipeOverrides = Path.Combine(stationsRoot, "recipe-definitions");
+    Directory.CreateDirectory(furnaceRecipeOverrides);
+    File.WriteAllText(Path.Combine(furnaceRecipeOverrides, "custom.yml"), """
+        smelt_dirt_to_diamond:
+          Type: Furnace
+          Ingredient: dirt
+          Result: { Id: diamond, Amount: 1 }
+          CookingTime: 37
+        """);
+    var stationRecipes = new RecipeCatalog(itemsCatalog, recipesFilePath,
+        furnaceRecipeOverrides);
+    var customFurnace = new WorkstationManager(null, settings.WorldPath,
+        stationWorld, itemsCatalog, stationRecipes);
+    var customPlayer = new PlayerInventory(null, Guid.NewGuid(), itemsCatalog);
+    var customMenu = customFurnace.Open(Guid.NewGuid(),
+        new StationPos(6, 81, 1), StationKind.Furnace);
+    Check(customPlayer.TryCreativeSet(36, 55, 1, true) &&
+        customPlayer.TryCreativeSet(37, 1010, 1, true),
+        "Prepare YAML-defined furnace recipe ingredients");
+    Check(customFurnace.Click(customMenu.PlayerId, customPlayer,
+        new InventoryClick(customMenu.WindowId, 0, 30, 0, 1)) &&
+        customFurnace.Click(customMenu.PlayerId, customPlayer,
+        new InventoryClick(customMenu.WindowId, 1, 31, 0, 1)),
+        "Furnace accepts custom YAML ingredient and conventional fuel");
+    for (int tick = 0; tick < 37; tick++) customFurnace.Tick();
+    Check(itemsCatalog.TryGetByIdentifier("diamond", out var customDiamond) &&
+        customFurnace.SnapshotStation(customMenu.Position)[2] ==
+        new ItemStack(customDiamond.ProtocolId, 1),
+        "Gameplay furnace actually smelts configured dirt-to-diamond recipe in 37 ticks");
+
     foreach (var (kind, rawId, resultId, pos) in new[]
     {
         (StationKind.Smoker, 1260, 1261, new StationPos(3, 81, 1)),
