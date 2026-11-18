@@ -9,9 +9,17 @@ namespace Amethyst.BuiltinShards;
 /// <summary>Immutable recipe registry built from the Items Shard's version-pinned
 /// vanilla item catalog and administrator YAML overrides. Recipe IDs are not
 /// protocol IDs and do not imply recipe-book synchronization to the client.</summary>
-public sealed class RecipeCatalog : IShardRecipeRegistry
+public sealed partial class RecipeCatalog : IShardRecipeRegistry
 {
-    private enum RecipeKind { Shaped, Shapeless, Furnace, Smoker, BlastFurnace }
+    private enum RecipeKind
+    {
+        Shaped, Shapeless, Furnace, Smoker, BlastFurnace, Campfire,
+        Stonecutting, SmithingTransform, SmithingTrim, Brewing,
+        CraftingTransmute, CraftingDye, CraftingImbue, CraftingDecoratedPot,
+        SpecialBannerDuplicate, SpecialBookCloning, SpecialFireworkRocket,
+        SpecialFireworkStar, SpecialFireworkStarFade, SpecialMapExtending,
+        SpecialRepairItem, SpecialShieldDecoration
+    }
 
     private sealed class Recipe
     {
@@ -22,6 +30,10 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
         public required int CookingTicks { get; init; }
         public int Width { get; init; }
         public int Height { get; init; }
+        public bool IsExecutable { get; init; } = true;
+        public string? InputPotion { get; init; }
+        public string? ReagentPotion { get; init; }
+        public IReadOnlyDictionary<string, string>? ResultComponents { get; init; }
         // Shaped: row-major cells, empty slots are empty sets.
         // Shapeless: one set of acceptable items per single-unit ingredient.
         // Cooking: exactly one set of acceptable input materials.
@@ -31,6 +43,11 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
     private readonly IShardItemRegistry _items;
     private readonly Recipe[] _crafting;
     private readonly Recipe[] _cooking;
+    private readonly Recipe[] _stonecutting;
+    private readonly Recipe[] _smithing;
+    private readonly Recipe[] _brewing;
+    private readonly IReadOnlyList<ShardRecipeDescriptor> _definitions;
+    public IReadOnlyList<ShardRecipeDescriptor> Definitions => _definitions;
     private readonly IReadOnlyList<string> _ids;
     public int RecipeCount => _ids.Count;
     public IReadOnlyList<string> RecipeIds => _ids;
@@ -75,7 +92,14 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
             .ThenBy(r => r.Id, StringComparer.OrdinalIgnoreCase).ToArray();
         _crafting = sorted.Where(r => r.Kind is RecipeKind.Shaped or RecipeKind.Shapeless).ToArray();
         _cooking = sorted.Where(r => r.Kind is RecipeKind.Furnace or RecipeKind.Smoker
-            or RecipeKind.BlastFurnace).ToArray();
+            or RecipeKind.BlastFurnace or RecipeKind.Campfire).ToArray();
+        _stonecutting = sorted.Where(r => r.Kind == RecipeKind.Stonecutting).ToArray();
+        _smithing = sorted.Where(r => r.Kind is RecipeKind.SmithingTransform
+            or RecipeKind.SmithingTrim).ToArray();
+        _brewing = sorted.Where(r => r.Kind == RecipeKind.Brewing).ToArray();
+        _definitions = new ReadOnlyCollection<ShardRecipeDescriptor>(
+            sorted.Select(r => new ShardRecipeDescriptor(r.Id,
+                (ShardRecipeType)r.Kind, r.IsExecutable)).ToArray());
         _ids = new ReadOnlyCollection<string>(sorted.Select(x => x.Id).ToArray());
     }
 
@@ -107,6 +131,7 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
             ShardCookingStation.Furnace => RecipeKind.Furnace,
             ShardCookingStation.Smoker => RecipeKind.Smoker,
             ShardCookingStation.BlastFurnace => RecipeKind.BlastFurnace,
+            ShardCookingStation.Campfire => RecipeKind.Campfire,
             _ => throw new ArgumentOutOfRangeException(nameof(station))
         };
         foreach (Recipe recipe in _cooking)
@@ -180,14 +205,20 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
     {
         var props = Fields(node, file, id,
             "Type", "Pattern", "Key", "Ingredients", "Ingredient", "Result",
-            "CookingTime", "Enabled", "Priority");
+            "CookingTime", "Enabled", "Priority",
+            "Input", "Output", "Template", "Base", "Addition", "Reagent",
+            "Material", "Category", "Group", "Experience", "Components");
         if (props.TryGetValue("Enabled", out var enableNode) &&
             !Boolean(enableNode, file, id)) return null;
 
         if (!props.TryGetValue("Type", out var kindNode) ||
-            !Enum.TryParse(Scalar(kindNode, file, id), ignoreCase: true, out RecipeKind kind) ||
-            !Enum.IsDefined(kind))
-            throw Invalid(file, id, "Type must be Shaped, Shapeless, Furnace, Smoker or BlastFurnace.");
+            !TryParseKind(Scalar(kindNode, file, id), out RecipeKind kind))
+            throw Invalid(file, id, "Unknown Minecraft Java 26.3 recipe type.");
+
+        if (kind is not (RecipeKind.Shaped or RecipeKind.Shapeless or
+            RecipeKind.Furnace or RecipeKind.Smoker or RecipeKind.BlastFurnace or
+            RecipeKind.Campfire))
+            return ParseAdvancedRecipe(id, node, file, kind, props, defaultPriority);
 
         if (!props.TryGetValue("Result", out var resultNode) ||
             resultNode is not YamlMappingNode resultMap)
@@ -265,7 +296,8 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
             inputs = [IngredientSet(inputNode, file, id)];
             cooking = props.TryGetValue("CookingTime", out var timeNode)
                 ? Integer(timeNode, file, id)
-                : kind == RecipeKind.Furnace ? 200 : 100;
+                : kind == RecipeKind.Campfire ? 600 :
+                  kind == RecipeKind.Furnace ? 200 : 100;
             if (cooking is < 1 or > 32767)
                 throw Invalid(file, id, "CookingTime must be 1–32767 ticks.");
         }
