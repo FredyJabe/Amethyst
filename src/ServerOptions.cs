@@ -11,6 +11,9 @@ public sealed class ServerOptions
     public int Port { get; set; } = 25565;
     public string Motd { get; set; } = "Amethyst | Java 26.3";
     public int MaxPlayers { get; set; } = 20;
+    // Applied when a player joins. In-game /gamemode changes are session-only.
+    // Stored as a string so networking Core does not depend on the Gameplay Shard.
+    public string DefaultGameMode { get; set; } = "creative";
     public bool OnlineMode { get; set; } = true;
     public bool ChatEnabled { get; set; } = true;
     public int ChatMaxLength { get; set; } = 256;
@@ -95,6 +98,11 @@ public sealed class ServerOptions
             throw new ArgumentException("bindAddress must be a numeric IPv4 or IPv6 address.");
         if (options.Port is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(options.Port));
         if (options.MaxPlayers is < 1 or > 10000) throw new ArgumentOutOfRangeException(nameof(options.MaxPlayers));
+        // Validate and canonicalize the YAML mode before it reaches the Gameplay Shard.
+        string? defaultMode = options.DefaultGameMode?.Trim().ToLowerInvariant();
+        if (defaultMode is not ("survival" or "creative" or "adventure" or "spectator"))
+            throw new ArgumentException("defaultGameMode must be survival, creative, adventure or spectator.");
+        options.DefaultGameMode = defaultMode;
         if (options.ChatMaxLength is < 1 or > 256) throw new ArgumentOutOfRangeException(nameof(options.ChatMaxLength));
         if (options.ChatCooldownMilliseconds is < 0 or > 5000)
             throw new ArgumentOutOfRangeException(nameof(options.ChatCooldownMilliseconds));
