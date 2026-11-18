@@ -19,12 +19,14 @@ public sealed class MinecraftServer
     private readonly OperatorStore _operators;
     private readonly GroundItemStore? _groundItems;
     private readonly PlayerPositionStore _positions;
+    private readonly WorkstationManager _stations;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private CancellationTokenSource? _clockLifetime;
     private Task? _clockSync;
     private Task? _itemsSync;
     private Task? _positionSync;
+    private Task? _stationSync;
 
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null)
@@ -38,6 +40,7 @@ public sealed class MinecraftServer
         _operators = new OperatorStore(options.OperatorsFile);
         _clock = new WorldClock(options);
         _positions = new PlayerPositionStore(inventoryDirectory, options.WorldPath, world);
+        _stations = new WorkstationManager(inventoryDirectory, options.WorldPath, world);
         if (_blocks is not null)
             _groundItems = new GroundItemStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId);
@@ -47,6 +50,7 @@ public sealed class MinecraftServer
         .Select(p => new ShardPlayerSummary(p.Username, p.PlayerUuid)).ToArray();
 
     internal GroundItem[] GroundItemsForTests => _groundItems?.Snapshot() ?? [];
+    internal WorkstationManager StationsForTests => _stations;
     internal ConnectedPlayer? GetPlayerForTests(Guid id) =>
         _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == id);
 
@@ -59,6 +63,8 @@ public sealed class MinecraftServer
             _itemsSync = RunGroundItemsAsync(_clockLifetime.Token);
         if (_positions.Enabled)
             _positionSync = SavePositionsPeriodicallyAsync(_clockLifetime.Token);
+        if (_blocks is not null)
+            _stationSync = RunStationTicksAsync(_clockLifetime.Token);
         Console.WriteLine($"[gameplay] Enabled: chat={_options.ChatEnabled}, " +
             $"operators={_operators.Snapshot().Length}, viewDistance={_world.ViewDistance}");
     }
@@ -76,10 +82,14 @@ public sealed class MinecraftServer
                 try { await _itemsSync; } catch (OperationCanceledException) { }
             if (_positionSync is not null)
                 try { await _positionSync; } catch (OperationCanceledException) { }
+            if (_stationSync is not null)
+                try { await _stationSync; } catch (OperationCanceledException) { }
+            _stations.Save();
             _groundItems?.Save();
             _itemViews.Clear();
             _itemsSync = null;
             _positionSync = null;
+            _stationSync = null;
             _clockLifetime.Dispose();
             _clockLifetime = null;
             _clockSync = null;
@@ -135,6 +145,7 @@ public sealed class MinecraftServer
         // The Play receive loop has finished by this point. Save only players
         // who completed login; rejected/half-loaded sessions must not overwrite
         // a valid previous save with the initial spawn placeholder.
+        CloseStation(player);
         TrySavePosition(player);
         _players.Remove(player.ConnectionId);
         await NotifyDepartureAsync(player);
@@ -249,6 +260,14 @@ public sealed class MinecraftServer
                         }
                         var current = new PlayerPose(x, y, z, yaw, pitch, (flags & 1) != 0);
                         player.SetPose(current);
+                        if (_stations.GetMenu(player.PlayerUuid) is StationMenu active)
+                        {
+                            double sx = active.Position.X + 0.5 - current.X;
+                            double sy = active.Position.Y + 0.5 - (current.Y + 1.62);
+                            double sz = active.Position.Z + 0.5 - current.Z;
+                            if (sx * sx + sy * sy + sz * sz > 64)
+                                await CloseStationAsync(player, true, lifetime.Token);
+                        }
                         await player.View.UpdateAsync(player.Connection, current, lifetime.Token);
                         if (player.Ready)
                             await BroadcastMovementAsync(player, old, current, lifetime.Token);
@@ -306,8 +325,13 @@ public sealed class MinecraftServer
                         InventoryClick click = InventoryProtocol.ReadClick(packet.Value);
                         if (player.Ready)
                         {
-                            player.Inventory.ApplyClick(click);
-                            await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
+                            if (_stations.GetMenu(player.PlayerUuid) is not null || click.Window != 0)
+                                await HandleStationClickAsync(player, click, lifetime.Token);
+                            else
+                            {
+                                player.Inventory.ApplyClick(click);
+                                await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
+                            }
                         }
                         break;
                     }
@@ -315,7 +339,10 @@ public sealed class MinecraftServer
                     {
                         int window = reader.ReadVarInt();
                         reader.RequireEnd();
-                        if (window == 0 && player.Ready)
+                        if (player.Ready && window != 0 &&
+                            _stations.GetMenu(player.PlayerUuid)?.WindowId == window)
+                            await CloseStationAsync(player, false, lifetime.Token);
+                        else if (window == 0 && player.Ready)
                             await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
                         break;
                     }
@@ -493,6 +520,8 @@ public sealed class MinecraftServer
 
         if (changed)
         {
+            if (WorkstationManager.FromBlockState(state) is not null)
+                await BreakStationAsync(action.X, action.Y, action.Z, ct);
             await BroadcastBlockChangeAsync(player, action.X, action.Y, action.Z, 0, ct);
             if (survival)
             {
@@ -530,6 +559,16 @@ public sealed class MinecraftServer
     internal async Task HandleBlockUseAsync(ConnectedPlayer player,
         BlockUseOn hit, CancellationToken ct)
     {
+        if (hit.ValidHit && hit.Hand == 0 &&
+            CanEditAt(player, hit.X, hit.Y, hit.Z) &&
+            WorkstationManager.FromBlockState(
+                _blocks!.GetBlockState(hit.X, hit.Y, hit.Z)) is StationKind station)
+        {
+            await OpenStationAsync(player,
+                new StationPos(hit.X, hit.Y, hit.Z), station, ct);
+            await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
+            return;
+        }
         var (x, y, z) = BlockInteractionProtocol.Adjacent(hit.X, hit.Y, hit.Z, hit.Face);
         ushort selected = 0;
         bool allowed = hit.ValidHit && hit.Hand == 0 &&
