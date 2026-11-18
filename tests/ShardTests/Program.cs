@@ -160,7 +160,7 @@ try
         {
             Components = new Dictionary<string, string>
             {
-                ["minecraft:potion_contents"] = "{\\"potion\\":\\"minecraft:water\\"}"
+                ["minecraft:potion_contents"] = """{"potion":"minecraft:water"}"""
             }
         }, new ShardRecipeStack(wart.ProtocolId, 1), out var brew) &&
         brew.RecipeId == "probe_brewing" &&
