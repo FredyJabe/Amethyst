@@ -182,12 +182,23 @@ opt-in diagnostic flag, not a general verbose-packet capture. The current mining
 *approximate*: it does not yet model enchantments, haste, mining fatigue,
 underwater penalties, status effects, tool durability, or all vanilla exceptions.
 
-The first Survival loot implementation collects a **conservative subset of
-simple drops directly into player inventory**. Items do not yet spawn as
-physical entities. Unsupported loot tables, silk touch, Fortune, stack drops,
-and full-block entity contents remain future work. If the inventory is full,
-unsupported extra drops are not spawned. Do not expect vanilla-equivalent
-Survival progression yet.
+The first Survival loot implementation spawns a **conservative subset of
+simple drops as real item entities**. Each item has a vanilla clientbound
+`add_entity` packet (type 72), item stack metadata, simple 20Hz gravity
+against full-block terrain, a 500ms pickup delay, collision-based collection,
+and a 5-minute expiry. Entities are visible to nearby players with loaded
+chunks and are removed (with the pickup animation) after collection. Items
+stay on the ground when a player's inventory is full, and partial pickups
+only remove the inserted quantity. Pickup updates the server-owned inventory
+and synchronizes it to the client. Loose items are persisted atomically in
+`<shardsDataDirectory>/gameplay/ground-items/<world-path-hash>.bin`; save
+that directory with the world and player inventory.
+
+Unsupported loot tables, Silk Touch, Fortune, multi-item stack drops,
+full-block entity contents, fluid/item physics, collision shapes, hopper
+logic and merge behavior remain future work. Very large numbers of entities
+are capped at 8192 per world; excess drop creations are logged.
+Do not expect complete vanilla-equivalent Survival progression yet.
 
 Creative can place its palette of simple blocks, plus axis-aware wooden logs
 and persistent leaves. Survival can place those blocks only if present in its
@@ -200,8 +211,8 @@ falling block physics and redstone behavior remain unsupported.
 Gameplay owns authoritative 36-slot main inventory + hotbar data (menu slots
 9–44), selected hotbar index, and cursor. Basic pickup/right-click, shift-click
 and number-key swaps are handled server-side; client changed-slot hashes are
-not trusted. Armor, crafting, offhand behavior, drop entities, drag distribution,
-and component-bearing/custom items are not yet implemented. Unsupported clicks
+not trusted. Armor, crafting, offhand behavior, player-initiated drop actions,
+drag distribution, and component-bearing/custom items are not yet implemented. Unsupported clicks
 are reconciled with the server's contents. Player inventory and cursor data are
 persisted atomically under `shards/data/gameplay/inventories/<uuid>.bin` (or
 the configured `shardsDataDirectory`). Back up this directory with the world.
@@ -228,7 +239,10 @@ dotnet run --project tests/ShardTests/ShardTests.csproj -c Release --no-build
 ```
 
 Manual acceptance: start with a backed-up world, connect two Java 26.3 clients,
-change into Survival using `/gamemode survival`, mine dirt by hand until a
-stack is collected, place it from the hotbar, and watch updates on both
-clients. Switch to Creative to test logs and instant breaks. Restart to verify
-world edits and inventory persistence.
+change into Survival using `/gamemode survival`, mine dirt by hand and
+watch a dropped item fall to the ground. Walk away and back toward it to
+collect it; verify that inventory only changes upon pickup and that the
+other client sees the same spawn and collection. Try a full inventory and
+reconnect after spawning an uncollected item. Place dirt from the hotbar,
+then switch to Creative to test logs and instant breaks. Restart to verify
+world edits, player inventory, and loose-item persistence.
