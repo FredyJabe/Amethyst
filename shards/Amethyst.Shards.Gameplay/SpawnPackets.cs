@@ -52,9 +52,11 @@ public static class SpawnPackets
         // Establish the client's camera position BEFORE the first chunk data.
         // Otherwise some clients build terrain render sections for their default
         // pre-teleport position and leave already-loaded chunks invisible.
-        await SendPositionAsync(channel, TeleportId, world.SpawnXPosition,
-            world.SpawnYPosition, world.SpawnZPosition, ct);
-        await player.View.UpdateAsync(channel, player.Pose, ct);
+        PlayerPose initial = player.Pose;
+        await SendPositionAsync(channel, TeleportId, initial.X, initial.Y,
+            initial.Z, initial.Yaw, initial.Pitch, ct);
+        // Stream the chunks for the restored location, not the world spawn.
+        await player.View.UpdateAsync(channel, initial, ct);
     }
 
     private static long HashSeed(long seed)
@@ -66,12 +68,17 @@ public static class SpawnPackets
     }
 
     public static Task SendPositionAsync(PacketChannel channel, int teleportId,
-        double x, double y, double z, CancellationToken ct) => channel.SendAsync(0x49, p =>
+        double x, double y, double z, CancellationToken ct) =>
+        SendPositionAsync(channel, teleportId, x, y, z, 0, 0, ct);
+
+    public static Task SendPositionAsync(PacketChannel channel, int teleportId,
+        double x, double y, double z, float yaw, float pitch, CancellationToken ct) =>
+        channel.SendAsync(0x49, p =>
         {
             p.WriteVarInt(teleportId);
             p.WriteDouble(x); p.WriteDouble(y); p.WriteDouble(z);
             p.WriteDouble(0); p.WriteDouble(0); p.WriteDouble(0);
-            p.WriteFloat(0); p.WriteFloat(0);
+            p.WriteFloat(yaw); p.WriteFloat(pitch);
             p.WriteInt32(0); // absolute position / rotation
         }, ct);
 }
