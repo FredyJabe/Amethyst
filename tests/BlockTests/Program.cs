@@ -350,6 +350,10 @@ try
         duplicate:
           Enabled: false
         """, "Duplicate recipe root IDs in one YAML file are rejected");
+    RecipeShouldFail("""
+        no_such_recipe:
+          Enabled: false
+        """, "Disabling an unknown recipe ID is rejected instead of silently ignored");
     string conflictDir = Path.Combine(customRecipesRoot, "duplicates");
     Directory.CreateDirectory(conflictDir);
     File.WriteAllText(Path.Combine(conflictDir, "a.yml"), "sticks:\n  Enabled: false\n");
@@ -1233,7 +1237,20 @@ try
         customFurnace.Click(customMenu.PlayerId, customPlayer,
         new InventoryClick(customMenu.WindowId, 1, 31, 0, 1)),
         "Furnace accepts custom YAML ingredient and conventional fuel");
-    for (int tick = 0; tick < 37; tick++) customFurnace.Tick();
+    for (int tick = 0; tick < 20; tick++) customFurnace.Tick();
+    Check(customFurnace.SnapshotState(customMenu.Position)?.CookProgress == 20,
+        "Custom cooking progresses using configured duration");
+    Check(customFurnace.Click(customMenu.PlayerId, customPlayer,
+        new InventoryClick(customMenu.WindowId, customMenu.Revision, 0, 0, 0)) &&
+        customFurnace.SnapshotState(customMenu.Position)?.CookProgress == 0,
+        "Removing a cooking ingredient resets progress rather than preserving elapsed ticks");
+    Check(customFurnace.Click(customMenu.PlayerId, customPlayer,
+        new InventoryClick(customMenu.WindowId, customMenu.Revision, 0, 0, 0)),
+        "The ingredient can be put back without minting items");
+    for (int tick = 0; tick < 36; tick++) customFurnace.Tick();
+    Check(customFurnace.SnapshotStation(customMenu.Position)[2].Count == 0,
+        "Restarted cooking cannot complete a custom recipe a tick too early");
+    customFurnace.Tick();
     Check(itemsCatalog.TryGetByIdentifier("diamond", out var customDiamond) &&
         customFurnace.SnapshotStation(customMenu.Position)[2] ==
         new ItemStack(customDiamond.ProtocolId, 1),
