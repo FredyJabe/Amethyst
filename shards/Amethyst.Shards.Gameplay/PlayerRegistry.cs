@@ -32,8 +32,8 @@ public sealed class ConnectedPlayer : IShardPlayer
         GameMode == PlayerGameMode.Creative &&
         Inventory.TryCreativeSet(slot, itemId, count, plainItem);
 
-    public bool TryGetSelectedBlock(out ushort blockState) =>
-        CreativeBlockPalette.TryGetState(Inventory.Held().ItemId, out blockState);
+    public bool TryGetSelectedBlock(int face, out ushort blockState) =>
+        CreativeBlockPalette.TryGetState(Inventory.Held().ItemId, face, out blockState);
 
     private (int X, int Y, int Z, ushort State, int HeldItem, long Started, int RequiredMs)? _mining;
     public void StartMining(int x, int y, int z, ushort state, int itemId, int requiredMs) =>
