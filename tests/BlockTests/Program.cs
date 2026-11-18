@@ -622,6 +622,7 @@ try
         Check(!store.TryLoad(userId, out _),
             "First join has no saved position");
         PlayerPose logoutPosition = new(-35.25, 108.125, 87.875, 133.5f, -27.25f, false);
+        PlayerPose walkedTo = new(-36.125, 109.75, 89.25, -91.5f, 22.75f, true);
         Check(store.Valid(logoutPosition), "Saved Creative/Survival coordinates and facing are valid");
         store.Save(userId, logoutPosition);
         Check(store.TryLoad(userId, out PlayerPose restored) && restored == logoutPosition,
@@ -647,7 +648,6 @@ try
                 "Default gamemode remains independent of saved location");
 
             // Simulate movement followed by a real ready-player logout.
-            var walkedTo = new PlayerPose(-36.125, 109.75, 89.25, -91.5f, 22.75f, true);
             joined.MarkReady();
             joined.SetPose(walkedTo);
             await game.OnDisconnectedAsync(userId);
