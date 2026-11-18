@@ -7,6 +7,8 @@ namespace Amethyst;
 /// login authentication and configuration are handled by AmethystNetworkServer.</summary>
 public sealed class MinecraftServer
 {
+    private static readonly bool TraceMining =
+        Environment.GetEnvironmentVariable("AMETHYST_TRACE_MINING") == "1";
     private readonly ServerOptions _options;
     private readonly IShardWorld _world;
     private readonly IShardBlockWorld? _blocks;
@@ -329,10 +331,16 @@ public sealed class MinecraftServer
     internal async Task HandleBlockActionAsync(ConnectedPlayer player,
         PlayerBlockAction action, CancellationToken ct)
     {
-        // Statuses 3/4 are item drops; no item entities exist yet, so explicitly
-        // resync rather than deleting items from the inventory.
+        // Run with AMETHYST_TRACE_MINING=1 ./run.sh to see the exact server
+        // decision for every START/CANCEL/STOP and its resulting block state.
+        if (TraceMining)
+            Console.WriteLine($"[mining] recv {player.Username} mode={player.GameMode} " +
+                $"status={action.Status} pos={action.X},{action.Y},{action.Z} " +
+                $"face={action.Face} seq={action.Sequence} held={player.Inventory.Held().ItemId}");
         if (action.Status is 3 or 4)
         {
+            // Drop actions have no item entities yet. Resynchronize instead of
+            // letting the client invent a dropped item or lose inventory.
             await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
             return;
         }
@@ -342,37 +350,72 @@ public sealed class MinecraftServer
         ushort state = valid ? _blocks!.GetBlockState(action.X, action.Y, action.Z) : (ushort)0;
         bool changed = false;
         bool survival = player.GameMode == PlayerGameMode.Survival;
+        string outcome = valid ? "no change" : "invalid target / range / mode / not ready";
         switch (action.Status)
         {
-            case 0: // Start digging; Creative is instant, Survival is timed.
+            case 0: // Start digging; Creative and 1-tick Survival breaks are instant.
             {
                 player.CancelMining();
-                if (!valid || state == 0 || !player.TryConsumeEditBudget()) break;
+                if (!valid || state == 0 || !player.TryConsumeEditBudget())
+                {
+                    if (valid) outcome = state == 0 ? "already air" : "edit budget exceeded";
+                    break;
+                }
+                int held = player.Inventory.Held().ItemId;
                 int duration = player.GameMode == PlayerGameMode.Creative ? 0 :
-                    MiningRules.RequiredMilliseconds(state, player.Inventory.Held().ItemId);
-                if (duration == int.MaxValue) break; // bedrock, barrier, etc.
-                if (duration == 0)
+                    MiningRules.RequiredMilliseconds(state, held);
+                if (duration == int.MaxValue)
+                {
+                    outcome = "unbreakable";
+                    break;
+                }
+                // Protocol 777: if a block takes at most one client tick to
+                // mine, vanilla predicts AIR and sends START but NEVER STOP.
+                // Previously we only completed hardness-zero blocks here,
+                // leaving all tool-instamined blocks as server-side ghosts.
+                if (duration <= 50)
+                {
                     changed = _blocks!.TrySetBlockState(action.X, action.Y, action.Z, 0, out _);
+                    outcome = changed ? "one-tick/Creative break committed" : "write rejected";
+                }
                 else if (survival)
-                    player.StartMining(action.X, action.Y, action.Z, state,
-                        player.Inventory.Held().ItemId, duration);
+                {
+                    player.StartMining(action.X, action.Y, action.Z, state, held, duration);
+                    outcome = $"digging started; expected={duration}ms";
+                }
+                else
+                {
+                    outcome = "mode disallows mining";
+                }
                 break;
             }
             case 1: // Abort digging
                 player.CancelMining();
+                outcome = "digging cancelled";
                 break;
-            case 2: // Finish digging after a validated session
+            case 2: // Finished digging
+            {
                 if (!survival || !valid || state == 0 || !player.TryConsumeEditBudget())
                 {
                     player.CancelMining();
+                    outcome = !survival ? "STOP outside Survival" :
+                        !valid ? "invalid target / range / not ready" :
+                        state == 0 ? "already air" : "edit budget exceeded";
                     break;
                 }
                 int held = player.Inventory.Held().ItemId;
-                if (!player.FinishMining(action.X, action.Y, action.Z, state, held))
+                if (!player.FinishMining(action.X, action.Y, action.Z, state, held,
+                    out string reason))
+                {
+                    outcome = $"STOP rejected: {reason}";
                     break;
+                }
                 changed = _blocks!.TrySetBlockState(action.X, action.Y, action.Z, 0, out _);
+                outcome = changed ? $"STOP committed: {reason}" : "STOP write rejected";
                 break;
+            }
         }
+
         if (changed)
         {
             await BroadcastBlockChangeAsync(player, action.X, action.Y, action.Z, 0, ct);
@@ -388,14 +431,19 @@ public sealed class MinecraftServer
         }
         else if (valid && action.Status == 2)
         {
-            // A rejected STOP must reconcile the client's predicted air
-            // before its prediction sequence is acknowledged. A normal START
-            // only begins cracking; sending a block correction there could
-            // overwrite a later predicted break when the client settles.
+            // A rejected STOP reconciles the client's predicted air before
+            // acknowledging it. A normal START must not correct a live dig.
             await BlockInteractionProtocol.SendBlockUpdateAsync(player.Connection,
                 action.X, action.Y, action.Z, state, ct);
         }
-        // Acknowledge after authoritative changes or corrections.
+
+        if (TraceMining)
+        {
+            ushort authoritative = valid ? _blocks!.GetBlockState(action.X, action.Y, action.Z) : (ushort)0;
+            Console.WriteLine($"[mining] result {player.Username} status={action.Status} " +
+                $"seq={action.Sequence} before={state} after={authoritative} " +
+                $"changed={changed} {outcome}");
+        }
         await BlockInteractionProtocol.SendAckAsync(player.Connection, action.Sequence, ct);
     }
 
