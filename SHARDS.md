@@ -137,13 +137,21 @@ The Minecraft protocol's server-list status uses JSON on the wire because the va
 
 Both **Creative** and **Survival** support breaking blocks, placing supported
 blocks, and synchronizing changes to other players viewing the same chunk.
+The initial mode for each login is controlled by `defaultGameMode` in
+`server.yaml`: `creative` (backward-compatible default), `survival`,
+`adventure` or `spectator`. In-game `/gamemode` overrides last until
+disconnect, then the configured default applies on the next login.
 **Adventure** and **Spectator** cannot modify the world. Gameplay uses the
 optional `IShardBlockWorld` capability; Core still handles networking only.
 
 Creative breaks blocks instantly and places items without consuming them.
 Survival tracks start/cancel/finish dig actions per player, checks block hardness
 and selected tool type/tier against Java Edition 26.3 data, and validates
-elapsed time before accepting a break. The current mining model is
+elapsed time before accepting a break. STOP is accepted at 70% of the expected
+mining duration, allowing for the vanilla client's tick-based completion and
+minor packet scheduling skew. The server sends confirmed block updates to the
+breaker **before** acknowledging prediction sequences to prevent previously
+mined blocks from reappearing when the next action arrives. The current mining model is
 *approximate*: it does not yet model enchantments, haste, mining fatigue,
 underwater penalties, status effects, tool durability, or all vanilla exceptions.
 
