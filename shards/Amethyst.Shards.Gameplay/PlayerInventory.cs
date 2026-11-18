@@ -7,7 +7,7 @@ namespace Amethyst;
 /// All edits are persisted atomically under Gameplay's Shard data directory.</summary>
 public sealed class PlayerInventory
 {
-    private static readonly byte[] Magic = "AMINV001"u8.ToArray();
+    private static readonly byte[] Magic = "AMINV002"u8.ToArray();
     private readonly object _sync = new();
     private readonly ItemStack[] _slots = new ItemStack[46];
     private readonly string? _path;
@@ -34,6 +34,8 @@ public sealed class PlayerInventory
         if (index is < 0 or > 8) return;
         lock (_sync) _selected = index;
     }
+
+    public int SelectedSlot { get { lock (_sync) return 36 + _selected; } }
 
     public ItemStack Held()
     {
@@ -223,24 +225,17 @@ public sealed class PlayerInventory
                 throw new InvalidDataException($"Corrupted inventory slot {i} in {_path}");
             _slots[i] = new ItemStack(item, count);
         }
-        // The cursor is returned to inventory on closing, not persisted.
+        int cursorItem = reader.ReadInt32(), cursorCount = reader.ReadInt32();
+        if (cursorItem is < 0 or > 1657 || cursorCount is < 0 or > 64 ||
+            (cursorItem == 0) != (cursorCount == 0))
+            throw new InvalidDataException($"Corrupted carried item in {_path}");
+        _cursor = new ItemStack(cursorItem, cursorCount);
         if (stream.Position != stream.Length)
             throw new InvalidDataException($"Unexpected inventory data in {_path}");
     }
 
-    public void ReturnCursor()
-    {
-        lock (_sync)
-        {
-            if (_cursor.Count == 0) return;
-            ItemStack held = _cursor;
-            _cursor = ItemStack.Empty;
-            try { Persist(); _revision++; }
-            catch { _cursor = held; throw; }
-        }
-        // The carried item is only in memory. It will be returned to hotbar
-        // when server supports cursor-close rules and drop entities.
-    }
+    // Client cursor contents persist as a separate, authoritative carried stack
+    // rather than disappearing when a GUI is closed or the player disconnects.
 
     private void Persist()
     {
@@ -258,6 +253,8 @@ public sealed class PlayerInventory
                     writer.Write(slot.ItemId);
                     writer.Write(slot.Count);
                 }
+                writer.Write(_cursor.ItemId);
+                writer.Write(_cursor.Count);
                 writer.Flush();
                 stream.Flush(flushToDisk: true);
             }
