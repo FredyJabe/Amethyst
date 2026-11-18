@@ -151,7 +151,12 @@ elapsed time before accepting a break. STOP is accepted at 70% of the expected
 mining duration, allowing for the vanilla client's tick-based completion and
 minor packet scheduling skew. It also commits **one-tick instant breaks
 directly on START**: vanilla does not send a STOP packet for blocks mined in
-one tick. The server sends confirmed block updates to the breaker **before**
+one tick. For longer digs, Java 26.3's ordered `client_tick_end` (0x0D)
+markers also count elapsed digging time. This prevents queued START and STOP
+packets being mistaken for a zero-duration dig when synchronous world work
+delays processing them. Tick markers are a compatibility aid while Amethyst
+lacks a production tick scheduler; they are not hardened anti-cheat evidence.
+The server sends confirmed block updates to the breaker **before**
 acknowledging prediction sequences to prevent previously mined blocks from
 reappearing when the next action arrives.
 
