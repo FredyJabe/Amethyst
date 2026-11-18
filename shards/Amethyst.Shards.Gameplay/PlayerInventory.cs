@@ -1,4 +1,5 @@
 using System.Text;
+using Amethyst.Shards;
 
 namespace Amethyst;
 
@@ -11,12 +12,15 @@ public sealed class PlayerInventory
     private readonly object _sync = new();
     private readonly ItemStack[] _slots = new ItemStack[46];
     private readonly string? _path;
+    private readonly IShardItemRegistry? _items;
     private ItemStack _cursor;
     private int _selected;
     private int _revision;
 
-    public PlayerInventory(string? dataDirectory, Guid player)
+    public PlayerInventory(string? dataDirectory, Guid player,
+        IShardItemRegistry? items = null)
     {
+        _items = items;
         if (dataDirectory is null) return;
         string directory = Path.Combine(Path.GetFullPath(dataDirectory), "inventories");
         Directory.CreateDirectory(directory);
@@ -45,8 +49,7 @@ public sealed class PlayerInventory
     public bool TryCreativeSet(int slot, int itemId, int count, bool plain)
     {
         if (slot is < 9 or > 44 || !plain ||
-            count is < 0 or > 64 || itemId is < 0 or > 1657 ||
-            (itemId == 0) != (count == 0)) return false;
+            !ValidStack(new ItemStack(itemId, count))) return false;
         lock (_sync)
         {
             var original = _slots[slot];
@@ -78,7 +81,8 @@ public sealed class PlayerInventory
     /// ground entity yet, until item entities are implemented.</returns>
     public int Give(int itemId, int count)
     {
-        if (itemId is <= 0 or > 1657 || count <= 0) return 0;
+        int maximum = MaxStack(itemId);
+        if (maximum == 0 || count <= 0) return 0;
         lock (_sync)
         {
             var backup = (ItemStack[])_slots.Clone();
@@ -86,8 +90,8 @@ public sealed class PlayerInventory
             foreach (int index in Enumerable.Range(36, 9).Concat(Enumerable.Range(9, 27)))
             {
                 ItemStack stack = _slots[index];
-                if (stack.ItemId != itemId || stack.Count == 0 || stack.Count >= 64) continue;
-                int delta = Math.Min(64 - stack.Count, remaining);
+                if (stack.ItemId != itemId || stack.Count == 0 || stack.Count >= maximum) continue;
+                int delta = Math.Min(maximum - stack.Count, remaining);
                 _slots[index] = stack with { Count = stack.Count + delta };
                 remaining -= delta;
                 if (remaining == 0) break;
@@ -96,7 +100,7 @@ public sealed class PlayerInventory
             foreach (int index in Enumerable.Range(36, 9).Concat(Enumerable.Range(9, 27)))
             {
                 if (_slots[index].Count != 0) continue;
-                int delta = Math.Min(64, remaining);
+                int delta = Math.Min(maximum, remaining);
                 _slots[index] = new ItemStack(itemId, delta);
                 remaining -= delta;
                 if (remaining == 0) break;
@@ -133,9 +137,20 @@ public sealed class PlayerInventory
         }
     }
 
-    private static bool ValidStack(ItemStack s) =>
-        s.Count is >= 0 and <= 64 && s.ItemId is >= 0 and <= 1657 &&
-        (s.Count == 0) == (s.ItemId == 0);
+    private int MaxStack(int itemId)
+    {
+        if (itemId <= 0) return 0;
+        if (_items is not null)
+            return _items.TryGetById(itemId, out var item) ? item.MaxStackSize : 0;
+        // Direct unit-test construction can omit a registry, but the live
+        // Gameplay Shard always obtains IShardItemRegistry from the Items Shard.
+        return itemId <= 1657 ? 64 : 0;
+    }
+
+    private bool ValidStack(ItemStack s) =>
+        _items?.IsValidStack(s.ItemId, s.Count) ??
+        (s.Count is >= 0 and <= 64 && s.ItemId is >= 0 and <= 1657 &&
+         (s.Count == 0) == (s.ItemId == 0));
 
     private static bool ValidSlot(int slot) => slot is >= 9 and <= 44;
 
@@ -161,9 +176,9 @@ public sealed class PlayerInventory
                         (_slots[slot], _cursor) = (_cursor, here);
                         changed = true;
                     }
-                    else if (here.Count < 64)
+                    else if (here.Count < MaxStack(here.ItemId))
                     {
-                        int moved = Math.Min(_cursor.Count, 64 - here.Count);
+                        int moved = Math.Min(_cursor.Count, MaxStack(here.ItemId) - here.Count);
                         _slots[slot] = here with { Count = here.Count + moved };
                         _cursor = moved == _cursor.Count ? ItemStack.Empty :
                             _cursor with { Count = _cursor.Count - moved };
@@ -181,7 +196,8 @@ public sealed class PlayerInventory
                         changed = true;
                     }
                     else if (_cursor.Count > 0 &&
-                        (here.Count == 0 || (here.ItemId == _cursor.ItemId && here.Count < 64)))
+                        (here.Count == 0 || (here.ItemId == _cursor.ItemId &&
+                            here.Count < MaxStack(_cursor.ItemId))))
                     {
                         _slots[slot] = new ItemStack(_cursor.ItemId, here.Count + 1);
                         _cursor = _cursor.Count == 1 ? ItemStack.Empty :
@@ -203,15 +219,16 @@ public sealed class PlayerInventory
                 for (int i = low; i <= high && remaining > 0; i++)
                 {
                     ItemStack other = _slots[i];
-                    if (other.ItemId != here.ItemId || other.Count == 0 || other.Count >= 64) continue;
-                    int moved = Math.Min(remaining, 64 - other.Count);
+                    if (other.ItemId != here.ItemId || other.Count == 0 ||
+                        other.Count >= MaxStack(here.ItemId)) continue;
+                    int moved = Math.Min(remaining, MaxStack(here.ItemId) - other.Count);
                     _slots[i] = other with { Count = other.Count + moved };
                     remaining -= moved;
                 }
                 for (int i = low; i <= high && remaining > 0; i++)
                 {
                     if (_slots[i].Count != 0) continue;
-                    int moved = Math.Min(64, remaining);
+                    int moved = Math.Min(MaxStack(here.ItemId), remaining);
                     _slots[i] = new ItemStack(here.ItemId, moved);
                     remaining -= moved;
                 }
@@ -251,13 +268,12 @@ public sealed class PlayerInventory
         for (int i = 0; i < _slots.Length; i++)
         {
             int item = reader.ReadInt32(), count = reader.ReadInt32();
-            if (item is < 0 or > 1657 || count is < 0 or > 64 || (item == 0) != (count == 0))
+            if (!ValidStack(new ItemStack(item, count)))
                 throw new InvalidDataException($"Corrupted inventory slot {i} in {_path}");
             _slots[i] = new ItemStack(item, count);
         }
         int cursorItem = reader.ReadInt32(), cursorCount = reader.ReadInt32();
-        if (cursorItem is < 0 or > 1657 || cursorCount is < 0 or > 64 ||
-            (cursorItem == 0) != (cursorCount == 0))
+        if (!ValidStack(new ItemStack(cursorItem, cursorCount)))
             throw new InvalidDataException($"Corrupted carried item in {_path}");
         _cursor = new ItemStack(cursorItem, cursorCount);
         if (stream.Position != stream.Length)

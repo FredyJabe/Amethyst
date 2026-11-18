@@ -27,10 +27,44 @@ try
         OperatorsFile = Path.Combine(temp, "ops.yaml"),
         WorldPath = Path.Combine(temp, "world")
     };
+    // Test administrator YAML loaded through the real ShardHost data path.
+    string yamlDir = Path.Combine(temp, "shards", "items", "definitions");
+    Directory.CreateDirectory(yamlDir);
+    File.WriteAllText(Path.Combine(yamlDir, "custom.yml"), """
+        crafting_table:
+          Display: "Workshop Table"
+          Lore:
+            - "Configured before the Shard loads"
+        """);
     await using var host = new ShardHost(options, installed, Path.Combine(temp, "shards"));
     await host.LoadAsync();
     Check(host.GetService<IShardWorld>() is not null, "default overworld provider enabled");
     Check(host.GetService<IShardGameplay>() is not null, "gameplay enabled with world provider");
+    IShardItemRegistry items = host.GetService<IShardItemRegistry>() ??
+        throw new Exception("FAIL: Items Shard service not registered");
+    Check(items.MinecraftVersion == "26.3" && items.Count == 1658 &&
+        items.All.Count == 1658,
+        "Items Shard auto-enabled and complete 26.3 definitions published");
+    Check(items.TryGetById(405, out var table) &&
+        table.Identifier == "minecraft:crafting_table" &&
+        table.MaxStackSize == 64 && table.IsBlockItem &&
+        table.Display == "Workshop Table" &&
+        table.Lore is { Count: 1 } &&
+        items.TryGetByIdentifier("crafting_table", out var byName) && byName == table,
+        "Items can be resolved by protocol ID and canonical/short identifier");
+    Check(items.TryGetByIdentifier("netherite_pickaxe", out var pickaxe) &&
+        pickaxe.MaxStackSize == 1 &&
+        items.TryGetByIdentifier("minecraft:ender_pearl", out var pearl) &&
+        pearl.MaxStackSize == 16 &&
+        items.IsValidStack(pickaxe.ProtocolId, 1) &&
+        !items.IsValidStack(pickaxe.ProtocolId, 2) &&
+        items.IsValidStack(pearl.ProtocolId, 16) &&
+        !items.IsValidStack(pearl.ProtocolId, 17) &&
+        !items.IsValidStack(1658, 1),
+        "Known item stack caps and unknown-ID rejection come from the Items Shard");
+    Check(host.RegisteredConsoleCommands.Contains("iteminfo") &&
+        await host.TryExecuteConsoleAsync("iteminfo 405", CancellationToken.None),
+        "iteminfo command is registered by the Items Shard");
     Check(host.Snapshot().Any(s => s.Id == "hello" && s.State == ShardState.Loaded),
         "example Shard installed but disabled");
 
@@ -47,14 +81,25 @@ try
     Check(!await host.TryExecuteConsoleAsync("hello Test", CancellationToken.None),
         "Shard commands removed upon disable");
 
+    bool itemsBlocked = false;
+    try { await host.DisableAsync("items"); }
+    catch (InvalidOperationException) { itemsBlocked = true; }
+    Check(itemsBlocked, "Gameplay dependency protects the Items Shard from being disabled");
+
     await host.DisableAsync("gameplay");
     Check(host.GetService<IShardGameplay>() is null, "gameplay service removed");
+    await host.DisableAsync("items");
+    Check(host.GetService<IShardItemRegistry>() is null &&
+        !host.RegisteredConsoleCommands.Contains("iteminfo"),
+        "Disabling Items Shard unregisters its definitions and iteminfo command");
     await host.DisableAsync("overworld");
     Check(host.GetService<IShardWorld>() is null, "world service removed");
 
     await host.EnableAsync("gameplay");
-    Check(host.GetService<IShardWorld>() is not null && host.GetService<IShardGameplay>() is not null,
-        "enabling gameplay automatically enables world provider");
+    Check(host.GetService<IShardWorld>() is not null &&
+        host.GetService<IShardGameplay>() is not null &&
+        host.GetService<IShardItemRegistry>() is not null,
+        "Enabling Gameplay automatically enables both World and Items providers");
 }
 finally
 {

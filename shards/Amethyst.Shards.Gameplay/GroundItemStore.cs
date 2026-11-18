@@ -23,12 +23,15 @@ public sealed class GroundItemStore
     private readonly Dictionary<int, GroundItem> _entities = new();
     private readonly Func<int> _allocateEntityId;
     private readonly string? _path;
+    private readonly IShardItemRegistry? _items;
     private int _frames;
     private long _lastSimulationMs;
 
-    public GroundItemStore(string? dataDirectory, string worldPath, Func<int> allocateEntityId)
+    public GroundItemStore(string? dataDirectory, string worldPath, Func<int> allocateEntityId,
+        IShardItemRegistry? items = null)
     {
         _allocateEntityId = allocateEntityId;
+        _items = items;
         if (dataDirectory is null) return;
         string folder = Path.Combine(Path.GetFullPath(dataDirectory), "ground-items");
         Directory.CreateDirectory(folder);
@@ -37,6 +40,10 @@ public sealed class GroundItemStore
         _path = Path.Combine(folder, worldKey + ".bin");
         Load();
     }
+
+    private bool ValidStack(int itemId, int amount) =>
+        _items?.IsValidStack(itemId, amount) ??
+        (itemId is > 0 and <= 1657 && amount is >= 1 and <= 64);
 
     public GroundItem[] Snapshot()
     {
@@ -47,7 +54,7 @@ public sealed class GroundItemStore
         out GroundItem entity, long? nowMilliseconds = null)
     {
         entity = default;
-        if (itemId is <= 0 or > 1657 || count is < 1 or > 64 ||
+        if (!ValidStack(itemId, count) ||
             !double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z))
             return false;
         lock (_gate)
@@ -160,7 +167,7 @@ public sealed class GroundItemStore
             double velocityY = reader.ReadDouble();
             bool onGround = reader.ReadBoolean();
             long created = reader.ReadInt64();
-            if (item is <= 0 or > 1657 || amount is < 1 or > 64 ||
+            if (!ValidStack(item, amount) ||
                 !double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z) ||
                 !double.IsFinite(velocityY))
                 throw new InvalidDataException($"Invalid ground item in {_path}");

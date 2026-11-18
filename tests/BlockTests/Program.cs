@@ -1,9 +1,189 @@
 using Amethyst;
+using Amethyst.BuiltinShards;
+
+DirectoryInfo? solutionRoot = new(AppContext.BaseDirectory);
+while (solutionRoot is not null &&
+    !File.Exists(Path.Combine(solutionRoot.FullName, "Amethyst.slnx")))
+    solutionRoot = solutionRoot.Parent;
+if (solutionRoot is null)
+    throw new InvalidOperationException("Amethyst.slnx not found above tests.");
+string itemCatalogPath = Path.Combine(solutionRoot.FullName,
+    "shards", "Amethyst.Shards.Items", "items-26.3.yml");
+var itemsCatalog = new ItemCatalog(itemCatalogPath);
 
 static void Check(bool condition, string message)
 {
     if (!condition) throw new Exception("FAIL: " + message);
     Console.WriteLine("PASS: " + message);
+}
+
+// The Items Shard is the sole version-pinned source of item identities
+// and stacking rules, including items that may only stack to one or 16.
+Amethyst.Shards.ShardItemDefinition diamondPickaxe = default;
+Amethyst.Shards.ShardItemDefinition pearls = default;
+Check(itemsCatalog.Count == 1658 &&
+    itemsCatalog.TryGetByIdentifier("minecraft:diamond_pickaxe", out diamondPickaxe) &&
+    diamondPickaxe.MaxStackSize == 1 &&
+    itemsCatalog.TryGetByIdentifier("minecraft:ender_pearl", out pearls) &&
+    pearls.MaxStackSize == 16 &&
+    itemsCatalog.TryGetById(405, out var craftingDefinition) &&
+    craftingDefinition.Identifier == "minecraft:crafting_table" &&
+    craftingDefinition.IsBlockItem,
+    "Items Shard exposes full vanilla 26.3 item data to gameplay");
+var stackInventory = new PlayerInventory(null, Guid.NewGuid(), itemsCatalog);
+Check(!stackInventory.TryCreativeSet(36, diamondPickaxe.ProtocolId, 2, true) &&
+    stackInventory.TryCreativeSet(36, diamondPickaxe.ProtocolId, 1, true),
+    "Creative cannot create illegal stacks of non-stackable tools");
+Check(stackInventory.Give(diamondPickaxe.ProtocolId, 2) == 2 &&
+    stackInventory.Snapshot().Slots.Count(s =>
+        s.ItemId == diamondPickaxe.ProtocolId && s.Count == 1) == 3,
+    "Ground item pickup distributes non-stackable tools to separate slots");
+Check(!stackInventory.TryCreativeSet(37, pearls.ProtocolId, 17, true) &&
+    stackInventory.TryCreativeSet(37, pearls.ProtocolId, 16, true),
+    "Items Shard's 16-item cap applies to creative and inventory");
+Check(!itemsCatalog.IsValidStack(99999, 1) &&
+    !itemsCatalog.IsValidStack(0, 1) &&
+    itemsCatalog.IsValidStack(0, 0),
+    "Unknown IDs and non-empty air stacks are never valid");
+
+// Mythic-style YAML: each root ID overrides one vanilla item or names a
+// custom alias backed by a vanilla protocol item. Never mint new IDs.
+string yamlTestRoot = Path.Combine(Path.GetTempPath(),
+    "amethyst-item-yaml-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(yamlTestRoot);
+try
+{
+    string overrides = Path.Combine(yamlTestRoot, "overrides");
+    Directory.CreateDirectory(overrides);
+    File.WriteAllText(Path.Combine(overrides, "weapons.yml"), """
+        diamond_pickaxe:
+          Id: minecraft:diamond_pickaxe
+          Display: "<aqua>Test Pickaxe</aqua>"
+          ItemName: "Mining Tool"
+          Lore:
+            - "Configurable item"
+            - "Defined in YAML"
+          Options:
+            Hidden: true
+        LegendaryPickaxe:
+          Id: diamond_pickaxe
+          Display: "<gold>Legendary Pickaxe</gold>"
+          Lore:
+            - "Alias sharing vanilla protocol ID"
+        """);
+    string more = Path.Combine(overrides, "other");
+    Directory.CreateDirectory(more);
+    File.WriteAllText(Path.Combine(more, "stacks.yaml"), """
+        ender_pearl:
+          Id: ender_pearl
+          Options:
+            StackSize: 8
+        405:
+          Id: minecraft:crafting_table
+          Display: "Workshop Table"
+          Options:
+            BlockItem: true
+        """);
+    var configured = new ItemCatalog(itemCatalogPath, overrides);
+    Amethyst.Shards.ShardItemDefinition updatedPickaxe = default;
+    Check(configured.Count == 1658 &&
+        configured.TryGetByIdentifier("diamond_pickaxe", out updatedPickaxe) &&
+        updatedPickaxe.Display == "<aqua>Test Pickaxe</aqua>" &&
+        updatedPickaxe.ItemName == "Mining Tool" &&
+        updatedPickaxe.Lore?.Count == 2 && updatedPickaxe.Hidden,
+        "YAML overrides existing item display name, lore, and hidden metadata");
+    Check(configured.TryGetByIdentifier("LegendaryPickaxe", out var alias) &&
+        alias.ProtocolId == updatedPickaxe.ProtocolId &&
+        alias.Identifier == "amethyst:legendarypickaxe" &&
+        alias.Display == "<gold>Legendary Pickaxe</gold>" &&
+        configured.All.Count == 1658,
+        "Mythic-style root custom name aliases a known vanilla material, not a new protocol ID");
+    Check(configured.TryGetByIdentifier("ender_pearl", out var smallPearl) &&
+        smallPearl.MaxStackSize == 8 &&
+        configured.IsValidStack(smallPearl.ProtocolId, 8) &&
+        !configured.IsValidStack(smallPearl.ProtocolId, 9) &&
+        configured.TryGetById(405, out var workshop) &&
+        workshop.Display == "Workshop Table",
+        "YAML configuration overrides actual inventory limits and numeric-root item metadata");
+    var yamlInventory = new PlayerInventory(null, Guid.NewGuid(), configured);
+    Check(yamlInventory.TryCreativeSet(36, smallPearl.ProtocolId, 8, true) &&
+        !yamlInventory.TryCreativeSet(37, smallPearl.ProtocolId, 9, true),
+        "Configured stack limit is used by Gameplay's inventory transaction validator");
+
+    // Invalid configurations fail fast instead of silently starting with
+    // partially applied definitions or ambiguous duplicate overrides.
+    void InvalidYaml(string filename, string source, string label)
+    {
+        string dir = Path.Combine(yamlTestRoot, "invalid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, filename), source);
+        bool rejected = false;
+        try { _ = new ItemCatalog(itemCatalogPath, dir); }
+        catch (InvalidDataException) { rejected = true; }
+        Check(rejected, label);
+    }
+    InvalidYaml("wrong-id.yml", """
+        diamond_pickaxe:
+          Id: minecraft:stone
+        """, "YAML cannot change an existing item's vanilla material identity");
+    InvalidYaml("wrong-protocol.yml", """
+        diamond_pickaxe:
+          ProtocolId: 405
+        """, "YAML cannot reassign vanilla protocol IDs");
+    InvalidYaml("max-overflow.yaml", """
+        diamond_pickaxe:
+          MaxStackSize: 64
+        """, "YAML cannot exceed a vanilla item's maximum stack size");
+    InvalidYaml("unknown-field.yml", """
+        stone:
+          UnimplementedFeature: true
+        """, "Unknown item configuration fields fail loudly");
+    InvalidYaml("unknown-alias.yml", """
+        MysterySword:
+          Id: minecraft:not_a_material
+        """, "Custom root IDs require a real base vanilla material");
+    InvalidYaml("alias-max.yml", """
+        MythicSword:
+          Id: diamond_sword
+          MaxStackSize: 32
+        """, "Aliases cannot change physical stack rules without a per-stack identity");
+    InvalidYaml("duplicate.yml", """
+        stone:
+          Display: First
+        stone:
+          Display: Second
+        """, "Duplicate YAML item roots are rejected");
+    InvalidYaml("conflicting-limits.yml", """
+        stone:
+          MaxStackSize: 8
+          Options:
+            StackSize: 4
+        """, "Conflicting MaxStackSize and Options.StackSize are rejected");
+
+    string repeated = Path.Combine(yamlTestRoot, "repeated");
+    Directory.CreateDirectory(repeated);
+    File.WriteAllText(Path.Combine(repeated, "a.yml"), "stone:\n  Display: One\n");
+    File.WriteAllText(Path.Combine(repeated, "b.yaml"), "stone:\n  Display: Two\n");
+    bool duplicateRejected = false;
+    try { _ = new ItemCatalog(itemCatalogPath, repeated); }
+    catch (InvalidDataException) { duplicateRejected = true; }
+    Check(duplicateRejected, "Overlapping definitions across YAML files are rejected");
+    string numericOverlap = Path.Combine(yamlTestRoot, "numeric-alias-collision");
+    Directory.CreateDirectory(numericOverlap);
+    File.WriteAllText(Path.Combine(numericOverlap, "a.yml"),
+        "405:\n  Display: Workshop\n");
+    File.WriteAllText(Path.Combine(numericOverlap, "b.yml"),
+        "crafting_table:\n  Display: Workbench\n");
+    bool numericCollisionRejected = false;
+    try { _ = new ItemCatalog(itemCatalogPath, numericOverlap); }
+    catch (InvalidDataException) { numericCollisionRejected = true; }
+    Check(numericCollisionRejected,
+        "Numeric and named roots for the same vanilla protocol ID cannot override twice");
+}
+finally
+{
+    try { Directory.Delete(yamlTestRoot, recursive: true); }
+    catch (IOException) { }
 }
 
 // Packed positions round-trip signed 26/12/26-bit coordinates.
@@ -163,7 +343,7 @@ Directory.CreateDirectory(playerRoot);
 try
 {
     Guid uuid = Guid.NewGuid();
-    var inventory = new PlayerInventory(playerRoot, uuid);
+    var inventory = new PlayerInventory(playerRoot, uuid, itemsCatalog);
     Check(inventory.Give(10, 3) == 3 &&
         inventory.Held() == new ItemStack(10, 3), "Mined dirt enters Survival hotbar");
     Check(inventory.ConsumeHeld(false, 10) &&
@@ -198,7 +378,7 @@ try
         Check(contentPacket is { Id: InventoryProtocol.ClientboundSetContent },
             "Inventory packet is framed with protocol 777 container ID");
     }
-    var recovered = new PlayerInventory(playerRoot, uuid);
+    var recovered = new PlayerInventory(playerRoot, uuid, itemsCatalog);
     Check(recovered.Snapshot().Cursor == new ItemStack(10, 2),
         "Inventory and cursor survive reconnect");
     Check(!recovered.ApplyClick(click), "Stale inventory revision cannot mutate items");
@@ -254,11 +434,11 @@ try
         using var channel = new PacketChannel(outgoing);
         var player = new ConnectedPlayer(Guid.NewGuid(), "MiningTester",
             Array.Empty<ProfileProperty>(), 1, channel, world,
-            Path.Combine(miningRoot, "playerdata"));
+            Path.Combine(miningRoot, "playerdata"), itemsCatalog);
         player.MarkReady();
         player.SetGameMode(PlayerGameMode.Survival);
         // The handler does not use the packet bus when invoked directly.
-        var game = new MinecraftServer(settings, world, null!, world);
+        var game = new MinecraftServer(settings, world, null!, world, items: itemsCatalog);
 
         for (int x = 1; x <= 2; x++)
         {
@@ -473,7 +653,7 @@ try
 {
     int entitySequence = 50;
     long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    var drops = new GroundItemStore(dropsRoot, "test-world", () => ++entitySequence);
+    var drops = new GroundItemStore(dropsRoot, "test-world", () => ++entitySequence, itemsCatalog);
     Check(drops.TrySpawn(55, 3, 10.5, 65.4, 10.5, out GroundItem firstDrop, now),
         "Breaking a block can create a persistent physical item entity");
     Check(drops.Snapshot() is [{ ItemId: 55, Count: 3 }],
@@ -564,7 +744,7 @@ try
         drops.Simulate(ground, now + tick * 50);
     Check(drops.Snapshot() is [{ OnGround: true }],
         "Loose items fall under gravity until hitting world blocks");
-    var inventory = new PlayerInventory(null, Guid.NewGuid());
+    var inventory = new PlayerInventory(null, Guid.NewGuid(), itemsCatalog);
     Check(drops.TryCollect(firstDrop.EntityId, inventory, out _, now + 300) == 0 &&
         inventory.Held().Count == 0, "Item cannot be picked up before its delay");
 
@@ -579,7 +759,7 @@ try
     Check(drops.TryCollect(firstDrop.EntityId, inventory, out GroundItem leftover, now + 2100) == 1 &&
         leftover.Count == 2 && inventory.Held() == new ItemStack(55, 64),
         "Partial pickup fills inventory and preserves leftover ground items");
-    var reloaded = new GroundItemStore(dropsRoot, "test-world", () => ++entitySequence);
+    var reloaded = new GroundItemStore(dropsRoot, "test-world", () => ++entitySequence, itemsCatalog);
     Check(reloaded.Snapshot() is [{ ItemId: 55, Count: 2 }],
         "Uncollected items persist across server restarts");
     Check(inventory.TryCreativeSet(9, 0, 0, true), "Free another inventory slot");
@@ -587,7 +767,7 @@ try
             out GroundItem finalStack, now + 2200) == 2 &&
         finalStack.Count == 0 && reloaded.Snapshot().Length == 0,
         "Nearby player can pick up remaining items and remove entity");
-    var emptyReload = new GroundItemStore(dropsRoot, "test-world", () => ++entitySequence);
+    var emptyReload = new GroundItemStore(dropsRoot, "test-world", () => ++entitySequence, itemsCatalog);
     Check(emptyReload.Snapshot().Length == 0,
         "Collected items do not reappear after restart");
 }
@@ -637,7 +817,7 @@ try
         using (var wire = new MemoryStream())
         using (var channel = new PacketChannel(wire))
         {
-            var game = new MinecraftServer(config, world, null!, world, dataRoot);
+            var game = new MinecraftServer(config, world, null!, world, dataRoot, itemsCatalog);
             Check(game.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
                 "Reconnecting player can be admitted");
@@ -657,7 +837,7 @@ try
 
             // Recreate Gameplay as if the process restarted: admission must
             // use the saved coordinates rather than a hard-coded spawn.
-            var restarted = new MinecraftServer(config, world, null!, world, dataRoot);
+            var restarted = new MinecraftServer(config, world, null!, world, dataRoot, itemsCatalog);
             Check(restarted.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
                 "Reconnecting after gameplay restart succeeds");
@@ -720,7 +900,7 @@ try
 
         using var fallbackWire = new MemoryStream();
         using var fallbackChannel = new PacketChannel(fallbackWire);
-        var fallbackGame = new MinecraftServer(config, world, null!, world, dataRoot);
+        var fallbackGame = new MinecraftServer(config, world, null!, world, dataRoot, itemsCatalog);
         Check(fallbackGame.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), fallbackChannel, 0, out _),
             "Damaged save must not interrupt player login");
@@ -753,8 +933,8 @@ try
         WorldPath = Path.Combine(stationsRoot, "world")
     };
     await using var stationWorld = new TerrainWorld(settings);
-    var stations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld);
-    var bag = new PlayerInventory(null, Guid.NewGuid());
+    var stations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog);
+    var bag = new PlayerInventory(null, Guid.NewGuid(), itemsCatalog);
     Guid playerId = Guid.NewGuid();
     Check(StationProtocol.MenuType(StationKind.Crafting) == 12 &&
         StationProtocol.MenuType(StationKind.Furnace) == 14 &&
@@ -828,7 +1008,7 @@ try
     Check(stations.Data(playerId).Burn > 0,
         "Furnace progress properties expose remaining burn time");
     stations.Save();
-    var restoredStations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld);
+    var restoredStations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog);
     Check(restoredStations.SnapshotStation(furnacePos).SequenceEqual(smelted),
         "Furnace contents survive a world restart");
     Check(!stations.Click(playerId, bag,
@@ -877,7 +1057,7 @@ try
         released.Sum(s => s.Count) == 1,
         "Breaking a furnace releases all remaining input/output instead of deleting it");
     stations.Save();
-    Check(new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld)
+    Check(new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog)
         .SnapshotStation(furnacePos).Length == 0,
         "Destroyed furnace does not reappear in saved workstation storage");
 
@@ -888,10 +1068,10 @@ try
     {
         var stationPlayer = new ConnectedPlayer(Guid.NewGuid(), "StationTester",
             Array.Empty<ProfileProperty>(), 77, gameplayChannel,
-            stationWorld, null);
+            stationWorld, null, itemsCatalog);
         stationPlayer.MarkReady();
         var gameplay = new MinecraftServer(settings, stationWorld, null!,
-            stationWorld, Path.Combine(stationsRoot, "gameplay-integration"));
+            stationWorld, Path.Combine(stationsRoot, "gameplay-integration"), itemsCatalog);
         int seq = 1;
         foreach (var (kind, mode, state, blockPosition) in new[]
         {
