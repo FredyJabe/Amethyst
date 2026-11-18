@@ -1,0 +1,10 @@
+id: gameplay
+apiVersion: 1
+assembly: Amethyst.Shards.Gameplay.dll
+entryType: Amethyst.BuiltinShards.GameplayShard
+enabled: true
+provides:
+  - gameplay
+requires:
+  - world
+dependsOn: []

@@ -1,0 +1,666 @@
+using System.Text.Json;
+using Amethyst.Shards;
+
+namespace Amethyst;
+
+/// <summary>Gameplay runtime supplied by the gameplay Shard. Network listener,
+/// login authentication and configuration are handled by AmethystNetworkServer.</summary>
+public sealed class MinecraftServer
+{
+    private readonly ServerOptions _options;
+    private readonly IShardWorld _world;
+    private readonly WorldClock _clock;
+    private readonly IShardPacketBus _packetBus;
+    private readonly PlayerRegistry _players;
+    private readonly OperatorStore _operators;
+    private CancellationTokenSource? _clockLifetime;
+    private Task? _clockSync;
+
+    public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus)
+    {
+        _options = options;
+        _world = world;
+        _packetBus = packetBus;
+        _players = new PlayerRegistry(options.MaxPlayers);
+        _operators = new OperatorStore(options.OperatorsFile);
+        _clock = new WorldClock(options);
+    }
+
+    public ShardPlayerSummary[] OnlinePlayers => _players.Snapshot()
+        .Select(p => new ShardPlayerSummary(p.Username, p.PlayerUuid)).ToArray();
+
+    public void Start()
+    {
+        if (_clockLifetime is not null) throw new InvalidOperationException("Already started.");
+        _clockLifetime = new CancellationTokenSource();
+        _clockSync = BroadcastWorldTimeAsync(_clockLifetime.Token);
+        Console.WriteLine($"[gameplay] Enabled: chat={_options.ChatEnabled}, " +
+            $"operators={_operators.Snapshot().Length}, viewDistance={_world.ViewDistance}");
+    }
+
+    public async Task StopAsync()
+    {
+        if (_players.Snapshot().Length != 0)
+            throw new InvalidOperationException("Cannot disable gameplay while players are connected.");
+        if (_clockLifetime is not null)
+        {
+            await _clockLifetime.CancelAsync();
+            if (_clockSync is not null)
+                try { await _clockSync; } catch (OperationCanceledException) { }
+            _clockLifetime.Dispose();
+            _clockLifetime = null;
+            _clockSync = null;
+        }
+        _clock.Save();
+    }
+
+    public bool TryAdmit(VerifiedProfile profile, PacketChannel channel, int chatMode, out string reason)
+    {
+        var player = new ConnectedPlayer(profile.Uuid, profile.Username, profile.Properties,
+            _players.AllocateEntityId(), channel, _world);
+        player.SetChatMode(chatMode);
+        return _players.TryAdd(player, out reason);
+    }
+
+    public void SetChatMode(Guid uuid, int mode)
+    {
+        ConnectedPlayer? player = _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == uuid);
+        player?.SetChatMode(mode);
+    }
+
+    public async Task RunPlayAsync(VerifiedProfile profile, CancellationToken ct)
+    {
+        ConnectedPlayer player = _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == profile.Uuid)
+            ?? throw new InvalidOperationException("Player admission was not completed.");
+        await SpawnPackets.SendAsync(player, _world, _options, _clock, ct);
+        int actualOpLevel = _options.OnlineMode ? _operators.Level(player.PlayerUuid) : 0;
+        await GameModeProtocol.SendClientPermissionsAsync(player.Connection, player.EntityId, actualOpLevel, ct);
+        await CommandTree.SendAsync(player.Connection, actualOpLevel, ct);
+        Console.WriteLine($"[play] {player.Username} received initial world");
+        await HandlePlayAsync(player, ct);
+    }
+
+    public async Task OnDisconnectedAsync(Guid uuid)
+    {
+        ConnectedPlayer? player = _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == uuid);
+        if (player is null) return;
+        _players.Remove(player.ConnectionId);
+        await NotifyDepartureAsync(player);
+        Console.WriteLine($"[leave] {player.Username}; {_players.Snapshot().Length} connected");
+    }
+
+    public IReadOnlyList<string> CompleteConsole(string prefix) =>
+        ConsoleCommandCompletion.Suggest(prefix,
+            _players.Snapshot().Where(p => p.Ready).Select(p => p.Username),
+            _operators.Snapshot().Select(p => p.Name));
+
+    private async Task HandlePlayAsync(ConnectedPlayer player, CancellationToken ct)
+    {
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct, player.DisconnectToken);
+        bool teleportConfirmed = false, playerLoaded = false;
+        int expectedTeleportId = SpawnPackets.TeleportId;
+        try
+        {
+            while (!lifetime.IsCancellationRequested)
+            {
+                Packet? packet = await player.Connection.ReceiveAsync(lifetime.Token);
+                if (packet is null) break;
+                if (await _packetBus.DispatchAsync(player, packet.Value, lifetime.Token)) continue;
+                var reader = packet.Value.Reader();
+                switch (packet.Value.Id)
+                {
+                    case 0x00: // Accept Teleportation
+                    {
+                        int teleportId = reader.ReadVarInt();
+                        double x = reader.ReadDouble(), y = reader.ReadDouble(), z = reader.ReadDouble();
+                        float yaw = reader.ReadFloat(), pitch = reader.ReadFloat();
+                        reader.RequireEnd();
+                        if (teleportId == expectedTeleportId && double.IsFinite(x) && double.IsFinite(y)
+                            && double.IsFinite(z) && float.IsFinite(yaw) && float.IsFinite(pitch))
+                            teleportConfirmed = true;
+                        break;
+                    }
+                    case 0x2C: // Player Loaded
+                        reader.RequireEnd();
+                        playerLoaded = true;
+                        break;
+                    case 0x1C: // KeepAlive reply
+                        _ = reader.ReadInt64(); reader.RequireEnd();
+                        break;
+                    case 0x1E: // Move position
+                    case 0x1F: // Move position and rotation
+                    case 0x20: // Move rotation
+                    case 0x21: // Move status only
+                    {
+                        PlayerPose old = player.Pose;
+                        double x = old.X, y = old.Y, z = old.Z;
+                        float yaw = old.Yaw, pitch = old.Pitch;
+                        if (packet.Value.Id is 0x1E or 0x1F)
+                        {
+                            x = reader.ReadDouble(); y = reader.ReadDouble(); z = reader.ReadDouble();
+                        }
+                        if (packet.Value.Id is 0x1F or 0x20)
+                        {
+                            yaw = reader.ReadFloat(); pitch = reader.ReadFloat();
+                        }
+                        byte flags = reader.ReadByte();
+                        reader.RequireEnd();
+                        if (!teleportConfirmed || !playerLoaded) break;
+                        if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z) ||
+                            !float.IsFinite(yaw) || !float.IsFinite(pitch) ||
+                            Math.Abs(x) > 29_999_984 || Math.Abs(z) > 29_999_984 ||
+                            y is < -20000000 or > 20000000 ||
+                            Math.Abs(x - old.X) > 1000 || Math.Abs(y - old.Y) > 1000 ||
+                            Math.Abs(z - old.Z) > 1000)
+                            throw new InvalidDataException("Invalid player movement.");
+                        // Until physics/collision is implemented server-side, recover
+                        // players who fell through terrain before its chunks arrived.
+                        // Do not let an out-of-world position persist on the server.
+                        if (_world.UsesDensity ? y < _world.MinY - 12 :
+                            y < _world.GetGroundHeight((int)Math.Floor(x), (int)Math.Floor(z)) - 12)
+                        {
+                            Console.WriteLine($"[spawn] Recovering {player.Username} from Y={y:F1} " +
+                                $"(ground Y={_world.GetGroundHeight((int)Math.Floor(x), (int)Math.Floor(z))})");
+                            expectedTeleportId++;
+                            teleportConfirmed = false;
+                            player.SetPose(new PlayerPose(_world.SpawnXPosition, _world.SpawnYPosition,
+                                _world.SpawnZPosition, 0, 0, true));
+                            await SpawnPackets.SendPositionAsync(player.Connection,
+                                expectedTeleportId, _world.SpawnXPosition, _world.SpawnYPosition,
+                                _world.SpawnZPosition, lifetime.Token);
+                            break;
+                        }
+                        var current = new PlayerPose(x, y, z, yaw, pitch, (flags & 1) != 0);
+                        player.SetPose(current);
+                        await player.View.UpdateAsync(player.Connection, current, lifetime.Token);
+                        if (player.Ready)
+                            await BroadcastMovementAsync(player, old, current, lifetime.Token);
+                        break;
+                    }
+                    case ChatProtocol.ServerboundChat:
+                    {
+                        IncomingChat message = ChatProtocol.ParseChat(packet.Value);
+                        if (player.Ready) await HandleChatAsync(player, message, lifetime.Token);
+                        break;
+                    }
+                    case GameModeProtocol.ServerboundChangeGameMode: // F3+F4 switcher (26.3)
+                    {
+                        PlayerGameMode mode = GameModeProtocol.ParseSwitchRequest(packet.Value);
+                        if (!GameModeProtocol.CanChange(Level(player)))
+                            await ReplyAsync(player, "OP level 1 is required to change game mode.", lifetime.Token);
+                        else if (player.Ready)
+                            await ChangeGameModeAsync(player, mode, player, lifetime.Token);
+                        break;
+                    }
+                    case ChatProtocol.ServerboundCommand:
+                    case ChatProtocol.ServerboundSignedCommand:
+                    {
+                        IncomingCommand command = ChatProtocol.ParseCommand(packet.Value);
+                        if (player.Ready)
+                        {
+                            if (command.HasSignedArguments)
+                                await ReplyAsync(player, "Signed command arguments are not supported yet.", lifetime.Token);
+                            else await ExecuteCommandAsync(player, command.Command, lifetime.Token);
+                        }
+                        break;
+                    }
+                    case ChatProtocol.ServerboundChatAck:
+                        ChatProtocol.ParseAck(packet.Value);
+                        break;
+                    case ChatProtocol.ServerboundSessionUpdate:
+                        ChatProtocol.ParseSessionUpdate(packet.Value);
+                        break;
+                    case 0x0E: // Client information (Play): chat visibility preference
+                    {
+                        ApplyClientInformation(player, packet.Value);
+                        break;
+                    }
+                    case 0x0B: // Chunk Batch Received: client-driven flow control
+                    {
+                        float desiredPerTick = reader.ReadFloat();
+                        reader.RequireEnd();
+                        await player.View.OnBatchReceivedAsync(player.Connection, desiredPerTick,
+                            lifetime.Token);
+                        break;
+                    }
+                    default:
+                        // Inventory, chat, block interactions, player abilities etc.
+                        // Not implemented yet; do not interpret them as movement.
+                        break;
+                }
+                if (teleportConfirmed && playerLoaded && !player.Ready)
+                    await NotifyArrivalAsync(player, lifetime.Token);
+            }
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        finally
+        {
+            await lifetime.CancelAsync();
+        }
+    }
+
+    private async Task NotifyArrivalAsync(ConnectedPlayer player, CancellationToken ct)
+    {
+        // Publish the player only after the client has confirmed spawn and
+        // loaded the world. This prevents ghost players during Configuration.
+        ConnectedPlayer[] peers = _players.Snapshot()
+            .Where(p => p.ConnectionId != player.ConnectionId && p.Ready).ToArray();
+        // The local player has a tab-list entry but must never receive its own Add Entity.
+        await PlayerPackets.SendTabEntryAsync(player.Connection, player, ct);
+        foreach (ConnectedPlayer peer in peers)
+        {
+            try
+            {
+                await PlayerPackets.SendVisibleAsync(player.Connection, peer, ct);
+                await PlayerPackets.SendVisibleAsync(peer.Connection, player, ct);
+            }
+            catch (IOException) { /* stale peer cleaned up by its own handler */ }
+            catch (ObjectDisposedException) { }
+        }
+        player.MarkReady();
+        Console.WriteLine($"[ready] {player.Username} can see {peers.Length} player(s)");
+        await BroadcastChatAsync($"[Server] {player.Username} joined the game", ct);
+    }
+
+    private static void ApplyClientInformation(ConnectedPlayer player, Packet packet)
+    {
+        PacketReader reader = packet.Reader();
+        _ = reader.ReadString(16);
+        _ = reader.ReadByte();
+        player.SetChatMode(reader.ReadVarInt());
+    }
+
+    private async Task HandleChatAsync(ConnectedPlayer player, IncomingChat incoming, CancellationToken ct)
+    {
+        if (!_options.ChatEnabled)
+        {
+            await ReplyAsync(player, "Chat is disabled on this server.", ct);
+            return;
+        }
+        if (!ChatProtocol.IsSafeMessage(incoming.Message, _options.ChatMaxLength))
+        {
+            await ReplyAsync(player, "Invalid or oversized chat message.", ct);
+            return;
+        }
+        if (!player.TryConsumeChatCooldown(_options.ChatCooldownMilliseconds))
+        {
+            await ReplyAsync(player, "You're sending messages too quickly.", ct);
+            return;
+        }
+        // Do not claim authenticated chat signatures: this is an unsigned system
+        // message attributed to a server-authenticated account UUID.
+        string text = $"<{player.Username}> {incoming.Message}";
+        Console.WriteLine($"[chat] {text}");
+        await BroadcastChatAsync(text, ct);
+    }
+
+    private async Task BroadcastChatAsync(string message, CancellationToken ct)
+    {
+        foreach (ConnectedPlayer target in _players.Snapshot().Where(p => p.Ready && p.ChatMode == 0))
+        {
+            try { await ChatProtocol.SendSystemAsync(target.Connection, message, ct); }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+        }
+    }
+
+    private static Task ReplyAsync(ConnectedPlayer player, string message, CancellationToken ct) =>
+        ChatProtocol.SendSystemAsync(player.Connection, $"[Server] {message}", ct);
+
+    private ConnectedPlayer? FindOnline(string username) => _players.Snapshot().FirstOrDefault(p =>
+        p.Ready && string.Equals(p.Username, username, StringComparison.OrdinalIgnoreCase));
+
+    private int Level(ConnectedPlayer player) => _options.OnlineMode ? _operators.Level(player.PlayerUuid) : 0;
+
+    private async Task ExecuteCommandAsync(ConnectedPlayer player, string command, CancellationToken ct)
+    {
+        if (command.Length > 512 || command.Any(c => char.IsControl(c)))
+        {
+            await ReplyAsync(player, "Invalid command.", ct);
+            return;
+        }
+        string[] split = command.TrimStart('/').Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (split.Length == 0) return;
+        string verb = split[0].ToLowerInvariant();
+        string argument = split.Length == 2 ? split[1].Trim() : "";
+        if (!_options.ChatEnabled && (verb is "msg" or "tell" or "w" or "me" or "say"))
+        {
+            await ReplyAsync(player, "Chat is disabled on this server.", ct);
+            return;
+        }
+
+        int level = Level(player);
+        int minimum = verb switch
+        {
+            "gamemode" => GameModeProtocol.RequiredOpLevel,
+            "say" or "kick" or "oplist" => 2,
+            "op" or "deop" => 4,
+            _ => 0
+        };
+        if (level < minimum)
+        {
+            await ReplyAsync(player, "You don't have permission to use that command.", ct);
+            return;
+        }
+        switch (verb)
+        {
+            case "help":
+                await ReplyAsync(player, "Commands: /help /list /whoami /msg /me" +
+                    (level >= 1 ? " /gamemode" : "") +
+                    (level >= 2 ? " /say /kick /oplist" : "") +
+                    (level >= 4 ? " /op /deop" : ""), ct);
+                break;
+            case "list":
+                var online = _players.Snapshot().Where(p => p.Ready).Select(p => p.Username).ToArray();
+                await ReplyAsync(player, $"Online ({online.Length}): {string.Join(", ", online)}", ct);
+                break;
+            case "whoami":
+                await ReplyAsync(player, $"{player.Username} | UUID {player.PlayerUuid} | permission level {level}", ct);
+                break;
+            case "gamemode":
+            {
+                if (string.IsNullOrWhiteSpace(argument))
+                {
+                    // No vanilla server packet can open this local debug screen.
+                    // Advertise gamemode as executable without arguments so
+                    // users can discover the F3+F4 switcher via /gamemode.
+                    await ReplyAsync(player, "Hold F3 and press F4 to open the game-mode switcher. " +
+                        "Tap F4 to choose, then release F3 to apply. " +
+                        "Or use /gamemode <mode> [player].", ct);
+                    break;
+                }
+                if (!GameModeProtocol.TryParseArguments(argument, out PlayerGameMode mode,
+                    out string? targetName))
+                {
+                    await ReplyAsync(player,
+                        "Usage: /gamemode <survival|creative|adventure|spectator> [online player]", ct);
+                    break;
+                }
+                ConnectedPlayer? target = targetName is null ? player : FindOnline(targetName);
+                if (target is null)
+                {
+                    await ReplyAsync(player, "Player not found or not fully connected.", ct);
+                    break;
+                }
+                await ChangeGameModeAsync(target, mode, player, ct);
+                break;
+            }
+            case "msg":
+            case "tell":
+            case "w":
+            {
+                string[] pm = argument.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                if (pm.Length != 2 || !ChatProtocol.IsSafeMessage(pm[1], _options.ChatMaxLength))
+                { await ReplyAsync(player, "Usage: /msg <player> <message>", ct); break; }
+                ConnectedPlayer? target = FindOnline(pm[0]);
+                if (target is null) { await ReplyAsync(player, "Player not found.", ct); break; }
+                if (!player.TryConsumeChatCooldown(_options.ChatCooldownMilliseconds))
+                { await ReplyAsync(player, "You're sending messages too quickly.", ct); break; }
+                await ChatProtocol.SendSystemAsync(target.Connection, $"[From {player.Username}] {pm[1]}", ct);
+                if (target != player)
+                    await ChatProtocol.SendSystemAsync(player.Connection, $"[To {target.Username}] {pm[1]}", ct);
+                break;
+            }
+            case "me":
+                if (!ChatProtocol.IsSafeMessage(argument, _options.ChatMaxLength))
+                { await ReplyAsync(player, "Usage: /me <action>", ct); break; }
+                if (!player.TryConsumeChatCooldown(_options.ChatCooldownMilliseconds))
+                { await ReplyAsync(player, "You're sending messages too quickly.", ct); break; }
+                await BroadcastChatAsync($"* {player.Username} {argument}", ct);
+                break;
+            case "say":
+                if (!ChatProtocol.IsSafeMessage(argument, _options.ChatMaxLength))
+                { await ReplyAsync(player, "Usage: /say <message>", ct); break; }
+                await BroadcastChatAsync($"[Server: {player.Username}] {argument}", ct);
+                break;
+            case "oplist":
+                await ReplyAsync(player, "Operators: " + string.Join(", ",
+                    _operators.Snapshot().Select(o => $"{o.Name} (level {o.Level})")), ct);
+                break;
+            case "op":
+            {
+                if (!TryParseOpArgument(argument, out string targetName, out int targetLevel))
+                { await ReplyAsync(player, "Usage: /op <online player> [level 1-4]", ct); break; }
+                await GrantOperatorAsync(targetName, targetLevel, player, ct);
+                break;
+            }
+            case "deop":
+                if (argument.Length == 0 || argument.Contains(' '))
+                { await ReplyAsync(player, "Usage: /deop <name|uuid>", ct); break; }
+                await RevokeOperatorAsync(argument, player, ct);
+                break;
+            case "kick":
+            {
+                string[] kick = argument.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                if (kick.Length == 0) { await ReplyAsync(player, "Usage: /kick <player> [reason]", ct); break; }
+                ConnectedPlayer? target = FindOnline(kick[0]);
+                if (target is null) { await ReplyAsync(player, "Player not found.", ct); break; }
+                if (target == player || Level(target) >= level)
+                { await ReplyAsync(player, "Cannot kick yourself or an equal/higher-level operator.", ct); break; }
+                string reason = kick.Length == 2 && ChatProtocol.IsSafeMessage(kick[1], 256) ? kick[1] : "Kicked by an operator.";
+                await KickAsync(target, reason);
+                await ReplyAsync(player, $"Kicked {target.Username}.", ct);
+                break;
+            }
+            default:
+                await ReplyAsync(player, $"Unknown command: /{verb}", ct);
+                break;
+        }
+    }
+
+    private async Task ChangeGameModeAsync(ConnectedPlayer target, PlayerGameMode mode,
+        ConnectedPlayer actor, CancellationToken ct)
+    {
+        if (target.GameMode == mode)
+        {
+            await ReplyAsync(actor, $"{target.Username} is already in {mode.ToString().ToLowerInvariant()} mode.", ct);
+            return;
+        }
+        target.SetGameMode(mode);
+        await GameModeProtocol.SendLocalChangeAsync(target.Connection, mode, ct);
+        foreach (ConnectedPlayer observer in _players.Snapshot().Where(p => p.Ready))
+            await GameModeProtocol.SendTabUpdateAsync(observer.Connection, target.PlayerUuid, mode, ct);
+        string message = $"Set {target.Username}'s game mode to {mode.ToString().ToLowerInvariant()}.";
+        await ReplyAsync(actor, message, ct);
+        if (actor != target)
+            await ReplyAsync(target, $"Your game mode was set to {mode.ToString().ToLowerInvariant()} by {actor.Username}.", ct);
+        Console.WriteLine($"[gamemode] {actor.Username} -> {target.Username}: {mode}");
+    }
+
+    private static bool TryParseOpArgument(string raw, out string username, out int level)
+    {
+        string[] fields = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        username = fields.Length > 0 ? fields[0] : "";
+        level = 4;
+        return fields.Length is >= 1 and <= 2 && username.Length <= 16 &&
+            (fields.Length == 1 || (int.TryParse(fields[1], out level) && level is >= 1 and <= 4));
+    }
+
+    private async Task GrantOperatorAsync(string username, int level, ConnectedPlayer? actor, CancellationToken ct)
+    {
+        if (!_options.OnlineMode)
+        {
+            if (actor is not null) await ReplyAsync(actor, "OP permissions require onlineMode: true.", ct);
+            else Console.WriteLine("[op] Online authentication must be enabled to assign permissions.");
+            return;
+        }
+        ConnectedPlayer? target = FindOnline(username);
+        if (target is null)
+        {
+            if (actor is not null) await ReplyAsync(actor, "The player must be online and authenticated to grant OP.", ct);
+            else Console.WriteLine("[op] Player must be online and authenticated before granting OP.");
+            return;
+        }
+        bool changed = _operators.TryGrant(target.PlayerUuid, target.Username, level, out string response);
+        Console.WriteLine($"[op] {response}");
+        if (actor is not null) await ReplyAsync(actor, response, ct);
+        if (changed)
+        {
+            await GameModeProtocol.SendClientPermissionsAsync(target.Connection, target.EntityId, level, ct);
+            await CommandTree.SendAsync(target.Connection, level, ct);
+            await ReplyAsync(target, $"Your operator level is now {level}. " +
+                "Use F3+F4 to switch game modes.", ct);
+        }
+    }
+
+    private async Task RevokeOperatorAsync(string userOrUuid, ConnectedPlayer? actor, CancellationToken ct)
+    {
+        bool changed = _operators.TryRevoke(userOrUuid, out Guid uuid, out string response);
+        Console.WriteLine($"[op] {response}");
+        if (actor is not null) await ReplyAsync(actor, response, ct);
+        if (changed)
+        {
+            ConnectedPlayer? target = _players.Snapshot().FirstOrDefault(p => p.Ready && p.PlayerUuid == uuid);
+            if (target is not null)
+            {
+                await GameModeProtocol.SendClientPermissionsAsync(target.Connection, target.EntityId, 0, ct);
+                await CommandTree.SendAsync(target.Connection, 0, ct);
+                await ReplyAsync(target, "Your operator privileges were removed.", ct);
+            }
+        }
+    }
+
+    private static async Task KickAsync(ConnectedPlayer target, string reason)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        try { await ChatProtocol.SendDisconnectAsync(target.Connection, reason, timeout.Token); }
+        catch (IOException) { }
+        catch (ObjectDisposedException) { }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested) { }
+        finally { target.RequestDisconnect(); }
+    }
+
+    public async Task ExecuteConsoleCommandAsync(string line, CancellationTokenSource shutdown,
+        ServerConsole? terminal, CancellationToken stop)
+    {
+        // The console is trusted, but still enforce syntax/length limits.
+        if (line.Length > ConsoleLineEditor.MaxCommandLength ||
+            line.Any(c => char.IsControl(c)))
+        {
+            Console.WriteLine("[WARN] Invalid console command.");
+            return;
+        }
+        string[] fields = line.Trim().TrimStart('/').Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (fields.Length == 0) return;
+        string argument = fields.Length == 2 ? fields[1].Trim() : "";
+        switch (fields[0].ToLowerInvariant())
+        {
+            case "op":
+                if (TryParseOpArgument(argument, out string name, out int level))
+                    await GrantOperatorAsync(name, level, null, stop);
+                else Console.WriteLine("Usage: op <online player> [level 1-4]");
+                break;
+            case "deop":
+                if (argument.Length > 0 && !argument.Contains(' '))
+                    await RevokeOperatorAsync(argument, null, stop);
+                else Console.WriteLine("Usage: deop <name|uuid>");
+                break;
+            case "say":
+                if (ChatProtocol.IsSafeMessage(argument, _options.ChatMaxLength))
+                {
+                    Console.WriteLine($"[chat] [Server] {argument}");
+                    await BroadcastChatAsync($"[Server] {argument}", stop);
+                }
+                else Console.WriteLine("Usage: say <message>");
+                break;
+            case "list":
+                Console.WriteLine("Online: " + string.Join(", ",
+                    _players.Snapshot().Where(p => p.Ready).Select(p => p.Username)));
+                break;
+            case "oplist":
+                Console.WriteLine("Operators: " + string.Join(", ",
+                    _operators.Snapshot().Select(p => $"{p.Name} (level {p.Level})")));
+                break;
+            case "kick":
+            {
+                string[] parts = argument.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0)
+                {
+                    Console.WriteLine("Usage: kick <online player> [reason]");
+                    break;
+                }
+                ConnectedPlayer? target = FindOnline(parts[0]);
+                if (target is null)
+                {
+                    Console.WriteLine("[WARN] Player not found or not ready.");
+                    break;
+                }
+                string reason = parts.Length == 2 && ChatProtocol.IsSafeMessage(parts[1], 256)
+                    ? parts[1] : "Kicked by the server console.";
+                await KickAsync(target, reason);
+                Console.WriteLine($"[server] Kicked {target.Username}: {reason}");
+                break;
+            }
+            case "perf":
+                Console.WriteLine(_world.GetPerformanceReport());
+                Console.WriteLine($"[perf] caches: {_world.GetCacheSummary()}");
+                break;
+            case "clear": terminal?.Clear(); break;
+            case "help":
+                Console.WriteLine("Console commands: op <player> [1-4], deop <name|uuid>, " +
+                    "kick <player> [reason], say <message>, list, oplist, perf, clear, stop");
+                break;
+            case "stop":
+                Console.WriteLine("[server] Shutdown requested from console.");
+                shutdown.Cancel();
+                break;
+            default:
+                Console.WriteLine($"Unknown console command '{fields[0]}'. Type 'help'.");
+                break;
+        }
+    }
+
+    private async Task BroadcastMovementAsync(ConnectedPlayer subject, PlayerPose previous,
+        PlayerPose current, CancellationToken ct)
+    {
+        foreach (ConnectedPlayer other in _players.Snapshot().Where(p => p.Ready && p != subject))
+        {
+            try { await PlayerPackets.SendMotionAsync(other.Connection, subject.EntityId, previous, current, ct); }
+            catch (IOException) { /* peer will be removed by its handler */ }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task NotifyDepartureAsync(ConnectedPlayer departed)
+    {
+        if (!departed.Ready) return;
+        await BroadcastChatAsync($"[Server] {departed.Username} left the game", CancellationToken.None);
+        foreach (ConnectedPlayer other in _players.Snapshot().Where(p => p.Ready))
+        {
+            try { await PlayerPackets.SendGoneAsync(other.Connection, departed, CancellationToken.None); }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    // All players observe the same clock. Each client interpolates its sun/moon
+    // between syncs using the rate included in the 26.3 clock entry.
+    private async Task BroadcastWorldTimeAsync(CancellationToken stop)
+    {
+        using var ticker = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        int steps = 0;
+        DateTime nextPerf = DateTime.UtcNow.AddSeconds(_options.PerformanceReportSeconds);
+        try
+        {
+            while (await ticker.WaitForNextTickAsync(stop))
+            {
+                foreach (ConnectedPlayer player in _players.Snapshot())
+                {
+                    if (!player.Ready) continue;
+                    try { await _clock.SendAsync(player.Connection, stop); }
+                    catch (IOException) { /* connection cleanup is handled by its owner */ }
+                    catch (ObjectDisposedException) { }
+                }
+                if (++steps % 12 == 0) _clock.Save();
+                if (_options.PerformanceReportSeconds > 0 && DateTime.UtcNow >= nextPerf)
+                {
+                    Console.WriteLine(_world.GetPerformanceReport());
+                    nextPerf = DateTime.UtcNow.AddSeconds(_options.PerformanceReportSeconds);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+    }
+
+}

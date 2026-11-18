@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/Amethyst.csproj" />
+  <Project Path="shards/Amethyst.Shards.Overworld/Amethyst.Shards.Overworld.csproj" />
+  <Project Path="shards/Amethyst.Shards.Gameplay/Amethyst.Shards.Gameplay.csproj" />
+  <Project Path="shards/Amethyst.Shards.Hello/Amethyst.Shards.Hello.csproj" />
+  <Project Path="tests/ShardTests/ShardTests.csproj" />
+</Solution>

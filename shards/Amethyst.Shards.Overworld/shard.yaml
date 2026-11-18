@@ -1,0 +1,9 @@
+id: overworld
+apiVersion: 1
+assembly: Amethyst.Shards.Overworld.dll
+entryType: Amethyst.BuiltinShards.OverworldShard
+enabled: true
+provides:
+  - world
+requires: []
+dependsOn: []

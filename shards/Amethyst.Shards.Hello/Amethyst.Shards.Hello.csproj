@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Amethyst.csproj" />
+  </ItemGroup>
+  <Target Name="InstallShard" AfterTargets="Build">
+    <MakeDir Directories="$(MSBuildProjectDirectory)/../../shards/installed/hello" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/hello" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/shard.yaml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/hello" Condition="!Exists('$(MSBuildProjectDirectory)/../../shards/installed/hello/shard.yaml')" />
+  </Target>
+</Project>

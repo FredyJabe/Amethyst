@@ -1,0 +1,8 @@
+id: hello
+apiVersion: 1
+assembly: Amethyst.Shards.Hello.dll
+entryType: Amethyst.Samples.HelloShard
+enabled: false
+provides: []
+requires: []
+dependsOn: []

@@ -1,0 +1,5 @@
+# Only online-mode authenticated UUIDs are eligible for operator privileges.
+# Grant the first OP via the local server console after they finish logging in:
+#   op PlayerName 4
+# Entries are written automatically on grant/revoke.
+operators: []
