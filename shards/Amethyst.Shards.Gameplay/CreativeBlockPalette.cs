@@ -14,7 +14,7 @@ public static class CreativeBlockPalette
         [218] = 376, // minecraft:jungle_leaves: distance=7,persistent=true,waterlogged=false
         [219] = 404, // minecraft:acacia_leaves: distance=7,persistent=true,waterlogged=false
         [221] = 460, // minecraft:dark_oak_leaves: distance=7,persistent=true,waterlogged=false
-        [222] = 516, // minecraft:mangrove_leaves: distance=7,persistent=true,waterlogged=false
+        [223] = 516, // minecraft:mangrove_leaves: distance=7,persistent=true,waterlogged=false
         [1] = 1, // minecraft:stone
         [2] = 2, // minecraft:granite
         [3] = 3, // minecraft:polished_granite
