@@ -12,8 +12,8 @@ public readonly record struct CreativeSlotUpdate(int Slot, int ItemId, bool Plai
 public static class BlockInteractionProtocol
 {
     public const int ServerboundPlayerAction = 0x29;
-    public const int ServerboundSetHeldItem = 0x35;
-    public const int ServerboundCreativeSlot = 0x38;
+    public const int ServerboundSetHeldItem = 0x36;
+    public const int ServerboundCreativeSlot = 0x39;
     public const int ServerboundUseItemOn = 0x42;
     public const int ClientboundChangedAck = 0x04;
     public const int ClientboundBlockUpdate = 0x08;
