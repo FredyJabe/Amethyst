@@ -17,8 +17,12 @@ public sealed class MinecraftServer
     private readonly IShardPacketBus _packetBus;
     private readonly PlayerRegistry _players;
     private readonly OperatorStore _operators;
+    private readonly GroundItemStore? _groundItems;
+    // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
+    private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private CancellationTokenSource? _clockLifetime;
     private Task? _clockSync;
+    private Task? _itemsSync;
 
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null)
@@ -31,6 +35,9 @@ public sealed class MinecraftServer
         _players = new PlayerRegistry(options.MaxPlayers);
         _operators = new OperatorStore(options.OperatorsFile);
         _clock = new WorldClock(options);
+        if (_blocks is not null)
+            _groundItems = new GroundItemStore(inventoryDirectory,
+                options.WorldPath, _players.AllocateEntityId);
     }
 
     public ShardPlayerSummary[] OnlinePlayers => _players.Snapshot()
@@ -41,6 +48,8 @@ public sealed class MinecraftServer
         if (_clockLifetime is not null) throw new InvalidOperationException("Already started.");
         _clockLifetime = new CancellationTokenSource();
         _clockSync = BroadcastWorldTimeAsync(_clockLifetime.Token);
+        if (_groundItems is not null)
+            _itemsSync = RunGroundItemsAsync(_clockLifetime.Token);
         Console.WriteLine($"[gameplay] Enabled: chat={_options.ChatEnabled}, " +
             $"operators={_operators.Snapshot().Length}, viewDistance={_world.ViewDistance}");
     }
@@ -54,6 +63,11 @@ public sealed class MinecraftServer
             await _clockLifetime.CancelAsync();
             if (_clockSync is not null)
                 try { await _clockSync; } catch (OperationCanceledException) { }
+            if (_itemsSync is not null)
+                try { await _itemsSync; } catch (OperationCanceledException) { }
+            _groundItems?.Save();
+            _itemViews.Clear();
+            _itemsSync = null;
             _clockLifetime.Dispose();
             _clockLifetime = null;
             _clockSync = null;
@@ -439,8 +453,13 @@ public sealed class MinecraftServer
                 MiningRules.BlockInfo info = MiningRules.ForState(state);
                 if (info.DropItem > 0 && MiningRules.IsHarvestable(info, player.Inventory.Held().ItemId))
                 {
-                    if (player.Inventory.Give(info.DropItem, 1) > 0)
-                        await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+                    // A break produces a world item. The player receives it
+                    // only after touching the item and after its pickup delay.
+                    // The shared 20Hz item ticker handles spawn/pickup packets.
+                    if (_groundItems is null || !_groundItems.TrySpawn(info.DropItem, 1,
+                        action.X + 0.5, action.Y + 0.35, action.Z + 0.5, out _))
+                        Console.WriteLine($"[items] No capacity to spawn drop {info.DropItem} " +
+                            $"at {action.X},{action.Y},{action.Z}");
                 }
             }
         }
@@ -528,6 +547,123 @@ public sealed class MinecraftServer
             }
             catch (IOException) { /* disconnected viewer */ }
             catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task RunGroundItemsAsync(CancellationToken ct)
+    {
+        using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
+        while (await ticker.WaitForNextTickAsync(ct))
+            await TickGroundItemsAsync(ct);
+    }
+
+    /// <summary>One authoritative 20Hz tick for loose items. Exposed internally
+    /// for regression tests: network packets are still sent via PacketChannel.</summary>
+    internal async Task TickGroundItemsAsync(CancellationToken ct)
+    {
+        if (_groundItems is null || _blocks is null) return;
+        _groundItems.Simulate(_blocks);
+        GroundItem[] items = _groundItems.Snapshot();
+        ConnectedPlayer[] viewers = _players.Snapshot().Where(p => p.Ready).ToArray();
+        var online = viewers.Select(p => p.ConnectionId).ToHashSet();
+        foreach (Guid id in _itemViews.Keys.ToArray())
+            if (!online.Contains(id)) _itemViews.Remove(id);
+
+        // Visibility follows chunk subscriptions. Players entering range or
+        // joining after a drop was created receive the complete entity stack.
+        foreach (ConnectedPlayer viewer in viewers)
+        {
+            if (!_itemViews.TryGetValue(viewer.ConnectionId,
+                out Dictionary<int, GroundItem>? seen))
+            {
+                seen = new Dictionary<int, GroundItem>();
+                _itemViews.Add(viewer.ConnectionId, seen);
+            }
+            var visible = new HashSet<int>();
+            foreach (GroundItem item in items)
+            {
+                PlayerPose pose = viewer.Pose;
+                double dx = item.X - pose.X, dz = item.Z - pose.Z;
+                if (dx * dx + dz * dz > 48 * 48 || Math.Abs(item.Y - pose.Y) > 48)
+                    continue;
+                int cx = (int)Math.Floor(item.X / 16.0), cz = (int)Math.Floor(item.Z / 16.0);
+                if (viewer.View is IShardChunkSubscriptions chunks &&
+                    !await chunks.HasLoadedChunkAsync(cx, cz, ct)) continue;
+                visible.Add(item.EntityId);
+                try
+                {
+                    if (!seen.TryGetValue(item.EntityId, out GroundItem last))
+                        await DroppedItemProtocol.SendSpawnAsync(viewer.Connection, item, ct);
+                    else
+                    {
+                        if (last.Count != item.Count)
+                            await DroppedItemProtocol.SendStackAsync(viewer.Connection, item, ct);
+                        if (last.X != item.X || last.Y != item.Y || last.Z != item.Z)
+                            await DroppedItemProtocol.SendPositionAsync(viewer.Connection, item, ct);
+                    }
+                    seen[item.EntityId] = item;
+                }
+                catch (IOException) { /* disconnect handled by Play loop */ }
+                catch (ObjectDisposedException) { }
+            }
+            foreach (int entityId in seen.Keys.ToArray())
+            {
+                if (visible.Contains(entityId)) continue;
+                try { await DroppedItemProtocol.SendRemoveAsync(viewer.Connection, entityId, ct); }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+                seen.Remove(entityId);
+            }
+        }
+
+        // Picking up a stack is a real collision, not an instant reward for
+        // mining. Full inventories leave all items on the ground.
+        foreach (GroundItem item in items)
+        {
+            foreach (ConnectedPlayer collector in viewers)
+            {
+                PlayerPose pose = collector.Pose;
+                double dx = item.X - pose.X, dz = item.Z - pose.Z;
+                if (dx * dx + dz * dz > 1.5 * 1.5 ||
+                    Math.Abs(item.Y - (pose.Y + 0.35)) > 1.6) continue;
+                if (!_itemViews.TryGetValue(collector.ConnectionId, out var collectorView) ||
+                    !collectorView.ContainsKey(item.EntityId)) continue;
+                int count = _groundItems.TryCollect(item.EntityId, collector.Inventory,
+                    out GroundItem remaining);
+                if (count == 0) continue;
+                foreach (ConnectedPlayer viewer in viewers)
+                {
+                    if (!_itemViews.TryGetValue(viewer.ConnectionId, out var seen) ||
+                        !seen.ContainsKey(item.EntityId)) continue;
+                    try
+                    {
+                        await DroppedItemProtocol.SendPickupAsync(viewer.Connection,
+                            item.EntityId, collector.EntityId, count, ct);
+                        if (remaining.Count == 0)
+                        {
+                            await DroppedItemProtocol.SendRemoveAsync(viewer.Connection,
+                                item.EntityId, ct);
+                            seen.Remove(item.EntityId);
+                        }
+                        else
+                        {
+                            await DroppedItemProtocol.SendStackAsync(viewer.Connection,
+                                remaining, ct);
+                            seen[item.EntityId] = remaining;
+                        }
+                    }
+                    catch (IOException) { }
+                    catch (ObjectDisposedException) { }
+                }
+                try
+                {
+                    await InventoryProtocol.SendContentAsync(collector.Connection,
+                        collector.Inventory, ct);
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+                if (remaining.Count == 0) break;
+            }
         }
     }
 
