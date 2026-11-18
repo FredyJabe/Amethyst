@@ -39,19 +39,42 @@ public sealed class ConnectedPlayer : IShardPlayer
     public void StartMining(int x, int y, int z, ushort state, int itemId, int requiredMs) =>
         _mining = (x, y, z, state, itemId, Environment.TickCount64, requiredMs);
     public void CancelMining() => _mining = null;
-    public bool FinishMining(int x, int y, int z, ushort state, int heldItem)
+    public bool FinishMining(int x, int y, int z, ushort state, int heldItem,
+        out string reason)
     {
         var mining = _mining;
         _mining = null;
-        return mining is { } started && started.X == x && started.Y == y &&
-            started.Z == z && started.State == state && started.HeldItem == heldItem &&
-            // The vanilla server accepts STOP once at least 70% of the
-            // expected mining progress is complete; the client predicts the
-            // removal at 100%. Requiring 100% of elapsed wall time here
-            // incorrectly rejects normal client digs at tick boundaries.
-            // Include one 50 ms tick for start/receive scheduling skew.
-            Environment.TickCount64 - started.Started + 50 >=
-                ((long)started.RequiredMs * 7 + 9) / 10;
+        if (mining is not { } started)
+        {
+            reason = "no START recorded";
+            return false;
+        }
+        if (started.X != x || started.Y != y || started.Z != z)
+        {
+            reason = $"different target ({started.X},{started.Y},{started.Z})";
+            return false;
+        }
+        if (started.State != state)
+        {
+            reason = $"block changed (started={started.State}, now={state})";
+            return false;
+        }
+        if (started.HeldItem != heldItem)
+        {
+            reason = $"held item changed (started={started.HeldItem}, now={heldItem})";
+            return false;
+        }
+        // Vanilla accepts STOP at 70% progress. Leave one 50 ms tick of
+        // allowance for the client's first mining tick and packet scheduling.
+        long elapsed = Math.Max(0, Environment.TickCount64 - started.Started);
+        long threshold = ((long)started.RequiredMs * 7 + 9) / 10;
+        if (elapsed + 50 < threshold)
+        {
+            reason = $"too early (elapsed={elapsed}ms, threshold={threshold}ms, expected={started.RequiredMs}ms)";
+            return false;
+        }
+        reason = $"complete (elapsed={elapsed}ms, expected={started.RequiredMs}ms)";
+        return true;
     }
 
     public bool TryConsumeEditBudget()
