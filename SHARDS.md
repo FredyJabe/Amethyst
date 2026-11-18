@@ -145,6 +145,13 @@ disconnect, then the configured default applies on the next login.
 optional `IShardBlockWorld` capability; Core still handles networking only.
 
 Creative breaks blocks instantly and places items without consuming them.
+**Java 26.3 digging action IDs:** `0=START`, `1=CHANGE_DESTROY_DIRECTION`,
+`2=ABORT`, `3=STOP`. This is **not** the pre-26.3 enum (the new
+direction action shifts ABORT/STOP and item drop statuses). A genuine
+26.3 STOP at status 3 must commit the world edit and publish the
+authoritative air state; interpreting it as an item drop causes client-side
+broken blocks to reappear the next time the server sends updates.
+
 Survival tracks start/cancel/finish dig actions per player, checks block hardness
 and selected tool type/tier against Java Edition 26.3 data, and validates
 elapsed time before accepting a break. STOP is accepted at 70% of the expected
