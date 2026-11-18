@@ -125,6 +125,16 @@ public sealed class ConnectedPlayer : IShardPlayer
     {
         lock (_poseLock) { PlayerPose previous = _pose; _pose = pose; return previous; }
     }
+
+    // Serialize against movement updates so background saves can never write
+    // an older snapshot after a newer one has been committed on logout.
+    public void PersistPosition(PlayerPositionStore positions)
+    {
+        lock (_poseLock)
+        {
+            if (Ready) positions.Save(PlayerUuid, _pose);
+        }
+    }
     public ConnectedPlayer(Guid id, string name, ProfileProperty[] properties, int entityId,
         PacketChannel connection, IShardWorld world, string? inventoryDirectory = null)
     {
