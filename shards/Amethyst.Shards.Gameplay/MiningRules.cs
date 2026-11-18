@@ -51,7 +51,7 @@ public static class MiningRules
         new(5, 5, 1.5f, 1, 5, 127), // polished_diorite
         new(6, 6, 1.5f, 1, 6, 127), // andesite
         new(7, 7, 1.5f, 1, 7, 127), // polished_andesite
-        new(8, 9, 0.6f, 3, 0, 0), // grass_block
+        new(8, 9, 0.6f, 3, 55, 0), // grass_block
         new(10, 10, 0.5f, 3, 55, 0), // dirt
         new(11, 11, 0.5f, 3, 56, 0), // coarse_dirt
         new(12, 13, 0.5f, 3, 0, 0), // podzol
@@ -87,10 +87,10 @@ public static class MiningRules
         new(126, 126, 0.5f, 3, 91, 0), // red_sand
         new(127, 127, 0.6f, 3, 92, 0), // gravel
         new(128, 131, 0.25f, 3, 0, 0), // suspicious_gravel
-        new(132, 132, 3f, 0, 1021, 112), // gold_ore
-        new(133, 133, 4.5f, 0, 1021, 112), // deepslate_gold_ore
-        new(134, 134, 3f, 0, 1017, 118), // iron_ore
-        new(135, 135, 4.5f, 0, 1017, 118), // deepslate_iron_ore
+        new(132, 132, 3f, 1, 1021, 112), // gold_ore
+        new(133, 133, 4.5f, 1, 1021, 112), // deepslate_gold_ore
+        new(134, 134, 3f, 1, 1017, 118), // iron_ore
+        new(135, 135, 4.5f, 1, 1017, 118), // deepslate_iron_ore
         new(136, 136, 3f, 1, 1010, 127), // coal_ore
         new(137, 137, 4.5f, 1, 1010, 127), // deepslate_coal_ore
         new(138, 138, 3f, 1, 109, 127), // nether_gold_ore
@@ -137,26 +137,26 @@ public static class MiningRules
         new(258, 260, 2f, 2, 197, 0), // stripped_pale_oak_wood
         new(261, 263, 2f, 2, 198, 0), // stripped_mangrove_wood
         new(264, 266, 2f, 2, 199, 0), // stripped_poplar_wood
-        new(267, 294, 0.2f, 4, 215, 0), // oak_leaves
-        new(295, 322, 0.2f, 4, 216, 0), // spruce_leaves
-        new(323, 350, 0.2f, 4, 217, 0), // birch_leaves
-        new(351, 378, 0.2f, 4, 218, 0), // jungle_leaves
-        new(379, 406, 0.2f, 4, 219, 0), // acacia_leaves
-        new(407, 434, 0.2f, 4, 220, 0), // cherry_leaves
-        new(435, 462, 0.2f, 4, 221, 0), // dark_oak_leaves
-        new(463, 490, 0.2f, 4, 222, 0), // pale_oak_leaves
-        new(491, 518, 0.2f, 4, 223, 0), // mangrove_leaves
-        new(519, 546, 0.2f, 4, 224, 0), // red_poplar_leaves
-        new(547, 574, 0.2f, 4, 225, 0), // orange_poplar_leaves
-        new(575, 602, 0.2f, 4, 226, 0), // yellow_poplar_leaves
-        new(603, 630, 0.2f, 4, 227, 0), // azalea_leaves
-        new(631, 658, 0.2f, 4, 228, 0), // flowering_azalea_leaves
+        new(267, 294, 0.2f, 4, 0, 0), // oak_leaves
+        new(295, 322, 0.2f, 4, 0, 0), // spruce_leaves
+        new(323, 350, 0.2f, 4, 0, 0), // birch_leaves
+        new(351, 378, 0.2f, 4, 0, 0), // jungle_leaves
+        new(379, 406, 0.2f, 4, 0, 0), // acacia_leaves
+        new(407, 434, 0.2f, 4, 0, 0), // cherry_leaves
+        new(435, 462, 0.2f, 4, 0, 0), // dark_oak_leaves
+        new(463, 490, 0.2f, 4, 0, 0), // pale_oak_leaves
+        new(491, 518, 0.2f, 4, 0, 0), // mangrove_leaves
+        new(519, 546, 0.2f, 4, 0, 0), // red_poplar_leaves
+        new(547, 574, 0.2f, 4, 0, 0), // orange_poplar_leaves
+        new(575, 602, 0.2f, 4, 0, 0), // yellow_poplar_leaves
+        new(603, 630, 0.2f, 4, 0, 0), // azalea_leaves
+        new(631, 658, 0.2f, 4, 0, 0), // flowering_azalea_leaves
         new(659, 659, 0.6f, 4, 0, 0), // sponge
         new(660, 660, 0.6f, 4, 0, 0), // wet_sponge
         new(661, 661, 0.3f, 0, 231, 0), // glass
-        new(662, 662, 3f, 0, 1014, 118), // lapis_ore
-        new(663, 663, 4.5f, 0, 1014, 118), // deepslate_lapis_ore
-        new(664, 664, 3f, 0, 233, 118), // lapis_block
+        new(662, 662, 3f, 1, 1014, 118), // lapis_ore
+        new(663, 663, 4.5f, 1, 1014, 118), // deepslate_lapis_ore
+        new(664, 664, 3f, 1, 233, 118), // lapis_block
         new(665, 676, 3.5f, 1, 0, 127), // dispenser
         new(677, 677, 0.8f, 1, 234, 127), // sandstone
         new(678, 678, 0.8f, 1, 0, 127), // chiseled_sandstone
@@ -260,8 +260,8 @@ public static class MiningRules
         new(3827, 3827, 0f, 0, 0, 0), // lily_of_the_valley
         new(3828, 3828, 0f, 0, 0, 0), // brown_mushroom
         new(3829, 3829, 0f, 0, 0, 0), // red_mushroom
-        new(3830, 3830, 3f, 0, 128, 112), // gold_block
-        new(3831, 3831, 5f, 0, 119, 118), // iron_block
+        new(3830, 3830, 3f, 1, 128, 112), // gold_block
+        new(3831, 3831, 5f, 1, 119, 118), // iron_block
         new(3832, 3832, 2f, 1, 376, 127), // bricks
         new(3833, 3834, 0f, 0, 0, 0), // tnt
         new(3835, 3835, 1.5f, 2, 0, 0), // bookshelf
@@ -280,7 +280,7 @@ public static class MiningRules
         new(4796, 4859, 2f, 2, 0, 0), // spruce_shelf
         new(4860, 4923, 2f, 2, 0, 0), // warped_shelf
         new(4924, 4924, 2f, 1, 393, 127), // mossy_cobblestone
-        new(4925, 4925, 50f, 0, 394, 96), // obsidian
+        new(4925, 4925, 50f, 1, 394, 96), // obsidian
         new(4926, 4926, 0f, 0, 0, 0), // torch
         new(4927, 4930, 0f, 0, 0, 0), // wall_torch
         new(4931, 5442, 0f, 0, 0, 0), // fire
@@ -290,9 +290,9 @@ public static class MiningRules
         new(5463, 5542, 2f, 2, 0, 0), // oak_stairs
         new(5543, 5566, 2.5f, 2, 0, 0), // chest
         new(5567, 6862, 0f, 0, 0, 0), // redstone_wire
-        new(6863, 6863, 3f, 0, 1012, 112), // diamond_ore
-        new(6864, 6864, 4.5f, 0, 1012, 112), // deepslate_diamond_ore
-        new(6865, 6865, 5f, 0, 129, 112), // diamond_block
+        new(6863, 6863, 3f, 1, 1012, 112), // diamond_ore
+        new(6864, 6864, 4.5f, 1, 1012, 112), // deepslate_diamond_ore
+        new(6865, 6865, 5f, 1, 129, 112), // diamond_block
         new(6866, 6866, 2.5f, 2, 0, 0), // crafting_table
         new(6867, 6874, 0f, 0, 0, 0), // wheat
         new(6875, 6882, 0.6f, 3, 0, 0), // farmland
@@ -363,8 +363,8 @@ public static class MiningRules
         new(8545, 8546, 0.5f, 2, 0, 0), // mangrove_pressure_plate
         new(8547, 8548, 0.5f, 2, 0, 0), // poplar_pressure_plate
         new(8549, 8550, 0.5f, 2, 0, 0), // bamboo_pressure_plate
-        new(8551, 8552, 3f, 0, 0, 112), // redstone_ore
-        new(8553, 8554, 4.5f, 0, 0, 112), // deepslate_redstone_ore
+        new(8551, 8552, 3f, 1, 0, 112), // redstone_ore
+        new(8553, 8554, 4.5f, 1, 0, 112), // deepslate_redstone_ore
         new(8555, 8556, 0f, 0, 0, 0), // redstone_torch
         new(8557, 8564, 0f, 0, 0, 0), // redstone_wall_torch
         new(8565, 8588, 0.5f, 1, 0, 0), // stone_button
@@ -492,12 +492,12 @@ public static class MiningRules
         new(11215, 11226, 0.2f, 2, 0, 0), // cocoa
         new(11227, 11234, 0f, 0, 0, 0), // shelf_mushroom
         new(11235, 11314, 0.8f, 1, 0, 127), // sandstone_stairs
-        new(11315, 11315, 3f, 0, 1013, 112), // emerald_ore
-        new(11316, 11316, 4.5f, 0, 1013, 112), // deepslate_emerald_ore
+        new(11315, 11315, 3f, 1, 1013, 112), // emerald_ore
+        new(11316, 11316, 4.5f, 1, 1013, 112), // deepslate_emerald_ore
         new(11317, 11324, 22.5f, 1, 0, 0), // ender_chest
         new(11325, 11340, 0f, 0, 0, 0), // tripwire_hook
         new(11341, 11468, 0f, 0, 0, 0), // tripwire
-        new(11469, 11469, 5f, 0, 514, 112), // emerald_block
+        new(11469, 11469, 5f, 1, 514, 112), // emerald_block
         new(11470, 11549, 2f, 2, 0, 0), // spruce_stairs
         new(11550, 11629, 2f, 2, 0, 0), // birch_stairs
         new(11630, 11709, 2f, 2, 0, 0), // jungle_stairs
@@ -1048,10 +1048,10 @@ public static class MiningRules
         new(25149, 25172, 0.6f, 2, 0, 0), // beehive
         new(25173, 25173, 0f, 0, 832, 0), // honey_block
         new(25174, 25174, 0.6f, 0, 0, 0), // honeycomb_block
-        new(25175, 25175, 50f, 0, 130, 96), // netherite_block
-        new(25176, 25176, 30f, 0, 0, 96), // ancient_debris
-        new(25177, 25177, 50f, 0, 1536, 96), // crying_obsidian
-        new(25178, 25182, 50f, 0, 0, 96), // respawn_anchor
+        new(25175, 25175, 50f, 1, 130, 96), // netherite_block
+        new(25176, 25176, 30f, 1, 0, 96), // ancient_debris
+        new(25177, 25177, 50f, 1, 1536, 96), // crying_obsidian
+        new(25178, 25182, 50f, 1, 0, 96), // respawn_anchor
         new(25183, 25183, 0f, 0, 0, 0), // potted_crimson_fungus
         new(25184, 25184, 0f, 0, 0, 0), // potted_warped_fungus
         new(25185, 25185, 0f, 0, 0, 0), // potted_crimson_roots
@@ -1167,48 +1167,48 @@ public static class MiningRules
         new(31001, 31128, 0.2f, 4, 0, 0), // sculk_vein
         new(31129, 31130, 3f, 4, 0, 0), // sculk_catalyst
         new(31131, 31138, 3f, 4, 0, 0), // sculk_shrieker
-        new(31139, 31139, 3f, 0, 120, 118), // copper_block
-        new(31140, 31140, 3f, 0, 0, 118), // exposed_copper
-        new(31141, 31141, 3f, 0, 0, 118), // weathered_copper
-        new(31142, 31142, 3f, 0, 0, 118), // oxidized_copper
-        new(31143, 31143, 3f, 0, 0, 118), // waxed_copper_block
-        new(31144, 31144, 3f, 0, 0, 118), // waxed_exposed_copper
-        new(31145, 31145, 3f, 0, 0, 118), // waxed_weathered_copper
-        new(31146, 31146, 3f, 0, 0, 118), // waxed_oxidized_copper
-        new(31147, 31147, 3f, 0, 1019, 118), // copper_ore
-        new(31148, 31148, 4.5f, 0, 1019, 118), // deepslate_copper_ore
-        new(31149, 31149, 3f, 0, 0, 118), // cut_copper
-        new(31150, 31150, 3f, 0, 0, 118), // exposed_cut_copper
-        new(31151, 31151, 3f, 0, 0, 118), // weathered_cut_copper
-        new(31152, 31152, 3f, 0, 0, 118), // oxidized_cut_copper
-        new(31153, 31153, 3f, 0, 0, 118), // waxed_cut_copper
-        new(31154, 31154, 3f, 0, 0, 118), // waxed_exposed_cut_copper
-        new(31155, 31155, 3f, 0, 0, 118), // waxed_weathered_cut_copper
-        new(31156, 31156, 3f, 0, 0, 118), // waxed_oxidized_cut_copper
-        new(31157, 31157, 3f, 0, 0, 118), // chiseled_copper
-        new(31158, 31158, 3f, 0, 0, 118), // exposed_chiseled_copper
-        new(31159, 31159, 3f, 0, 0, 118), // weathered_chiseled_copper
-        new(31160, 31160, 3f, 0, 0, 118), // oxidized_chiseled_copper
-        new(31161, 31161, 3f, 0, 0, 118), // waxed_chiseled_copper
-        new(31162, 31162, 3f, 0, 0, 118), // waxed_exposed_chiseled_copper
-        new(31163, 31163, 3f, 0, 0, 118), // waxed_weathered_chiseled_copper
-        new(31164, 31164, 3f, 0, 0, 118), // waxed_oxidized_chiseled_copper
-        new(31165, 31244, 3f, 0, 0, 118), // cut_copper_stairs
-        new(31245, 31324, 3f, 0, 0, 118), // exposed_cut_copper_stairs
-        new(31325, 31404, 3f, 0, 0, 118), // weathered_cut_copper_stairs
-        new(31405, 31484, 3f, 0, 0, 118), // oxidized_cut_copper_stairs
-        new(31485, 31564, 3f, 0, 0, 118), // waxed_cut_copper_stairs
-        new(31565, 31644, 3f, 0, 0, 118), // waxed_exposed_cut_copper_stairs
-        new(31645, 31724, 3f, 0, 0, 118), // waxed_weathered_cut_copper_stairs
-        new(31725, 31804, 3f, 0, 0, 118), // waxed_oxidized_cut_copper_stairs
-        new(31805, 31810, 3f, 0, 0, 118), // cut_copper_slab
-        new(31811, 31816, 3f, 0, 0, 118), // exposed_cut_copper_slab
-        new(31817, 31822, 3f, 0, 0, 118), // weathered_cut_copper_slab
-        new(31823, 31828, 3f, 0, 0, 118), // oxidized_cut_copper_slab
-        new(31829, 31834, 3f, 0, 0, 118), // waxed_cut_copper_slab
-        new(31835, 31840, 3f, 0, 0, 118), // waxed_exposed_cut_copper_slab
-        new(31841, 31846, 3f, 0, 0, 118), // waxed_weathered_cut_copper_slab
-        new(31847, 31852, 3f, 0, 0, 118), // waxed_oxidized_cut_copper_slab
+        new(31139, 31139, 3f, 1, 120, 118), // copper_block
+        new(31140, 31140, 3f, 1, 0, 118), // exposed_copper
+        new(31141, 31141, 3f, 1, 0, 118), // weathered_copper
+        new(31142, 31142, 3f, 1, 0, 118), // oxidized_copper
+        new(31143, 31143, 3f, 1, 0, 118), // waxed_copper_block
+        new(31144, 31144, 3f, 1, 0, 118), // waxed_exposed_copper
+        new(31145, 31145, 3f, 1, 0, 118), // waxed_weathered_copper
+        new(31146, 31146, 3f, 1, 0, 118), // waxed_oxidized_copper
+        new(31147, 31147, 3f, 1, 1019, 118), // copper_ore
+        new(31148, 31148, 4.5f, 1, 1019, 118), // deepslate_copper_ore
+        new(31149, 31149, 3f, 1, 0, 118), // cut_copper
+        new(31150, 31150, 3f, 1, 0, 118), // exposed_cut_copper
+        new(31151, 31151, 3f, 1, 0, 118), // weathered_cut_copper
+        new(31152, 31152, 3f, 1, 0, 118), // oxidized_cut_copper
+        new(31153, 31153, 3f, 1, 0, 118), // waxed_cut_copper
+        new(31154, 31154, 3f, 1, 0, 118), // waxed_exposed_cut_copper
+        new(31155, 31155, 3f, 1, 0, 118), // waxed_weathered_cut_copper
+        new(31156, 31156, 3f, 1, 0, 118), // waxed_oxidized_cut_copper
+        new(31157, 31157, 3f, 1, 0, 118), // chiseled_copper
+        new(31158, 31158, 3f, 1, 0, 118), // exposed_chiseled_copper
+        new(31159, 31159, 3f, 1, 0, 118), // weathered_chiseled_copper
+        new(31160, 31160, 3f, 1, 0, 118), // oxidized_chiseled_copper
+        new(31161, 31161, 3f, 1, 0, 118), // waxed_chiseled_copper
+        new(31162, 31162, 3f, 1, 0, 118), // waxed_exposed_chiseled_copper
+        new(31163, 31163, 3f, 1, 0, 118), // waxed_weathered_chiseled_copper
+        new(31164, 31164, 3f, 1, 0, 118), // waxed_oxidized_chiseled_copper
+        new(31165, 31244, 3f, 1, 0, 118), // cut_copper_stairs
+        new(31245, 31324, 3f, 1, 0, 118), // exposed_cut_copper_stairs
+        new(31325, 31404, 3f, 1, 0, 118), // weathered_cut_copper_stairs
+        new(31405, 31484, 3f, 1, 0, 118), // oxidized_cut_copper_stairs
+        new(31485, 31564, 3f, 1, 0, 118), // waxed_cut_copper_stairs
+        new(31565, 31644, 3f, 1, 0, 118), // waxed_exposed_cut_copper_stairs
+        new(31645, 31724, 3f, 1, 0, 118), // waxed_weathered_cut_copper_stairs
+        new(31725, 31804, 3f, 1, 0, 118), // waxed_oxidized_cut_copper_stairs
+        new(31805, 31810, 3f, 1, 0, 118), // cut_copper_slab
+        new(31811, 31816, 3f, 1, 0, 118), // exposed_cut_copper_slab
+        new(31817, 31822, 3f, 1, 0, 118), // weathered_cut_copper_slab
+        new(31823, 31828, 3f, 1, 0, 118), // oxidized_cut_copper_slab
+        new(31829, 31834, 3f, 1, 0, 118), // waxed_cut_copper_slab
+        new(31835, 31840, 3f, 1, 0, 118), // waxed_exposed_cut_copper_slab
+        new(31841, 31846, 3f, 1, 0, 118), // waxed_weathered_cut_copper_slab
+        new(31847, 31852, 3f, 1, 0, 118), // waxed_oxidized_cut_copper_slab
         new(31853, 31916, 3f, 1, 0, 0), // copper_door
         new(31917, 31980, 3f, 1, 0, 0), // exposed_copper_door
         new(31981, 32044, 3f, 1, 0, 0), // weathered_copper_door
@@ -1217,38 +1217,38 @@ public static class MiningRules
         new(32173, 32236, 3f, 1, 0, 0), // waxed_exposed_copper_door
         new(32237, 32300, 3f, 1, 0, 0), // waxed_weathered_copper_door
         new(32301, 32364, 3f, 1, 0, 0), // waxed_oxidized_copper_door
-        new(32365, 32428, 3f, 0, 0, 118), // copper_trapdoor
-        new(32429, 32492, 3f, 0, 0, 118), // exposed_copper_trapdoor
-        new(32493, 32556, 3f, 0, 0, 118), // weathered_copper_trapdoor
-        new(32557, 32620, 3f, 0, 0, 118), // oxidized_copper_trapdoor
-        new(32621, 32684, 3f, 0, 0, 118), // waxed_copper_trapdoor
-        new(32685, 32748, 3f, 0, 0, 118), // waxed_exposed_copper_trapdoor
-        new(32749, 32812, 3f, 0, 0, 118), // waxed_weathered_copper_trapdoor
-        new(32813, 32876, 3f, 0, 0, 118), // waxed_oxidized_copper_trapdoor
-        new(32877, 32878, 3f, 0, 0, 118), // copper_grate
-        new(32879, 32880, 3f, 0, 0, 118), // exposed_copper_grate
-        new(32881, 32882, 3f, 0, 0, 118), // weathered_copper_grate
-        new(32883, 32884, 3f, 0, 0, 118), // oxidized_copper_grate
-        new(32885, 32886, 3f, 0, 0, 118), // waxed_copper_grate
-        new(32887, 32888, 3f, 0, 0, 118), // waxed_exposed_copper_grate
-        new(32889, 32890, 3f, 0, 0, 118), // waxed_weathered_copper_grate
-        new(32891, 32892, 3f, 0, 0, 118), // waxed_oxidized_copper_grate
-        new(32893, 32896, 3f, 0, 0, 118), // copper_bulb
-        new(32897, 32900, 3f, 0, 0, 118), // exposed_copper_bulb
-        new(32901, 32904, 3f, 0, 0, 118), // weathered_copper_bulb
-        new(32905, 32908, 3f, 0, 0, 118), // oxidized_copper_bulb
-        new(32909, 32912, 3f, 0, 0, 118), // waxed_copper_bulb
-        new(32913, 32916, 3f, 0, 0, 118), // waxed_exposed_copper_bulb
-        new(32917, 32920, 3f, 0, 0, 118), // waxed_weathered_copper_bulb
-        new(32921, 32924, 3f, 0, 0, 118), // waxed_oxidized_copper_bulb
-        new(32925, 32948, 3f, 0, 0, 118), // copper_chest
-        new(32949, 32972, 3f, 0, 0, 118), // exposed_copper_chest
-        new(32973, 32996, 3f, 0, 0, 118), // weathered_copper_chest
-        new(32997, 33020, 3f, 0, 0, 118), // oxidized_copper_chest
-        new(33021, 33044, 3f, 0, 0, 118), // waxed_copper_chest
-        new(33045, 33068, 3f, 0, 0, 118), // waxed_exposed_copper_chest
-        new(33069, 33092, 3f, 0, 0, 118), // waxed_weathered_copper_chest
-        new(33093, 33116, 3f, 0, 0, 118), // waxed_oxidized_copper_chest
+        new(32365, 32428, 3f, 1, 0, 118), // copper_trapdoor
+        new(32429, 32492, 3f, 1, 0, 118), // exposed_copper_trapdoor
+        new(32493, 32556, 3f, 1, 0, 118), // weathered_copper_trapdoor
+        new(32557, 32620, 3f, 1, 0, 118), // oxidized_copper_trapdoor
+        new(32621, 32684, 3f, 1, 0, 118), // waxed_copper_trapdoor
+        new(32685, 32748, 3f, 1, 0, 118), // waxed_exposed_copper_trapdoor
+        new(32749, 32812, 3f, 1, 0, 118), // waxed_weathered_copper_trapdoor
+        new(32813, 32876, 3f, 1, 0, 118), // waxed_oxidized_copper_trapdoor
+        new(32877, 32878, 3f, 1, 0, 118), // copper_grate
+        new(32879, 32880, 3f, 1, 0, 118), // exposed_copper_grate
+        new(32881, 32882, 3f, 1, 0, 118), // weathered_copper_grate
+        new(32883, 32884, 3f, 1, 0, 118), // oxidized_copper_grate
+        new(32885, 32886, 3f, 1, 0, 118), // waxed_copper_grate
+        new(32887, 32888, 3f, 1, 0, 118), // waxed_exposed_copper_grate
+        new(32889, 32890, 3f, 1, 0, 118), // waxed_weathered_copper_grate
+        new(32891, 32892, 3f, 1, 0, 118), // waxed_oxidized_copper_grate
+        new(32893, 32896, 3f, 1, 0, 118), // copper_bulb
+        new(32897, 32900, 3f, 1, 0, 118), // exposed_copper_bulb
+        new(32901, 32904, 3f, 1, 0, 118), // weathered_copper_bulb
+        new(32905, 32908, 3f, 1, 0, 118), // oxidized_copper_bulb
+        new(32909, 32912, 3f, 1, 0, 118), // waxed_copper_bulb
+        new(32913, 32916, 3f, 1, 0, 118), // waxed_exposed_copper_bulb
+        new(32917, 32920, 3f, 1, 0, 118), // waxed_weathered_copper_bulb
+        new(32921, 32924, 3f, 1, 0, 118), // waxed_oxidized_copper_bulb
+        new(32925, 32948, 3f, 1, 0, 118), // copper_chest
+        new(32949, 32972, 3f, 1, 0, 118), // exposed_copper_chest
+        new(32973, 32996, 3f, 1, 0, 118), // weathered_copper_chest
+        new(32997, 33020, 3f, 1, 0, 118), // oxidized_copper_chest
+        new(33021, 33044, 3f, 1, 0, 118), // waxed_copper_chest
+        new(33045, 33068, 3f, 1, 0, 118), // waxed_exposed_copper_chest
+        new(33069, 33092, 3f, 1, 0, 118), // waxed_weathered_copper_chest
+        new(33093, 33116, 3f, 1, 0, 118), // waxed_oxidized_copper_chest
         new(33117, 33148, 3f, 1, 0, 0), // copper_golem_statue
         new(33149, 33180, 3f, 1, 0, 0), // exposed_copper_golem_statue
         new(33181, 33212, 3f, 1, 0, 0), // weathered_copper_golem_statue
@@ -1257,14 +1257,14 @@ public static class MiningRules
         new(33277, 33308, 3f, 1, 0, 0), // waxed_exposed_copper_golem_statue
         new(33309, 33340, 3f, 1, 0, 0), // waxed_weathered_copper_golem_statue
         new(33341, 33372, 3f, 1, 0, 0), // waxed_oxidized_copper_golem_statue
-        new(33373, 33396, 3f, 0, 0, 118), // lightning_rod
-        new(33397, 33420, 3f, 0, 0, 118), // exposed_lightning_rod
-        new(33421, 33444, 3f, 0, 0, 118), // weathered_lightning_rod
-        new(33445, 33468, 3f, 0, 0, 118), // oxidized_lightning_rod
-        new(33469, 33492, 3f, 0, 0, 118), // waxed_lightning_rod
-        new(33493, 33516, 3f, 0, 0, 118), // waxed_exposed_lightning_rod
-        new(33517, 33540, 3f, 0, 0, 118), // waxed_weathered_lightning_rod
-        new(33541, 33564, 3f, 0, 0, 118), // waxed_oxidized_lightning_rod
+        new(33373, 33396, 3f, 1, 0, 118), // lightning_rod
+        new(33397, 33420, 3f, 1, 0, 118), // exposed_lightning_rod
+        new(33421, 33444, 3f, 1, 0, 118), // weathered_lightning_rod
+        new(33445, 33468, 3f, 1, 0, 118), // oxidized_lightning_rod
+        new(33469, 33492, 3f, 1, 0, 118), // waxed_lightning_rod
+        new(33493, 33516, 3f, 1, 0, 118), // waxed_exposed_lightning_rod
+        new(33517, 33540, 3f, 1, 0, 118), // waxed_weathered_lightning_rod
+        new(33541, 33564, 3f, 1, 0, 118), // waxed_oxidized_lightning_rod
         new(33565, 33565, 1.5f, 1, 53, 127), // dripstone_block
         new(33566, 33585, 1.5f, 1, 0, 0), // pointed_dripstone
         new(33586, 33605, 1.5f, 1, 0, 0), // sulfur_spike
@@ -1306,9 +1306,9 @@ public static class MiningRules
         new(35422, 35422, 3.5f, 1, 0, 127), // cracked_deepslate_tiles
         new(35423, 35425, 1.5f, 1, 0, 0), // infested_deepslate
         new(35426, 35426, 1.25f, 1, 438, 127), // smooth_basalt
-        new(35427, 35427, 5f, 0, 113, 118), // raw_iron_block
-        new(35428, 35428, 5f, 0, 114, 118), // raw_copper_block
-        new(35429, 35429, 5f, 0, 115, 112), // raw_gold_block
+        new(35427, 35427, 5f, 1, 113, 118), // raw_iron_block
+        new(35428, 35428, 5f, 1, 114, 118), // raw_copper_block
+        new(35429, 35429, 5f, 1, 115, 112), // raw_gold_block
         new(35430, 35430, 0f, 0, 0, 0), // potted_azalea_bush
         new(35431, 35431, 0f, 0, 0, 0), // potted_flowering_azalea_bush
         new(35432, 35434, 0.3f, 0, 0, 0), // ochre_froglight
