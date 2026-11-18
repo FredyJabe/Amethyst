@@ -466,7 +466,10 @@ public sealed class WorkstationManager
                     state.BurnRemaining != beforeBurn || inventoryChanged)
                     changed.Add(state.Position);
             }
-            if (persist || ++_ticks % 20 == 0) Persist();
+            // Do not rewrite the station file every second on an empty or
+            // completely idle world. Active station progress is checkpointed
+            // once per second; fuel/output mutations persist immediately.
+            if (persist || (changed.Count > 0 && ++_ticks % 20 == 0)) Persist();
             return changed.ToArray();
         }
     }
