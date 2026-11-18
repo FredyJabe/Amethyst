@@ -124,7 +124,7 @@ public sealed class ItemCatalog : IShardItemRegistry
         if (fields.ProtocolId is int requested && requested != material.ProtocolId)
             throw new InvalidDataException(
                 $"Custom item '{root}' cannot assign a new protocol ID.");
-        if (fields.MaxStackSize is int max && max != material.MaxStackSize ||
+        if (fields.MaxStackSize is int aliasMax && aliasMax != material.MaxStackSize ||
             fields.BlockItem is bool block && block != material.IsBlockItem)
             throw new InvalidDataException(
                 $"Custom alias '{root}' cannot override physical stack or block properties; " +
