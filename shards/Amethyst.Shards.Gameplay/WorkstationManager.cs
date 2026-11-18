@@ -51,13 +51,16 @@ public sealed class WorkstationManager
     private readonly Dictionary<StationPos, StationState> _stations = [];
     private readonly Dictionary<Guid, StationMenu> _menus = [];
     private readonly IShardWorld _world;
+    private readonly IShardItemRegistry? _items;
     private readonly string? _path;
     private int _nextWindowId;
     private int _ticks;
 
-    public WorkstationManager(string? directory, string worldPath, IShardWorld world)
+    public WorkstationManager(string? directory, string worldPath, IShardWorld world,
+        IShardItemRegistry? items = null)
     {
         _world = world;
+        _items = items;
         if (directory is null) return;
         string folder = Path.Combine(Path.GetFullPath(directory), "stations");
         Directory.CreateDirectory(folder);
@@ -66,6 +69,19 @@ public sealed class WorkstationManager
         _path = Path.Combine(folder, key + ".bin");
         Load();
     }
+
+    private int MaxStack(int id)
+    {
+        if (id <= 0) return 0;
+        if (_items is not null)
+            return _items.TryGetById(id, out var item) ? item.MaxStackSize : 0;
+        return id <= 1657 ? 64 : 0; // direct legacy unit tests without ShardHost
+    }
+
+    private bool ValidStack(ItemStack stack) =>
+        _items?.IsValidStack(stack.ItemId, stack.Count) ??
+        (stack.ItemId is >= 0 and <= 1657 && stack.Count is >= 0 and <= 64 &&
+         (stack.ItemId == 0) == (stack.Count == 0));
 
     public static StationKind? FromBlockState(ushort state) =>
         state switch
@@ -241,6 +257,9 @@ public sealed class WorkstationManager
                 else local[index] = stack;
             }
             bool changed = false;
+            if (menu.Kind != StationKind.Crafting && click.Slot < count &&
+                click.Slot != 2 && local[click.Slot].Count > MaxStack(local[click.Slot].ItemId))
+                return false;
             bool output = menu.Kind == StationKind.Crafting
                 ? click.Slot == 0 : click.Slot == 2;
             if (output)
@@ -258,7 +277,7 @@ public sealed class WorkstationManager
                 {
                     if (cursor.Count != 0 &&
                         (cursor.ItemId != available.ItemId ||
-                         cursor.Count + available.Count > 64)) return false;
+                         cursor.Count + available.Count > MaxStack(available.ItemId))) return false;
                     cursor = new ItemStack(available.ItemId, cursor.Count + available.Count);
                 }
                 if (menu.Kind == StationKind.Crafting)
@@ -288,10 +307,11 @@ public sealed class WorkstationManager
                         Put(click.Slot, cursor);
                         cursor = ItemStack.Empty;
                     }
-                    else if (here.ItemId == cursor.ItemId && here.Count < 64)
+                    else if (here.ItemId == cursor.ItemId &&
+                        here.Count < MaxStack(cursor.ItemId))
                     {
                         if (!CanInsert(click.Slot, cursor)) return false;
-                        int moved = Math.Min(64 - here.Count, cursor.Count);
+                        int moved = Math.Min(MaxStack(cursor.ItemId) - here.Count, cursor.Count);
                         Put(click.Slot, here with { Count = here.Count + moved });
                         cursor = Decrement(cursor, moved);
                     }
@@ -312,7 +332,7 @@ public sealed class WorkstationManager
                         Put(click.Slot, Decrement(here, take));
                     }
                     else if (here.Count == 0 || here.ItemId == cursor.ItemId &&
-                        here.Count < 64)
+                        here.Count < MaxStack(cursor.ItemId))
                     {
                         if (!CanInsert(click.Slot, cursor)) return false;
                         Put(click.Slot, new ItemStack(cursor.ItemId, here.Count + 1));
@@ -345,7 +365,7 @@ public sealed class WorkstationManager
                     ItemStack stationStack = local[target];
                     if (stationStack.Count != 0 && stationStack.ItemId != here.ItemId)
                         return false;
-                    int moved = Math.Min(64 - stationStack.Count, here.Count);
+                    int moved = Math.Min(MaxStack(here.ItemId) - stationStack.Count, here.Count);
                     if (moved <= 0) return false;
                     local[target] = new ItemStack(here.ItemId, stationStack.Count + moved);
                     Put(click.Slot, Decrement(here, moved));
@@ -386,20 +406,20 @@ public sealed class WorkstationManager
     private static ItemStack Decrement(ItemStack item, int count) =>
         item.Count <= count ? ItemStack.Empty : item with { Count = item.Count - count };
 
-    private static int InsertInventory(ItemStack[] slots, ItemStack incoming)
+    private int InsertInventory(ItemStack[] slots, ItemStack incoming)
     {
         int remaining = incoming.Count;
         for (int i = 9; i <= 44 && remaining > 0; i++)
-            if (slots[i].ItemId == incoming.ItemId && slots[i].Count is > 0 and < 64)
+            if (slots[i].ItemId == incoming.ItemId && slots[i].Count > 0 && slots[i].Count < MaxStack(incoming.ItemId))
             {
-                int added = Math.Min(remaining, 64 - slots[i].Count);
+                int added = Math.Min(remaining, MaxStack(incoming.ItemId) - slots[i].Count);
                 slots[i] = slots[i] with { Count = slots[i].Count + added };
                 remaining -= added;
             }
         for (int i = 9; i <= 44 && remaining > 0; i++)
             if (slots[i].Count == 0)
             {
-                int added = Math.Min(64, remaining);
+                int added = Math.Min(MaxStack(incoming.ItemId), remaining);
                 slots[i] = new ItemStack(incoming.ItemId, added);
                 remaining -= added;
             }
@@ -431,7 +451,7 @@ public sealed class WorkstationManager
                         out result, out duration) &&
                     (state.Slots[2].Count == 0 ||
                      state.Slots[2].ItemId == result.ItemId &&
-                     state.Slots[2].Count + result.Count <= 64);
+                     state.Slots[2].Count + result.Count <= MaxStack(result.ItemId));
                 if (valid)
                 {
                     state.CookTotal = duration;
@@ -500,8 +520,7 @@ public sealed class WorkstationManager
             for (int slot = 0; slot < 3; slot++)
             {
                 int itemId = reader.ReadInt32(), amount = reader.ReadInt32();
-                if (itemId is < 0 or > 1657 || amount is < 0 or > 64 ||
-                    (itemId == 0) != (amount == 0))
+                if (!ValidStack(new ItemStack(itemId, amount)))
                     throw new InvalidDataException("Invalid persisted station inventory.");
                 state.Slots[slot] = new ItemStack(itemId, amount);
             }
