@@ -22,7 +22,7 @@ public static class StationRecipes
     private const int AnyStoneCraft = -3;
     private static readonly HashSet<int> Planks = [63,64,65,66,67,68,69,70,71,72,73,74,75];
     private static readonly HashSet<int> Logs = [163,164,165,166,167,168,169,170,171,172,173,174,175];
-    private static readonly HashSet<int> StoneCraft = [62,14,9,10]; // cobblestone, cobbled deepslate, etc (item IDs)
+    private static readonly HashSet<int> StoneCraft = [62,9,1537]; // cobblestone, cobbled deepslate, blackstone
     private readonly record struct Recipe(int OutputId, int Count, int Width,
         int Height, int[] Ingredients);
     private static Recipe R(int id, int count, int width, params int[] ingredients) =>
@@ -49,9 +49,9 @@ public static class StationRecipes
             0,1060,0, 0,1060,0), // stone pickaxe
         R(1047, 1, 3, 1018,1018,1018,
             0,1060,0, 0,1060,0), // iron pickaxe
-        R(1026, 1, 1, AnyPlank,1060), // wooden shovel
-        R(1036, 1, 1, AnyStoneCraft,1060), // stone shovel
-        R(1046, 1, 1, 1018,1060), // iron shovel
+        R(1026, 1, 1, AnyPlank,1060,1060), // wooden shovel
+        R(1036, 1, 1, AnyStoneCraft,1060,1060), // stone shovel
+        R(1046, 1, 1, 1018,1060,1060), // iron shovel
         R(1028, 1, 2, AnyPlank,AnyPlank,
             AnyPlank,1060,0,1060), // wooden axe
         R(1038, 1, 2, AnyStoneCraft,AnyStoneCraft,
