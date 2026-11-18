@@ -96,4 +96,66 @@ finally
     try { Directory.Delete(temp, recursive: true); }
     catch (IOException) { }
 }
-Console.WriteLine("PASS: block codec, Creative palette, edit overlay and persistence");
+// Survival timings use the hardness table and the player's actual tool.
+Check(MiningRules.RequiredMilliseconds(10, 0) >= 700 &&
+    MiningRules.RequiredMilliseconds(10, 0) <= 800,
+    "Dirt requires a timed hand-mining session");
+Check(MiningRules.RequiredMilliseconds(1, 0) >
+    MiningRules.RequiredMilliseconds(1, 1047) &&
+    !MiningRules.IsHarvestable(MiningRules.ForState(1), 0) &&
+    MiningRules.IsHarvestable(MiningRules.ForState(1), 1047),
+    "Stone needs a pickaxe to drop cobblestone, correct tools mine faster");
+Check(MiningRules.RequiredMilliseconds(88, 1047) == int.MaxValue,
+    "Bedrock is not breakable");
+
+string playerRoot = Path.Combine(Path.GetTempPath(), "amethyst-player-tests-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(playerRoot);
+try
+{
+    Guid uuid = Guid.NewGuid();
+    var inventory = new PlayerInventory(playerRoot, uuid);
+    Check(inventory.Give(10, 3) == 3 &&
+        inventory.Held() == new ItemStack(10, 3), "Mined dirt enters Survival hotbar");
+    Check(inventory.ConsumeHeld(false, 10) &&
+        inventory.Held() == new ItemStack(10, 2), "Survival placement consumes one item");
+    Check(inventory.ConsumeHeld(true, 10) &&
+        inventory.Held() == new ItemStack(10, 2), "Creative placement does not consume an item");
+    Check(!inventory.TryCreativeSet(36, 0, 64, true), "Reject invalid Creative stack");
+
+    var (beforeSlots, _, revision) = inventory.Snapshot();
+    Check(beforeSlots[36].Count == 2, "Inventory snapshots preserve stack counts");
+
+    var clickWriter = new PacketWriter();
+    clickWriter.WriteVarInt(0);
+    clickWriter.WriteVarInt(revision);
+    clickWriter.WriteInt16(36);
+    clickWriter.WriteByte(0); // left click
+    clickWriter.WriteVarInt(0);
+    clickWriter.WriteVarInt(0); // no client claims for modified slots
+    clickWriter.WriteBool(false); // no carried hashed slot
+    var click = InventoryProtocol.ReadClick(new Packet(
+        InventoryProtocol.ServerboundContainerClick, clickWriter.ToArray()));
+    Check(inventory.ApplyClick(click) &&
+        inventory.Held().Count == 0 &&
+        inventory.Snapshot().Cursor.Count == 2,
+        "Authoritative inventory click picks up a stack");
+    using (var stream = new MemoryStream())
+    {
+        using var channel = new PacketChannel(stream);
+        await InventoryProtocol.SendContentAsync(channel, inventory, CancellationToken.None);
+        stream.Position = 0;
+        Packet? contentPacket = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
+        Check(contentPacket is { Id: InventoryProtocol.ClientboundSetContent },
+            "Inventory packet is framed with protocol 777 container ID");
+    }
+    var recovered = new PlayerInventory(playerRoot, uuid);
+    Check(recovered.Snapshot().Cursor == new ItemStack(10, 2),
+        "Inventory and cursor survive reconnect");
+    Check(!recovered.ApplyClick(click), "Stale inventory revision cannot mutate items");
+}
+finally
+{
+    try { Directory.Delete(playerRoot, recursive: true); }
+    catch (IOException) { }
+}
+Console.WriteLine("PASS: block codec, modes, item stacks, timed mining, edit overlay and persistence");
