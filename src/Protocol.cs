@@ -113,6 +113,12 @@ public sealed class PacketReader
         return Take(n).ToArray();
     }
     public long ReadInt64() => BinaryPrimitives.ReadInt64BigEndian(Take(8));
+    // Java Edition BlockPos: signed 26-bit X/Z, signed 12-bit Y.
+    public (int X, int Y, int Z) ReadPosition()
+    {
+        long packed = ReadInt64();
+        return ((int)(packed >> 38), (int)(packed << 52 >> 52), (int)(packed << 26 >> 38));
+    }
     public Guid ReadUuid() => new(Take(16), bigEndian: true);
 
     public int ReadVarInt()
