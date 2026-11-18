@@ -1,0 +1,21 @@
+name: Build and block regression tests
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build entire solution
+        run: dotnet build Amethyst.slnx -c Release --nologo
+      - name: Shard lifecycle
+        run: dotnet run --project tests/ShardTests/ShardTests.csproj -c Release --no-build
+      - name: Block interaction and persistence
+        run: dotnet run --project tests/BlockTests/BlockTests.csproj -c Release --no-build
