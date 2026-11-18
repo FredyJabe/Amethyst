@@ -74,7 +74,7 @@ public interface IShardChunkView
     Task UpdateAsync(PacketChannel connection, PlayerPose pose, CancellationToken ct);
     Task OnBatchReceivedAsync(PacketChannel connection, float chunksPerTick, CancellationToken ct);
     /// <summary>Whether this connection has received the target chunk.</summary>
-    bool HasLoadedChunk(int chunkX, int chunkZ);
+    Task<bool> HasLoadedChunkAsync(int chunkX, int chunkZ, CancellationToken ct);
 }
 
 /// <summary>One enabled gameplay Shard is responsible for Play-state behavior.
