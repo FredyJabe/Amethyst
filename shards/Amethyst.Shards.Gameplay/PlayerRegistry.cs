@@ -33,7 +33,7 @@ public sealed class ConnectedPlayer : IShardPlayer
         Inventory.TryCreativeSet(slot, itemId, count, plainItem);
 
     public bool TryGetSelectedBlock(int face, out ushort blockState) =>
-        CreativeBlockPalette.TryGetState(Inventory.Held().ItemId, face, out blockState);
+        CreativeBlockPalette.TryGetState(Inventory.Held().ItemId, face, Pose.Yaw, out blockState);
 
     // A vanilla 26.3 client emits 0x0D at the end of every gameplay tick.
     // Count these in stream order so stalled packet processing does not make

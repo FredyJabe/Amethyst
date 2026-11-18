@@ -108,6 +108,35 @@ public sealed class PlayerInventory
         }
     }
 
+    /// <summary>Commit a workstation transaction against an inventory snapshot.
+    /// Rejects stale snapshots (including concurrent ground-item pickups).
+    /// Workstation logic validates all outputs independently of client claims.</summary>
+    public bool TryCommitWindow(int expectedRevision, ItemStack[] slots, ItemStack cursor)
+    {
+        if (slots.Length != _slots.Length || !ValidStack(cursor) ||
+            slots.Any(s => !ValidStack(s))) return false;
+        lock (_sync)
+        {
+            if (expectedRevision != _revision) return false;
+            ItemStack[] original = (ItemStack[])_slots.Clone();
+            ItemStack oldCursor = _cursor;
+            Array.Copy(slots, _slots, _slots.Length);
+            _cursor = cursor;
+            try { Persist(); _revision++; }
+            catch
+            {
+                Array.Copy(original, _slots, _slots.Length);
+                _cursor = oldCursor;
+                throw;
+            }
+            return true;
+        }
+    }
+
+    private static bool ValidStack(ItemStack s) =>
+        s.Count is >= 0 and <= 64 && s.ItemId is >= 0 and <= 1657 &&
+        (s.Count == 0) == (s.ItemId == 0);
+
     private static bool ValidSlot(int slot) => slot is >= 9 and <= 44;
 
     /// <summary>Execute server-side mouse clicks, hotbar swaps and shift-clicks.
