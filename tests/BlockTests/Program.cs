@@ -285,6 +285,13 @@ try
               world.GetBlockState(2, blockY, blockZ) == 0,
             "First block remains air after breaking second");
 
+        // Mined loot must remain in the world until a player physically
+        // collects it, rather than being granted at mining time.
+        GroundItem[] firstDrops = game.GroundItemsForTests;
+        Check(firstDrops.Length == 2 && firstDrops.All(i => i.ItemId == 55 && i.Count == 1) &&
+            player.Inventory.Held().Count == 0,
+            "Both dirt drops remain ground entities; mining does not grant inventory items");
+
         var updates = new List<(int X, int Y, int Z, int State, int Index)>();
         var acknowledgements = new List<(int Sequence, int Index)>();
         using (var stream = new MemoryStream(outgoing.ToArray()))
