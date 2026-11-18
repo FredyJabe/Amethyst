@@ -1,5 +1,6 @@
 using Amethyst;
 using Amethyst.BuiltinShards;
+using Amethyst.Shards;
 
 DirectoryInfo? solutionRoot = new(AppContext.BaseDirectory);
 while (solutionRoot is not null &&
@@ -10,6 +11,9 @@ if (solutionRoot is null)
 string itemCatalogPath = Path.Combine(solutionRoot.FullName,
     "shards", "Amethyst.Shards.Items", "items-26.3.yml");
 var itemsCatalog = new ItemCatalog(itemCatalogPath);
+string recipesFilePath = Path.Combine(solutionRoot.FullName,
+    "shards", "Amethyst.Shards.Items", "recipes-26.3.yml");
+var recipesCatalog = new RecipeCatalog(itemsCatalog, recipesFilePath);
 
 static void Check(bool condition, string message)
 {
@@ -438,7 +442,8 @@ try
         player.MarkReady();
         player.SetGameMode(PlayerGameMode.Survival);
         // The handler does not use the packet bus when invoked directly.
-        var game = new MinecraftServer(settings, world, null!, world, items: itemsCatalog);
+        var game = new MinecraftServer(settings, world, null!, world,
+            items: itemsCatalog, recipes: recipesCatalog);
 
         for (int x = 1; x <= 2; x++)
         {
@@ -817,7 +822,8 @@ try
         using (var wire = new MemoryStream())
         using (var channel = new PacketChannel(wire))
         {
-            var game = new MinecraftServer(config, world, null!, world, dataRoot, itemsCatalog);
+            var game = new MinecraftServer(config, world, null!, world, dataRoot,
+                itemsCatalog, recipesCatalog);
             Check(game.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
                 "Reconnecting player can be admitted");
@@ -837,7 +843,8 @@ try
 
             // Recreate Gameplay as if the process restarted: admission must
             // use the saved coordinates rather than a hard-coded spawn.
-            var restarted = new MinecraftServer(config, world, null!, world, dataRoot, itemsCatalog);
+            var restarted = new MinecraftServer(config, world, null!, world, dataRoot,
+                itemsCatalog, recipesCatalog);
             Check(restarted.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
                 "Reconnecting after gameplay restart succeeds");
@@ -900,7 +907,8 @@ try
 
         using var fallbackWire = new MemoryStream();
         using var fallbackChannel = new PacketChannel(fallbackWire);
-        var fallbackGame = new MinecraftServer(config, world, null!, world, dataRoot, itemsCatalog);
+        var fallbackGame = new MinecraftServer(config, world, null!, world, dataRoot,
+                itemsCatalog, recipesCatalog);
         Check(fallbackGame.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), fallbackChannel, 0, out _),
             "Damaged save must not interrupt player login");
@@ -933,7 +941,7 @@ try
         WorldPath = Path.Combine(stationsRoot, "world")
     };
     await using var stationWorld = new TerrainWorld(settings);
-    var stations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog);
+    var stations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog, recipesCatalog);
     var bag = new PlayerInventory(null, Guid.NewGuid(), itemsCatalog);
     Guid playerId = Guid.NewGuid();
     Check(StationProtocol.MenuType(StationKind.Crafting) == 12 &&
@@ -1008,7 +1016,7 @@ try
     Check(stations.Data(playerId).Burn > 0,
         "Furnace progress properties expose remaining burn time");
     stations.Save();
-    var restoredStations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog);
+    var restoredStations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog, recipesCatalog);
     Check(restoredStations.SnapshotStation(furnacePos).SequenceEqual(smelted),
         "Furnace contents survive a world restart");
     Check(!stations.Click(playerId, bag,
@@ -1030,8 +1038,11 @@ try
         (StationKind.BlastFurnace, 1017, 1018, new StationPos(4, 81, 1))
     })
     {
-        Check(StationRecipes.TryCook(kind, rawId, out ItemStack result, out int duration) &&
-            result == new ItemStack(resultId, 1) && duration == 100,
+        Check(recipesCatalog.TryGetCookingRecipe(kind == StationKind.Smoker
+                ? ShardCookingStation.Smoker : ShardCookingStation.BlastFurnace,
+                rawId, out ShardCookingMatch cooked) &&
+            cooked.Result == new ShardRecipeStack(resultId, 1) &&
+            cooked.CookingTicks == 100,
             "Smoker and blast furnace enforce their accelerated recipe categories");
         var menu = stations.Open(playerId, pos, kind);
         // Direct block-state seeding for the persistent cooking simulation.
@@ -1048,8 +1059,8 @@ try
             "Fast cooking produces a real output stack in its workstation");
         stations.Close(playerId);
     }
-    Check(!StationRecipes.TryCook(StationKind.Smoker, 1017, out _, out _) &&
-        !StationRecipes.TryCook(StationKind.BlastFurnace, 1260, out _, out _),
+    Check(!recipesCatalog.TryGetCookingRecipe(ShardCookingStation.Smoker, 1017, out _) &&
+        !recipesCatalog.TryGetCookingRecipe(ShardCookingStation.BlastFurnace, 1260, out _),
         "Smoker rejects ore and blast furnace rejects food");
 
     var (released, _) = stations.Break(furnacePos);
@@ -1057,7 +1068,7 @@ try
         released.Sum(s => s.Count) == 1,
         "Breaking a furnace releases all remaining input/output instead of deleting it");
     stations.Save();
-    Check(new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog)
+    Check(new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog, recipesCatalog)
         .SnapshotStation(furnacePos).Length == 0,
         "Destroyed furnace does not reappear in saved workstation storage");
 
@@ -1071,7 +1082,8 @@ try
             stationWorld, null, itemsCatalog);
         stationPlayer.MarkReady();
         var gameplay = new MinecraftServer(settings, stationWorld, null!,
-            stationWorld, Path.Combine(stationsRoot, "gameplay-integration"), itemsCatalog);
+            stationWorld, Path.Combine(stationsRoot, "gameplay-integration"),
+            itemsCatalog, recipesCatalog);
         int seq = 1;
         foreach (var (kind, mode, state, blockPosition) in new[]
         {
