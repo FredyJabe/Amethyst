@@ -220,6 +220,29 @@ are reconciled with the server's contents. Player inventory and cursor data are
 persisted atomically under `shards/data/gameplay/inventories/<uuid>.bin` (or
 the configured `shardsDataDirectory`). Back up this directory with the world.
 
+### Player position persistence
+
+Gameplay saves the last server-validated position, yaw, pitch, and on-ground
+state **per player UUID and world**. On reconnect, that location is restored
+*before* the initial 26.3 position/rotation teleport and the first chunks are
+streamed, so a player resumes where they left off instead of world spawn.
+First-time players use the world's generated spawn. Position persistence is
+independent of `defaultGameMode`; the configured gamemode still applies on
+each login.
+
+Position files are stored atomically under
+`<shardsDataDirectory>/gameplay/positions/<world-path-hash>/<player-uuid>.bin`.
+Files also record the world seed and dimension to prevent restoring coordinates
+from an incompatible world. Data is saved when a fully connected player leaves
+and every 15 seconds while online, limiting loss after a crash. Disconnections
+before the client finishes loading cannot overwrite an earlier valid location.
+Invalid, damaged, or incompatible saves fall back to world spawn.
+
+Backup `positions/` alongside `inventories/`, `ground-items/`, and the
+world's `chunks/` and `edits/` directories. This first pass does not yet
+implement beds, respawn anchors, death/respawn mechanics, or per-dimension
+portal travel.
+
 ### World edits and networking
 
 Generated `.mc26` snapshots remain unchanged. For generator versions 5–7
