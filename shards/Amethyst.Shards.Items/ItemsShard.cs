@@ -240,7 +240,11 @@ public sealed class ItemCatalog : IShardItemRegistry
                 {
                     case "id": fields.Id = Scalar(field.Value, path, key); break;
                     case "protocolid": fields.ProtocolId = Integer(field.Value, path, key); break;
-                    case "maxstacksize": fields.MaxStackSize = Integer(field.Value, path, key); break;
+                    case "maxstacksize":
+                        if (fields.MaxStackSize.HasValue)
+                            throw new InvalidDataException($"Specify MaxStackSize / Options.StackSize only once in {key}.");
+                        fields.MaxStackSize = Integer(field.Value, path, key);
+                        break;
                     case "display": fields.Display = LimitedString(field.Value, path, key); break;
                     case "itemname": fields.ItemName = LimitedString(field.Value, path, key); break;
                     case "custommodeldata":
@@ -267,6 +271,12 @@ public sealed class ItemCatalog : IShardItemRegistry
                             {
                                 case "blockitem":
                                     fields.BlockItem = Boolean(option.Value, path, key);
+                                    break;
+                                case "stacksize":
+                                    if (fields.MaxStackSize.HasValue)
+                                        throw new InvalidDataException(
+                                            $"Specify MaxStackSize / Options.StackSize only once in {key}.");
+                                    fields.MaxStackSize = Integer(option.Value, path, key);
                                     break;
                                 case "hidden":
                                     if (fields.Hidden.HasValue)
@@ -331,13 +341,14 @@ public sealed class ItemsShard : IShard
             File.WriteAllText(example, """
                 # MythicMobs-style item overrides. Uncomment examples to enable.
                 # Each root key is an item ID; Id is the base vanilla material.
+                # Display/Lore are metadata only until item-component packets are supported.
                 # diamond_pickaxe:
                 #   Id: minecraft:diamond_pickaxe
                 #   Display: "<aqua>Miner's Pickaxe</aqua>"
                 #   Lore:
                 #     - "Configured in the Items Shard"
-                #   MaxStackSize: 1
                 #   Options:
+                #     StackSize: 1
                 #     BlockItem: false
                 #
                 # legendary_pickaxe:
