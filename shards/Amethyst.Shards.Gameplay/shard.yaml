@@ -7,4 +7,5 @@ provides:
   - gameplay
 requires:
   - world
+  - items
 dependsOn: []
