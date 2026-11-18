@@ -45,7 +45,13 @@ public sealed class ConnectedPlayer : IShardPlayer
         _mining = null;
         return mining is { } started && started.X == x && started.Y == y &&
             started.Z == z && started.State == state && started.HeldItem == heldItem &&
-            Environment.TickCount64 - started.Started + 75 >= started.RequiredMs;
+            // The vanilla server accepts STOP once at least 70% of the
+            // expected mining progress is complete; the client predicts the
+            // removal at 100%. Requiring 100% of elapsed wall time here
+            // incorrectly rejects normal client digs at tick boundaries.
+            // Include one 50 ms tick for start/receive scheduling skew.
+            Environment.TickCount64 - started.Started + 50 >=
+                ((long)started.RequiredMs * 7 + 9) / 10;
     }
 
     public bool TryConsumeEditBudget()
