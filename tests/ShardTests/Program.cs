@@ -85,10 +85,21 @@ try
           Result: { Id: minecraft:diamond, Amount: 1 }
         probe_dye:
           Type: minecraft:crafting_dye
+          Target: minecraft:leather_helmet
+          Dye: minecraft:red_dye
+          Result: { Id: minecraft:leather_helmet, Amount: 1 }
         probe_imbue:
           Type: minecraft:crafting_imbue
+          Source: minecraft:lingering_potion
+          Material: minecraft:arrow
+          Result: { Id: minecraft:tipped_arrow, Amount: 8 }
         probe_decorated_pot:
           Type: minecraft:crafting_decorated_pot
+          Back: minecraft:brick
+          Left: minecraft:brick
+          Right: minecraft:brick
+          Front: minecraft:brick
+          Result: { Id: minecraft:decorated_pot, Amount: 1 }
         probe_bannerduplicate:
           Type: minecraft:crafting_special_bannerduplicate
 
@@ -97,6 +108,10 @@ try
 
         probe_firework_rocket:
           Type: minecraft:crafting_special_firework_rocket
+          Shell: minecraft:paper
+          Fuel: minecraft:gunpowder
+          Star: minecraft:firework_star
+          Result: { Id: minecraft:firework_rocket, Amount: 3 }
 
         probe_firework_star:
           Type: minecraft:crafting_special_firework_star
@@ -127,6 +142,10 @@ try
     Check(recipes.Definitions.Select(d => d.Type).Distinct().Count() ==
         Enum.GetValues<ShardRecipeType>().Length,
         "All 22 Java 26.3 recipe serializers load from YAML");
+    Check(recipes.Definitions.Any(d => d.Id == "probe_firework_rocket" &&
+        !d.IsExecutable && d.Parameters is not null &&
+        d.Parameters.ContainsKey("Shell") && d.Parameters.ContainsKey("Fuel")),
+        "Special serializer configuration fields survive registration");
     Check(recipes.Definitions.Any(d => d.Id == "probe_decorated_pot" &&
         !d.IsExecutable) &&
         recipes.Definitions.Any(d => d.Id == "probe_smithing_trim" &&
