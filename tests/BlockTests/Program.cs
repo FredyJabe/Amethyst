@@ -190,6 +190,181 @@ finally
     catch (IOException) { }
 }
 
+// Server-side YAML recipes are supplied by the Items Shard, not Gameplay.
+// Verify matching/consumption, custom precedence, disabling, and validation.
+Check(recipesCatalog.RecipeCount >= 70 &&
+    recipesCatalog.RecipeIds.Contains("crafting_table") &&
+    recipesCatalog.RecipeIds.Contains("iron_ingot_from_raw_iron_smelting"),
+    "Items Shard loads its bundled 26.3 crafting and cooking recipe definitions");
+{
+    var grid = new ShardRecipeStack[9];
+    grid[8] = new ShardRecipeStack(163, 1); // oak_log
+    Check(recipesCatalog.TryMatchCrafting(grid, out var match) &&
+        match.RecipeId == "oak_planks_from_log" &&
+        match.Result == new ShardRecipeStack(63, 4) &&
+        match.ConsumedSlots.SequenceEqual([8]),
+        "Shapeless recipes accept ingredients in any slot and consume only matched slots");
+    grid[1] = new ShardRecipeStack(55, 1); // extra dirt
+    Check(!recipesCatalog.TryMatchCrafting(grid, out _),
+        "Extra ingredients cannot be ignored by the recipe matcher");
+    Check(recipesCatalog.TryGetCookingRecipe(ShardCookingStation.Furnace, 1017,
+            out var smelt) &&
+        smelt.Result == new ShardRecipeStack(1018, 1) &&
+        smelt.CookingTicks == 200,
+        "Default furnace recipe duration and output are data-driven");
+    Check(recipesCatalog.TryGetCookingRecipe(ShardCookingStation.BlastFurnace, 1017,
+            out var blast) && blast.CookingTicks == 100 &&
+        !recipesCatalog.TryGetCookingRecipe(ShardCookingStation.Smoker, 1017, out _),
+        "Smoker and blast furnace use their own YAML recipe categories");
+}
+
+string customRecipesRoot = Path.Combine(Path.GetTempPath(),
+    "amethyst-recipe-tests-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(customRecipesRoot);
+try
+{
+    var customRecipes = Path.Combine(customRecipesRoot, "recipes");
+    Directory.CreateDirectory(customRecipes);
+    File.WriteAllText(Path.Combine(customRecipes, "custom.yml"), """
+        oak_planks_from_log:
+          Enabled: false
+
+        sticks:
+          Type: Shaped
+          Pattern:
+            - "P"
+            - "P"
+          Key:
+            P: [oak_planks, spruce_planks]
+          Result: { Id: stick, Amount: 5 }
+
+        carefully_shaped:
+          Type: Shaped
+          Pattern:
+            - "SI"
+            - " S"
+          Key:
+            S: stone
+            I: iron_ingot
+          Result: { Id: torch, Amount: 3 }
+
+        competing_ingredients:
+          Type: Shapeless
+          Ingredients:
+            - [dirt, stick]
+            - dirt
+          Result: { Id: torch, Amount: 8 }
+
+        smelt_dirt:
+          Type: Furnace
+          Ingredient: dirt
+          Result: { Id: diamond, Amount: 1 }
+          CookingTime: 37
+        """);
+    var customRegistry = new RecipeCatalog(itemsCatalog, recipesFilePath, customRecipes);
+    Check(customRegistry.RecipeCount >= recipesCatalog.RecipeCount &&
+        !customRegistry.RecipeIds.Contains("oak_planks_from_log"),
+        "Admin recipe YAML overrides bundled recipes by ID and can disable a default");
+    var grid = new ShardRecipeStack[9];
+    grid[6] = new ShardRecipeStack(63, 1);
+    grid[3] = new ShardRecipeStack(64, 1);
+    Check(customRegistry.TryMatchCrafting(grid, out var overridden) &&
+        overridden.RecipeId == "sticks" &&
+        overridden.Result == new ShardRecipeStack(1060, 5) &&
+        overridden.ConsumedSlots.Order().SequenceEqual([3, 6]),
+        "Custom shaped recipe overrides the bundled output using alternative planks");
+    grid = new ShardRecipeStack[9];
+    grid[0] = new ShardRecipeStack(1018, 1); // I, mirrored
+    grid[1] = new ShardRecipeStack(1, 1); // S, mirrored
+    grid[3] = new ShardRecipeStack(1, 1); // S, mirrored
+    Check(customRegistry.TryMatchCrafting(grid, out var mirrored) &&
+        mirrored.RecipeId == "carefully_shaped" &&
+        mirrored.Result.Count == 3,
+        "Shaped YAML recipes match horizontally mirrored patterns");
+    grid = new ShardRecipeStack[9];
+    grid[0] = new ShardRecipeStack(55, 1);
+    grid[2] = new ShardRecipeStack(1060, 1);
+    Check(customRegistry.TryMatchCrafting(grid, out var overlapping) &&
+        overlapping.RecipeId == "competing_ingredients" &&
+        overlapping.Result == new ShardRecipeStack(395, 8) &&
+        overlapping.ConsumedSlots.Order().SequenceEqual([0, 2]),
+        "Shapeless matcher backtracks when ingredient alternatives overlap");
+    grid = new ShardRecipeStack[9];
+    grid[4] = new ShardRecipeStack(163, 1);
+    Check(!customRegistry.TryMatchCrafting(grid, out _),
+        "Disabled built-in log-to-planks recipe no longer crafts");
+    Check(itemsCatalog.TryGetByIdentifier("diamond", out var diamond) &&
+        customRegistry.TryGetCookingRecipe(ShardCookingStation.Furnace, 55,
+            out var customCook) &&
+        customCook.Result == new ShardRecipeStack(diamond.ProtocolId, 1) &&
+        customCook.CookingTicks == 37 &&
+        !customRegistry.TryGetCookingRecipe(ShardCookingStation.Smoker, 55, out _),
+        "Custom furnace YAML recipe changes input, output and processing time");
+
+    void RecipeShouldFail(string yaml, string message)
+    {
+        string folder = Path.Combine(customRecipesRoot,
+            "invalid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "bad.yml"), yaml);
+        bool invalid = false;
+        try { _ = new RecipeCatalog(itemsCatalog, recipesFilePath, folder); }
+        catch (InvalidDataException) { invalid = true; }
+        Check(invalid, message);
+    }
+    RecipeShouldFail("""
+        bad:
+          Type: Shapeless
+          Ingredients: [minecraft:does_not_exist]
+          Result: { Id: stone, Amount: 1 }
+        """, "Unknown ingredient names are rejected at startup");
+    RecipeShouldFail("""
+        bad:
+          Type: Shapeless
+          Ingredients: [stone]
+          Result: { Id: diamond_pickaxe, Amount: 2 }
+        """, "Recipe output cannot exceed the item's maximum stack size");
+    RecipeShouldFail("""
+        bad:
+          Type: Shaped
+          Pattern: ["AX"]
+          Key: { A: stone }
+          Result: { Id: stick, Amount: 1 }
+        """, "Shaped recipes reject missing pattern key symbols");
+    RecipeShouldFail("""
+        bad:
+          Type: Furnace
+          Ingredient: stone
+          Result: { Id: diamond, Amount: 1 }
+          CookingTime: 0
+        """, "Cooking recipes reject zero and invalid durations");
+    RecipeShouldFail("""
+        bad:
+          Type: Shapeless
+          Ingredients: [stone]
+          Result: { Id: air, Amount: 1 }
+        """, "Recipe outputs cannot be air or invalid stacks");
+    RecipeShouldFail("""
+        duplicate:
+          Enabled: false
+        duplicate:
+          Enabled: false
+        """, "Duplicate recipe root IDs in one YAML file are rejected");
+    string conflictDir = Path.Combine(customRecipesRoot, "duplicates");
+    Directory.CreateDirectory(conflictDir);
+    File.WriteAllText(Path.Combine(conflictDir, "a.yml"), "sticks:\n  Enabled: false\n");
+    File.WriteAllText(Path.Combine(conflictDir, "b.yaml"), "sticks:\n  Enabled: false\n");
+    bool conflict = false;
+    try { _ = new RecipeCatalog(itemsCatalog, recipesFilePath, conflictDir); }
+    catch (InvalidDataException) { conflict = true; }
+    Check(conflict, "Duplicate custom recipe IDs across files fail startup");
+}
+finally
+{
+    try { Directory.Delete(customRecipesRoot, recursive: true); }
+    catch (IOException) { }
+}
+
 // Packed positions round-trip signed 26/12/26-bit coordinates.
 var writer = new PacketWriter();
 writer.WritePosition(-17, -64, 26);
