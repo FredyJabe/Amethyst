@@ -283,9 +283,10 @@ public sealed partial class RecipeCatalog
                 !recipe.Inputs[0].Contains(template.ItemId) ||
                 !recipe.Inputs[1].Contains(baseItem.ItemId) ||
                 !recipe.Inputs[2].Contains(addition.ItemId)) continue;
-            var components = new Dictionary<string, string>(
-                baseItem.Components ?? new Dictionary<string, string>(),
-                StringComparer.Ordinal);
+            var components = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (baseItem.Components is not null)
+                foreach (var (key, value) in baseItem.Components)
+                    components[key] = value;
             if (recipe.Result.Components is not null)
                 foreach (var (key, value) in recipe.Result.Components)
                     components[key] = value;
