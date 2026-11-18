@@ -12,7 +12,7 @@
   <Target Name="InstallShard" AfterTargets="Build">
     <MakeDir Directories="$(MSBuildProjectDirectory)/../../shards/installed/items" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
-    <Copy SourceFiles="$(MSBuildProjectDirectory)/shard.yaml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/shard.yaml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" Condition="!Exists('$(MSBuildProjectDirectory)/../../shards/installed/items/shard.yaml')" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)/items-26.3.tsv" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
   </Target>
 </Project>
