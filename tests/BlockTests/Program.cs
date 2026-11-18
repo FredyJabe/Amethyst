@@ -84,8 +84,9 @@ try
             BlockItem: true
         """);
     var configured = new ItemCatalog(itemCatalogPath, overrides);
+    Amethyst.Shards.ShardItemDefinition updatedPickaxe = default;
     Check(configured.Count == 1658 &&
-        configured.TryGetByIdentifier("diamond_pickaxe", out var updatedPickaxe) &&
+        configured.TryGetByIdentifier("diamond_pickaxe", out updatedPickaxe) &&
         updatedPickaxe.Display == "<aqua>Test Pickaxe</aqua>" &&
         updatedPickaxe.ItemName == "Mining Tool" &&
         updatedPickaxe.Lore?.Count == 2 && updatedPickaxe.Hidden,
