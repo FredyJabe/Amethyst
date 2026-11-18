@@ -21,6 +21,7 @@ Current functionality includes:
 - **Shards plugin runtime** with lifecycle hooks, dependency/capability resolution, service API, packet hooks and command registration.
 - Two built-in Shards: Overworld (generation/chunks/lighting) and Gameplay (players/chat/permissions/time).
 - Experimental **Creative and Survival block interaction**: tool-aware timed mining, physical ground item drops and pickup into persistent inventories, stack-consuming placement, per-chunk edit persistence and multiplayer block updates. No complete loot/physics or dynamic client relighting yet.
+- **Player location persistence:** each player's last valid coordinates and facing are saved per world on disconnect and every 15 seconds; reconnect restores the camera location before chunk streaming. Invalid/world-mismatched saves return to world spawn.
 
 > **Status:** Prototype. No claim of full vanilla gameplay, complete Survival mechanics, signed chat verification, or production-grade compatibility. Local building and in-game testing are still required for this snapshot.
 
