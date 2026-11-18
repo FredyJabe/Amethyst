@@ -8,10 +8,41 @@ Amethyst is now organized into a **network kernel** and independently compiled *
 | --- | --- |
 | `src/Amethyst.csproj` | TCP listener, status/ping, protocol framing, Mojang authentication, encryption, login/configuration, connection lifetime, Shard loader, operator console host |
 | `shards/Amethyst.Shards.Overworld` | Terrain/biomes, chunks, lighting, save files, chunk preparation and streaming |
-| `shards/Amethyst.Shards.Gameplay` | Play-state packets, players, movement, game modes, permissions, chat, day/night clock |
+| `shards/Amethyst.Shards.Items` | Minecraft 26.3 vanilla item definitions: 1,658 IDs, canonical names, stack limits and block-item classification |
+| `shards/Amethyst.Shards.Gameplay` | Play-state packets, players, movement, game modes, inventory, crafting stations, chat, day/night clock; consumes Items and World services |
 | `shards/Amethyst.Shards.Hello` | Disabled-by-default example: a `hello` console command and a Play packet observer |
 
 Core deliberately does **not** reference either built-in Shard assembly. The protocol API (e.g., `PacketChannel`, `PacketReader`, `PacketWriter`) and Shard contracts (`Amethyst.Shards`) are available from the core project. Existing generator versions **1–7** and the `.mc26` chunk save format are unchanged.
+
+## Items Shard (item definition ownership)
+
+The built-in `items` capability supplies
+`Amethyst.Shards.IShardItemRegistry`: an immutable Java 26.3 catalog of
+**1,658 vanilla items** (protocol IDs 0–1657), namespaced names,
+maximum stack sizes (1, 16, or 64), and block-item flags.
+
+Gameplay looks up these definitions to validate Creative inventory edits,
+item pickups, persisted stacks, and furnace/crafting slot transactions. For
+example, swords and pickaxes can no longer stack to 64; an ender pearl can
+stack to 16. The Item Shard owns *definitions*, not recipes, block
+placement, mining, entity physics, or packet framing.
+
+A Shard that consumes item definitions declares `requires: [items]`
+and resolves the service in `OnEnableAsync`:
+
+```csharp
+IShardItemRegistry items = context.GetRequiredService<IShardItemRegistry>();
+if (items.TryGetByIdentifier("diamond_pickaxe", out ShardItemDefinition definition))
+    context.Log($"Protocol item {definition.ProtocolId}; max stack {definition.MaxStackSize}");
+```
+
+Inspect definitions in the server console with `iteminfo diamond_pickaxe`,
+`iteminfo minecraft:crafting_table`, or `iteminfo 405`. Data lives in
+`shards/Amethyst.Shards.Items/items-26.3.tsv`; see
+`shards/Amethyst.Shards.Items/README.md` for data provenance and version
+migration rules. These are **vanilla-client protocol IDs**, not arbitrary
+modded item registration; adding custom IDs would require additional
+registry/asset/protocol support.
 
 ## Build / run
 
@@ -23,7 +54,7 @@ dotnet run --no-build --project src/Amethyst.csproj -- server.yaml
 
 On Linux, `./run.sh` does both steps automatically. **Do not run only `dotnet run --project src/Amethyst.csproj` on a fresh checkout**: it builds only the network kernel, not the Shard assemblies.
 
-`shards/installed/` and `shards/data/` are ignored by Git. Configure their paths through `shardsDirectory` and `shardsDataDirectory` in `server.yaml`. The build targets always copy Shard DLLs, but copy each manifest only when it is missing: local `enabled` edits survive rebuilds. Shard-specific writable data belongs in `shards/data/<shard-id>/`; saves and operators remain at their existing paths.
+`shards/installed/` and `shards/data/` are ignored by Git. Configure their paths through `shardsDirectory` and `shardsDataDirectory` in `server.yaml`. The build targets always copy Shard DLLs. Gameplay and Items also refresh their manifests on each build so required capability changes are applied. Overworld and Hello keep existing manifests when present; local `enabled` edits to those two survive rebuilds. Shard-specific writable data belongs in `shards/data/<shard-id>/`; saves and operators remain at their existing paths.
 
 ## Shard manifest
 
@@ -52,7 +83,7 @@ Manifest fields:
 - `requires`: capabilities that must have exactly one enabled provider
 - `dependsOn`: explicit Shard IDs (for non-substitutable dependencies)
 
-A dependency cycle, missing required provider, duplicate ID, incompatible API version, missing DLL, or invalid manifest causes a clear startup error. The Gameplay Shard requires the `world` capability rather than referring directly to `overworld`; an alternative provider can be substituted **without changing the gameplay binary**.
+A dependency cycle, missing required provider, duplicate ID, incompatible API version, missing DLL, or invalid manifest causes a clear startup error. The Gameplay Shard requires the `world` and `items` capabilities rather than referring directly to `overworld` or the built-in Items implementation; alternative providers can be substituted **without changing the gameplay binary**.
 
 To replace the built-in world provider, set `enabled: false` on the installed `overworld/shard.yaml`, install a trusted Shard that declares `provides: [world]`, and set `enabled: true` on that Shard. Its enable hook must register one `IShardWorld` service. Keep the same world save only if the new provider is actually save-format and generator compatible; otherwise choose a new `worldPath`.
 
@@ -65,7 +96,7 @@ To replace the built-in world provider, set `enabled: false` on the installed `o
 
 Each Shard has its own noncollectible assembly load context and resolves private dependencies from its installation directory (include its dependency DLLs and `.deps.json` when distributing third-party Shards). The shared Amethyst API assembly is never loaded twice.
 
-**Enable/disable does not unload .NET assemblies.** DLL replacement or code updates require a process restart. The Gameplay Shard refuses to disable while players are connected. World providers cannot disable while an enabled Gameplay Shard depends on them.
+**Enable/disable does not unload .NET assemblies.** DLL replacement or code updates require a process restart. The Gameplay Shard refuses to disable while players are connected. World and Items providers cannot disable while an enabled Gameplay Shard depends on them.
 
 Console commands:
 
@@ -75,8 +106,10 @@ shard enable hello
 hello World
 shard disable hello
 shard disable gameplay
+shard disable items
 shard disable overworld
-shard enable gameplay   # automatically enables a world provider
+shard enable gameplay   # automatically enables world + items providers
+iteminfo minecraft:diamond_pickaxe
 ```
 
 Other commands (`op`, `deop`, `kick`, `say`, `perf`) continue to come from the Gameplay Shard. `stop` is owned by Core.
