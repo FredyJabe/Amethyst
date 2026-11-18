@@ -20,7 +20,8 @@ Current functionality includes:
 - An interactive server console with log-safe input, history, completion and a `perf` command.
 - **Shards plugin runtime** with lifecycle hooks, dependency/capability resolution, service API, packet hooks and command registration.
 - Two built-in Shards: Overworld (generation/chunks/lighting) and Gameplay (players/chat/permissions/time).
-- Experimental **Creative and Survival block interaction**: tool-aware timed mining, simple drops collected into persistent player inventories, stack-consuming placement, per-chunk edit persistence and multiplayer block updates. No complete loot/physics or dynamic client relighting yet.
+- Experimental **Creative and Survival block interaction**: tool-aware timed mining, physical ground item drops and pickup into persistent inventories, stack-consuming placement, per-chunk edit persistence and multiplayer block updates. No complete loot/physics or dynamic client relighting yet.
+- **Player location persistence:** each player's last valid coordinates and facing are saved per world on disconnect and every 15 seconds; reconnect restores the camera location before chunk streaming. Invalid/world-mismatched saves return to world spawn.
 
 > **Status:** Prototype. No claim of full vanilla gameplay, complete Survival mechanics, signed chat verification, or production-grade compatibility. Local building and in-game testing are still required for this snapshot.
 
@@ -41,7 +42,7 @@ dotnet run --no-build --project src/Amethyst.csproj -- server.yaml
 
 Alternatively, on Linux/macOS use `./run.sh` (run `chmod +x run.sh` if needed); it builds the kernel and Shards before running. See [Shard API and development guide](SHARDS.md). The default `server.yaml` listens only on `127.0.0.1:25565` and has `onlineMode: true`. Adjust the bind address only after reviewing authentication and server security.
 
-The world seed, generator version, lighting, console, and chunk performance options live in `server.yaml`; the sensitive operator list lives in ignored `ops.yaml`. Generated world data under `worlds/` is also ignored.
+The world seed, generator version, default game mode (`defaultGameMode: survival` or `creative`), lighting, console, and chunk performance options live in `server.yaml`; the sensitive operator list lives in ignored `ops.yaml`. Generated world data under `worlds/` is also ignored.
 
 ```yaml
 operatorsFile: "ops.yaml"  # runtime operator list (ignored by Git)

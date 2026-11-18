@@ -35,17 +35,58 @@ public sealed class ConnectedPlayer : IShardPlayer
     public bool TryGetSelectedBlock(int face, out ushort blockState) =>
         CreativeBlockPalette.TryGetState(Inventory.Held().ItemId, face, out blockState);
 
-    private (int X, int Y, int Z, ushort State, int HeldItem, long Started, int RequiredMs)? _mining;
+    // A vanilla 26.3 client emits 0x0D at the end of every gameplay tick.
+    // Count these in stream order so stalled packet processing does not make
+    // an entire real dig look like START and STOP in the same millisecond.
+    private long _clientTicks;
+    public void AdvanceClientTick() => _clientTicks++;
+    private (int X, int Y, int Z, ushort State, int HeldItem, long Started,
+        int RequiredMs, long ClientTicksAtStart)? _mining;
     public void StartMining(int x, int y, int z, ushort state, int itemId, int requiredMs) =>
-        _mining = (x, y, z, state, itemId, Environment.TickCount64, requiredMs);
+        _mining = (x, y, z, state, itemId, Environment.TickCount64, requiredMs, _clientTicks);
     public void CancelMining() => _mining = null;
-    public bool FinishMining(int x, int y, int z, ushort state, int heldItem)
+    public bool FinishMining(int x, int y, int z, ushort state, int heldItem,
+        out string reason)
     {
         var mining = _mining;
         _mining = null;
-        return mining is { } started && started.X == x && started.Y == y &&
-            started.Z == z && started.State == state && started.HeldItem == heldItem &&
-            Environment.TickCount64 - started.Started + 75 >= started.RequiredMs;
+        if (mining is not { } started)
+        {
+            reason = "no START recorded";
+            return false;
+        }
+        if (started.X != x || started.Y != y || started.Z != z)
+        {
+            reason = $"different target ({started.X},{started.Y},{started.Z})";
+            return false;
+        }
+        if (started.State != state)
+        {
+            reason = $"block changed (started={started.State}, now={state})";
+            return false;
+        }
+        if (started.HeldItem != heldItem)
+        {
+            reason = $"held item changed (started={started.HeldItem}, now={heldItem})";
+            return false;
+        }
+        // Vanilla accepts STOP at 70% progress. Leave one 50 ms tick of
+        // allowance for the client's first mining tick and packet scheduling.
+        long elapsed = Math.Max(0, Environment.TickCount64 - started.Started);
+        long ticks = Math.Max(0, _clientTicks - started.ClientTicksAtStart);
+        long threshold = ((long)started.RequiredMs * 7 + 9) / 10;
+        // The stream is ordered, even if CPU/IO blocked the receive loop for
+        // an entire dig. The client has already counted these 50ms ticks.
+        // Include the initial mining tick, exactly as the vanilla client does.
+        // Retain wall-clock progress for protocol clients without tick markers.
+        long progressed = Math.Max(elapsed + 50, (ticks + 1) * 50);
+        if (progressed < threshold)
+        {
+            reason = $"too early (wall={elapsed}ms, clientTicks={ticks}, threshold={threshold}ms, expected={started.RequiredMs}ms)";
+            return false;
+        }
+        reason = $"complete (wall={elapsed}ms, clientTicks={ticks}, expected={started.RequiredMs}ms)";
+        return true;
     }
 
     public bool TryConsumeEditBudget()
@@ -83,6 +124,16 @@ public sealed class ConnectedPlayer : IShardPlayer
     public PlayerPose SetPose(PlayerPose pose)
     {
         lock (_poseLock) { PlayerPose previous = _pose; _pose = pose; return previous; }
+    }
+
+    // Serialize against movement updates so background saves can never write
+    // an older snapshot after a newer one has been committed on logout.
+    public void PersistPosition(PlayerPositionStore positions)
+    {
+        lock (_poseLock)
+        {
+            if (Ready) positions.Save(PlayerUuid, _pose);
+        }
     }
     public ConnectedPlayer(Guid id, string name, ProfileProperty[] properties, int entityId,
         PacketChannel connection, IShardWorld world, string? inventoryDirectory = null)

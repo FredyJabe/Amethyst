@@ -137,39 +137,111 @@ The Minecraft protocol's server-list status uses JSON on the wire because the va
 
 Both **Creative** and **Survival** support breaking blocks, placing supported
 blocks, and synchronizing changes to other players viewing the same chunk.
+The initial mode for each login is controlled by `defaultGameMode` in
+`server.yaml`: `creative` (backward-compatible default), `survival`,
+`adventure` or `spectator`. In-game `/gamemode` overrides last until
+disconnect, then the configured default applies on the next login.
 **Adventure** and **Spectator** cannot modify the world. Gameplay uses the
 optional `IShardBlockWorld` capability; Core still handles networking only.
 
 Creative breaks blocks instantly and places items without consuming them.
+**Java 26.3 digging action IDs:** `0=START`, `1=CHANGE_DESTROY_DIRECTION`,
+`2=ABORT`, `3=STOP`. This is **not** the pre-26.3 enum (the new
+direction action shifts ABORT/STOP and item drop statuses). A genuine
+26.3 STOP at status 3 must commit the world edit and publish the
+authoritative air state; interpreting it as an item drop causes client-side
+broken blocks to reappear the next time the server sends updates.
+
 Survival tracks start/cancel/finish dig actions per player, checks block hardness
 and selected tool type/tier against Java Edition 26.3 data, and validates
-elapsed time before accepting a break. The current mining model is
+elapsed time before accepting a break. STOP is accepted at 70% of the expected
+mining duration, allowing for the vanilla client's tick-based completion and
+minor packet scheduling skew. It also commits **one-tick instant breaks
+directly on START**: vanilla does not send a STOP packet for blocks mined in
+one tick. For longer digs, Java 26.3's ordered `client_tick_end` (0x0D)
+markers also count elapsed digging time. This prevents queued START and STOP
+packets being mistaken for a zero-duration dig when synchronous world work
+delays processing them. Tick markers are a compatibility aid while Amethyst
+lacks a production tick scheduler; they are not hardened anti-cheat evidence.
+The server sends confirmed block updates to the breaker **before**
+acknowledging prediction sequences to prevent previously mined blocks from
+reappearing when the next action arrives.
+
+If a client still sees ghost blocks, enable action-level diagnostics:
+
+```bash
+AMETHYST_TRACE_MINING=1 ./run.sh
+```
+
+For each dig the console prints the received START/CANCEL/STOP, position,
+selected item, server block state, whether the edit was committed, and a
+specific rejection reason. A committed block reports `changed=True`,
+`after=0`; an uncommitted block shows why (missing START, target mismatch,
+too early, unbreakable, out of range, or edit throttled). This is an
+opt-in diagnostic flag, not a general verbose-packet capture. The current mining model is
 *approximate*: it does not yet model enchantments, haste, mining fatigue,
 underwater penalties, status effects, tool durability, or all vanilla exceptions.
 
-The first Survival loot implementation collects a **conservative subset of
-simple drops directly into player inventory**. Items do not yet spawn as
-physical entities. Unsupported loot tables, silk touch, Fortune, stack drops,
-and full-block entity contents remain future work. If the inventory is full,
-unsupported extra drops are not spawned. Do not expect vanilla-equivalent
-Survival progression yet.
+The first Survival loot implementation spawns a **conservative subset of
+simple drops as real item entities**. Each item has a vanilla clientbound
+`add_entity` packet (type 72), item stack metadata, simple 20Hz gravity
+against full-block terrain, a 500ms pickup delay, collision-based collection,
+and a 5-minute expiry. Entities are visible to nearby players with loaded
+chunks and are removed (with the pickup animation) after collection. Items
+stay on the ground when a player's inventory is full, and partial pickups
+only remove the inserted quantity. Pickup updates the server-owned inventory
+and synchronizes it to the client. Loose items are persisted atomically in
+`<shardsDataDirectory>/gameplay/ground-items/<world-path-hash>.bin`; save
+that directory with the world and player inventory.
 
-Creative can place its palette of simple blocks, plus axis-aware wooden logs
-and persistent leaves. Survival can place those blocks only if present in its
-selected hotbar stack; placing consumes one item. Multi-block structures,
-interactable blocks, containers, furniture, slab/stair shape selection, fluids,
-falling block physics and redstone behavior remain unsupported.
+Unsupported loot tables, Silk Touch, Fortune, multi-item stack drops,
+full-block entity contents, fluid/item physics, collision shapes, hopper
+logic and merge behavior remain future work. Very large numbers of entities
+are capped at 8192 per world; excess drop creations are logged.
+Do not expect complete vanilla-equivalent Survival progression yet.
+
+Creative can place its palette of simple blocks, including grass blocks
+(`snowy=false`) and crafting tables, plus axis-aware wooden logs and
+persistent leaves. Survival can place these blocks only when present in its
+selected hotbar stack; placing consumes one item. Crafting tables can be placed,
+broken and picked up as items, but **their crafting UI and recipes are not
+implemented yet**. Multi-block structures, interactive container menus,
+furniture, slab/stair shape selection, fluids, falling block physics and
+redstone behavior remain unsupported.
 
 ### Inventory
 
 Gameplay owns authoritative 36-slot main inventory + hotbar data (menu slots
 9–44), selected hotbar index, and cursor. Basic pickup/right-click, shift-click
 and number-key swaps are handled server-side; client changed-slot hashes are
-not trusted. Armor, crafting, offhand behavior, drop entities, drag distribution,
-and component-bearing/custom items are not yet implemented. Unsupported clicks
+not trusted. Armor, crafting, offhand behavior, player-initiated drop actions,
+drag distribution, and component-bearing/custom items are not yet implemented. Unsupported clicks
 are reconciled with the server's contents. Player inventory and cursor data are
 persisted atomically under `shards/data/gameplay/inventories/<uuid>.bin` (or
 the configured `shardsDataDirectory`). Back up this directory with the world.
+
+### Player position persistence
+
+Gameplay saves the last server-validated position, yaw, pitch, and on-ground
+state **per player UUID and world**. On reconnect, that location is restored
+*before* the initial 26.3 position/rotation teleport and the first chunks are
+streamed, so a player resumes where they left off instead of world spawn.
+First-time players use the world's generated spawn. Position persistence is
+independent of `defaultGameMode`; the configured gamemode still applies on
+each login.
+
+Position files are stored atomically under
+`<shardsDataDirectory>/gameplay/positions/<world-path-hash>/<player-uuid>.bin`.
+Files also record the world seed and dimension to prevent restoring coordinates
+from an incompatible world. Data is saved when a fully connected player leaves
+and every 15 seconds while online, limiting loss after a crash. Disconnections
+before the client finishes loading cannot overwrite an earlier valid location.
+Invalid, damaged, or incompatible saves fall back to world spawn.
+
+Backup `positions/` alongside `inventories/`, `ground-items/`, and the
+world's `chunks/` and `edits/` directories. This first pass does not yet
+implement beds, respawn anchors, death/respawn mechanics, or per-dimension
+portal travel.
 
 ### World edits and networking
 
@@ -193,7 +265,10 @@ dotnet run --project tests/ShardTests/ShardTests.csproj -c Release --no-build
 ```
 
 Manual acceptance: start with a backed-up world, connect two Java 26.3 clients,
-change into Survival using `/gamemode survival`, mine dirt by hand until a
-stack is collected, place it from the hotbar, and watch updates on both
-clients. Switch to Creative to test logs and instant breaks. Restart to verify
-world edits and inventory persistence.
+change into Survival using `/gamemode survival`, mine dirt by hand and
+watch a dropped item fall to the ground. Walk away and back toward it to
+collect it; verify that inventory only changes upon pickup and that the
+other client sees the same spawn and collection. Try a full inventory and
+reconnect after spawning an uncollected item. Place dirt from the hotbar,
+then switch to Creative to test logs and instant breaks. Restart to verify
+world edits, player inventory, and loose-item persistence.
