@@ -420,7 +420,13 @@ public sealed class WorkstationManager
                 Array.Copy(local, menu.CraftingGrid, 9);
             else
             {
-                Array.Copy(local, block!.Slots, 3);
+                // Recipe duration/output may differ between configured inputs.
+                // Never carry cooking progress across a different ingredient,
+                // which could otherwise produce a short recipe's result early.
+                int previousIngredient = block!.Slots[0].ItemId;
+                Array.Copy(local, block.Slots, 3);
+                if (block.Slots[0].ItemId != previousIngredient)
+                    block.CookProgress = 0;
                 Persist();
             }
             menu.Revision++;
