@@ -6,9 +6,9 @@ public readonly record struct PlayerBlockAction(int Status, int X, int Y, int Z,
 public readonly record struct BlockUseOn(int Hand, int X, int Y, int Z,
     int Face, int Sequence, bool ValidHit);
 
-public readonly record struct CreativeSlotUpdate(int Slot, int ItemId, bool PlainItem);
+public readonly record struct CreativeSlotUpdate(int Slot, int ItemId, int Count, bool PlainItem);
 
-/// <summary>Java 26.3 (protocol 777) Creative block interaction packets.</summary>
+/// <summary>Java 26.3 (protocol 777) block interaction packets.</summary>
 public static class BlockInteractionProtocol
 {
     public const int ServerboundPlayerAction = 0x29;
@@ -55,17 +55,17 @@ public static class BlockInteractionProtocol
         if (count == 0)
         {
             reader.RequireEnd();
-            return new CreativeSlotUpdate(slot, 0, true);
+            return new CreativeSlotUpdate(slot, 0, 0, true);
         }
         if (count is < 0 or > 64)
-            return new CreativeSlotUpdate(slot, 0, false);
+            return new CreativeSlotUpdate(slot, 0, 0, false);
         int itemId = reader.ReadVarInt();
         int added = reader.ReadVarInt(), removed = reader.ReadVarInt();
         // Full data component decoding belongs in the inventory milestone.
         // Never accept an unparsed patch as a trusted Creative placement item.
         bool plain = added == 0 && removed == 0;
         if (plain) reader.RequireEnd();
-        return new CreativeSlotUpdate(slot, itemId, plain);
+        return new CreativeSlotUpdate(slot, itemId, count, plain);
     }
 
     public static int ReadHeldItem(Packet packet)
