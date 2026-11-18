@@ -224,12 +224,13 @@ try
         for (int x = 1; x <= 2; x++)
         {
             int startSequence = x * 2 - 1, stopSequence = x * 2;
+            int startOffset = checked((int)outgoing.Length);
             await game.HandleBlockActionAsync(player,
                 new PlayerBlockAction(0, x, blockY, blockZ, 1, startSequence),
                 CancellationToken.None);
             // START has no predicted removal in Survival. Do not send a stale
             // block-state correction; only acknowledge the action.
-            byte[] beforeStop = outgoing.ToArray();
+            byte[] beforeStop = outgoing.ToArray().AsSpan(startOffset).ToArray();
             using (var startStream = new MemoryStream(beforeStop))
             {
                 var packets = new List<Packet>();
