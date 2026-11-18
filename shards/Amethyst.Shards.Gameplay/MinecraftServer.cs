@@ -483,7 +483,7 @@ public sealed class MinecraftServer
         await BlockInteractionProtocol.SendAckAsync(player.Connection, action.Sequence, ct);
     }
 
-    private async Task HandleBlockUseAsync(ConnectedPlayer player,
+    internal async Task HandleBlockUseAsync(ConnectedPlayer player,
         BlockUseOn hit, CancellationToken ct)
     {
         var (x, y, z) = BlockInteractionProtocol.Adjacent(hit.X, hit.Y, hit.Z, hit.Face);
