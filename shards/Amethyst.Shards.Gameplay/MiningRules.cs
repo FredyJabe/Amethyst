@@ -293,7 +293,7 @@ public static class MiningRules
         new(6863, 6863, 3f, 1, 1012, 112), // diamond_ore
         new(6864, 6864, 4.5f, 1, 1012, 112), // deepslate_diamond_ore
         new(6865, 6865, 5f, 1, 129, 112), // diamond_block
-        new(6866, 6866, 2.5f, 2, 0, 0), // crafting_table
+        new(6866, 6866, 2.5f, 2, 405, 0), // crafting_table
         new(6867, 6874, 0f, 0, 0, 0), // wheat
         new(6875, 6882, 0.6f, 3, 0, 0), // farmland
         new(6883, 6890, 3.5f, 1, 0, 127), // furnace
