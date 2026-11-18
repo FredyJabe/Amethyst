@@ -38,7 +38,8 @@ diamond_pickaxe:
     BlockItem: false
 
 ender_pearl:
-  MaxStackSize: 8
+  Options:
+    StackSize: 8
 ```
 
 The root key can also be the **numeric protocol ID**, for example:
@@ -54,10 +55,12 @@ resolve to the same vanilla item** when supplied. In the bundled
 `items-26.3.yml`, `ProtocolId` pins the actual wire ID. User YAML
 cannot reassign protocol IDs or invent new ones.
 
-`MaxStackSize` must be at least 1 and **cannot exceed the vanilla base
-item's actual maximum** (1, 16 or 64). Lowering it is enforced by the
-server in inventory, pickups and station transactions; vanilla clients
-may still predict the original maximum until reconciled.
+`MaxStackSize` (or MythicMobs-compatible
+`Options.StackSize`) must be at least 1 and **cannot exceed the
+vanilla base item's actual maximum** (1, 16 or 64). Specify at most
+one of them. Lowering it is enforced by the server in inventory,
+pickups and station transactions; vanilla clients may still predict
+the original maximum until reconciled.
 
 `Options.BlockItem` is metadata identifying an item that matches a
 block. Changing it does *not* automatically make a block placeable or
@@ -108,6 +111,7 @@ client rendering or new custom textures.
 | `Lore` | string list | Optional lore metadata (not yet rendered) |
 | `CustomModelData` | nonnegative integer | Optional model metadata (not yet rendered) |
 | `Hidden` | boolean | Optional metadata |
+| `Options.StackSize` | integer | MythicMobs-style synonym for `MaxStackSize` |
 | `Options.BlockItem` | boolean | Block-item metadata, not placement logic |
 | `Options.Hidden` | boolean | Same as top-level `Hidden` |
 
