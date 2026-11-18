@@ -131,37 +131,69 @@ Existing `ops.yaml`, world directories, v7 seeds, and `.mc26` chunk files are un
 The Minecraft protocol's server-list status uses JSON on the wire because the vanilla client requires it. All project configuration files remain YAML.
 
 
-## Creative block editing (experimental)
+## Block interaction (experimental)
 
-Creative-mode players can break blocks and place a **curated set of 168 simple
-vanilla blocks** using the Creative inventory and hotbar. This release introduces
-`IShardBlockWorld` as an optional capability registered by the Overworld Shard,
-without adding gameplay responsibilities to Core or changing the existing
-`IShardWorld` ABI. World Shards may provide their own implementation.
+### Creative and Survival
 
-Player actions are range-checked, restricted to Creative mode, rate-limited
-(64 edits/s/player), synchronized with `block_update`, and acknowledged using
-the client's prediction sequence ID. Supported placed blocks are a version-locked
-subset without complex block properties or block entities. Creative hotbar items
-with data-component patches are not yet supported; a general inventory will
-require a separate parser and persistence model.
+Both **Creative** and **Survival** support breaking blocks, placing supported
+blocks, and synchronizing changes to other players viewing the same chunk.
+**Adventure** and **Spectator** cannot modify the world. Gameplay uses the
+optional `IShardBlockWorld` capability; Core still handles networking only.
 
-**Edits storage:** generated `.mc26` snapshots remain immutable. When
-`saveGeneratedChunks: true` and `generatorVersion` is 5–7, sparse edits are
-atomically saved in `worldPath/edits/<chunkX>.<chunkZ>.amedit`. Back up both
-`chunks/` and `edits/` together. If persistence is disabled (or generator
-version is 1–4), edits are session-only. Corrupt sidecar files fail loudly rather
-than being silently overwritten. Frame and lighting caches are revisioned so
-future chunk loads incorporate edits.
+Creative breaks blocks instantly and places items without consuming them.
+Survival tracks start/cancel/finish dig actions per player, checks block hardness
+and selected tool type/tier against Java Edition 26.3 data, and validates
+elapsed time before accepting a break. The current mining model is
+*approximate*: it does not yet model enchantments, haste, mining fatigue,
+underwater penalties, status effects, tool durability, or all vanilla exceptions.
 
-**Limitations:** no Survival mining progression, drops, inventory consumption,
-multiblock placement, block physics, fluid updates or neighboring block behaviors.
-Existing clients receive block-state changes immediately; full dynamic relighting
-of their already-loaded chunks remains follow-up work.
+The first Survival loot implementation collects a **conservative subset of
+simple drops directly into player inventory**. Items do not yet spawn as
+physical entities. Unsupported loot tables, silk touch, Fortune, stack drops,
+and full-block entity contents remain future work. If the inventory is full,
+unsupported extra drops are not spawned. Do not expect vanilla-equivalent
+Survival progression yet.
 
-To run the automated regression tests:
+Creative can place its palette of simple blocks, plus axis-aware wooden logs
+and persistent leaves. Survival can place those blocks only if present in its
+selected hotbar stack; placing consumes one item. Multi-block structures,
+interactable blocks, containers, furniture, slab/stair shape selection, fluids,
+falling block physics and redstone behavior remain unsupported.
+
+### Inventory
+
+Gameplay owns authoritative 36-slot main inventory + hotbar data (menu slots
+9–44), selected hotbar index, and cursor. Basic pickup/right-click, shift-click
+and number-key swaps are handled server-side; client changed-slot hashes are
+not trusted. Armor, crafting, offhand behavior, drop entities, drag distribution,
+and component-bearing/custom items are not yet implemented. Unsupported clicks
+are reconciled with the server's contents. Player inventory and cursor data are
+persisted atomically under `shards/data/gameplay/inventories/<uuid>.bin` (or
+the configured `shardsDataDirectory`). Back up this directory with the world.
+
+### World edits and networking
+
+Generated `.mc26` snapshots remain unchanged. For generator versions 5–7
+with `saveGeneratedChunks: true`, sparse edits are atomically stored in
+`worldPath/edits/<chunkX>.<chunkZ>.amedit`; for older/nonpersistent worlds,
+edits are in memory only. Back up `chunks/` and `edits/` together.
+
+Player edits have a basic six-block reach check and a 64 edits/second budget.
+The server sends authoritative block updates and prediction acknowledgements
+(sequence IDs) in protocol 777 and refreshes cache versions for newly streamed
+chunks. **Already-loaded chunks do not yet receive full dynamic lighting
+recalculations**; the new lighting is reflected when chunks are streamed again.
+
+### Tests
 
 ```bash
-dotnet build Amethyst.slnx
-dotnet run --project tests/BlockTests/BlockTests.csproj
+dotnet build Amethyst.slnx -c Release
+dotnet run --project tests/BlockTests/BlockTests.csproj -c Release --no-build
+dotnet run --project tests/ShardTests/ShardTests.csproj -c Release --no-build
 ```
+
+Manual acceptance: start with a backed-up world, connect two Java 26.3 clients,
+change into Survival using `/gamemode survival`, mine dirt by hand until a
+stack is collected, place it from the hotbar, and watch updates on both
+clients. Switch to Creative to test logs and instant breaks. Restart to verify
+world edits and inventory persistence.
