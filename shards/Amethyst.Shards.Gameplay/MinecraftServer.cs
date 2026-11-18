@@ -135,6 +135,12 @@ public sealed class MinecraftServer
                         reader.RequireEnd();
                         playerLoaded = true;
                         break;
+                    case 0x0D: // Client Tick End (Java 26.3)
+                        // A reliable, ordered 50ms client tick boundary. Needed
+                        // for mining when chunk streaming stalls packet reading.
+                        reader.RequireEnd();
+                        player.AdvanceClientTick();
+                        break;
                     case 0x1C: // KeepAlive reply
                         _ = reader.ReadInt64(); reader.RequireEnd();
                         break;
