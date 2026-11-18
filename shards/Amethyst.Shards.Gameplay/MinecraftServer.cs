@@ -47,6 +47,8 @@ public sealed class MinecraftServer
         .Select(p => new ShardPlayerSummary(p.Username, p.PlayerUuid)).ToArray();
 
     internal GroundItem[] GroundItemsForTests => _groundItems?.Snapshot() ?? [];
+    internal ConnectedPlayer? GetPlayerForTests(Guid id) =>
+        _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == id);
 
     public void Start()
     {
