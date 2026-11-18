@@ -63,7 +63,10 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
                     if (!visited.Add(id)) throw new InvalidDataException(
                         $"Recipe '{id}' defined multiple times in user recipe files.");
                     Recipe? recipe = ParseRecipe(id, node, file, 100);
-                    if (recipe is null) entries.Remove(id);
+                    if (recipe is null)
+                    {
+                        if (!entries.Remove(id)) throw InvalidDataExceptionForUnknown(id, file);
+                    }
                     else entries[id] = recipe;
                 }
         }
@@ -182,7 +185,8 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
             !Boolean(enableNode, file, id)) return null;
 
         if (!props.TryGetValue("Type", out var kindNode) ||
-            !Enum.TryParse(Scalar(kindNode, file, id), ignoreCase: true, out RecipeKind kind))
+            !Enum.TryParse(Scalar(kindNode, file, id), ignoreCase: true, out RecipeKind kind) ||
+            !Enum.IsDefined(kind))
             throw Invalid(file, id, "Type must be Shaped, Shapeless, Furnace, Smoker or BlastFurnace.");
 
         if (!props.TryGetValue("Result", out var resultNode) ||
@@ -357,6 +361,10 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
     private static bool Boolean(YamlNode node, string file, string recipeId) =>
         bool.TryParse(Scalar(node, file, recipeId), out bool b) ? b :
             throw Invalid(file, recipeId, "Expected true or false.");
+
+    private static InvalidDataException InvalidDataExceptionForUnknown(
+        string id, string file) => Invalid(file, id,
+            "Enabled: false requires an existing bundled recipe ID.");
 
     private static InvalidDataException Invalid(string file, string id, string reason) =>
         new($"Invalid recipe '{id}' in '{file}': {reason}");
