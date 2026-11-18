@@ -129,3 +129,71 @@ The public API is **experimental** and will evolve. Do not rely on internal engi
 Existing `ops.yaml`, world directories, v7 seeds, and `.mc26` chunk files are unchanged. For upgrading from a pre-Shards build, **use a clean source checkout** and copy over `server.yaml`, `ops.yaml` and your saved world directories. Avoid extracting over a modified tree with stray source files; `Amethyst.csproj` excludes known legacy source locations, but a clean checkout is still safer.
 
 The Minecraft protocol's server-list status uses JSON on the wire because the vanilla client requires it. All project configuration files remain YAML.
+
+
+## Block interaction (experimental)
+
+### Creative and Survival
+
+Both **Creative** and **Survival** support breaking blocks, placing supported
+blocks, and synchronizing changes to other players viewing the same chunk.
+**Adventure** and **Spectator** cannot modify the world. Gameplay uses the
+optional `IShardBlockWorld` capability; Core still handles networking only.
+
+Creative breaks blocks instantly and places items without consuming them.
+Survival tracks start/cancel/finish dig actions per player, checks block hardness
+and selected tool type/tier against Java Edition 26.3 data, and validates
+elapsed time before accepting a break. The current mining model is
+*approximate*: it does not yet model enchantments, haste, mining fatigue,
+underwater penalties, status effects, tool durability, or all vanilla exceptions.
+
+The first Survival loot implementation collects a **conservative subset of
+simple drops directly into player inventory**. Items do not yet spawn as
+physical entities. Unsupported loot tables, silk touch, Fortune, stack drops,
+and full-block entity contents remain future work. If the inventory is full,
+unsupported extra drops are not spawned. Do not expect vanilla-equivalent
+Survival progression yet.
+
+Creative can place its palette of simple blocks, plus axis-aware wooden logs
+and persistent leaves. Survival can place those blocks only if present in its
+selected hotbar stack; placing consumes one item. Multi-block structures,
+interactable blocks, containers, furniture, slab/stair shape selection, fluids,
+falling block physics and redstone behavior remain unsupported.
+
+### Inventory
+
+Gameplay owns authoritative 36-slot main inventory + hotbar data (menu slots
+9–44), selected hotbar index, and cursor. Basic pickup/right-click, shift-click
+and number-key swaps are handled server-side; client changed-slot hashes are
+not trusted. Armor, crafting, offhand behavior, drop entities, drag distribution,
+and component-bearing/custom items are not yet implemented. Unsupported clicks
+are reconciled with the server's contents. Player inventory and cursor data are
+persisted atomically under `shards/data/gameplay/inventories/<uuid>.bin` (or
+the configured `shardsDataDirectory`). Back up this directory with the world.
+
+### World edits and networking
+
+Generated `.mc26` snapshots remain unchanged. For generator versions 5–7
+with `saveGeneratedChunks: true`, sparse edits are atomically stored in
+`worldPath/edits/<chunkX>.<chunkZ>.amedit`; for older/nonpersistent worlds,
+edits are in memory only. Back up `chunks/` and `edits/` together.
+
+Player edits have a basic six-block reach check and a 64 edits/second budget.
+The server sends authoritative block updates and prediction acknowledgements
+(sequence IDs) in protocol 777 and refreshes cache versions for newly streamed
+chunks. **Already-loaded chunks do not yet receive full dynamic lighting
+recalculations**; the new lighting is reflected when chunks are streamed again.
+
+### Tests
+
+```bash
+dotnet build Amethyst.slnx -c Release
+dotnet run --project tests/BlockTests/BlockTests.csproj -c Release --no-build
+dotnet run --project tests/ShardTests/ShardTests.csproj -c Release --no-build
+```
+
+Manual acceptance: start with a backed-up world, connect two Java 26.3 clients,
+change into Survival using `/gamemode survival`, mine dirt by hand until a
+stack is collected, place it from the hotbar, and watch updates on both
+clients. Switch to Creative to test logs and instant breaks. Restart to verify
+world edits and inventory persistence.

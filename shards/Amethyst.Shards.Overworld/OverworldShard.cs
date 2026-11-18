@@ -21,6 +21,7 @@ public sealed class OverworldShard : IShard
         var world = new TerrainWorld(_context.Options);
         _world = world;
         _context.RegisterService<IShardWorld>(world);
+        _context.RegisterService<IShardBlockWorld>(world);
         _context.Log($"World initialized: seed={world.Seed}, generatorVersion={_context.Options.GeneratorVersion}, sea={world.SeaLevel}");
         return Task.CompletedTask;
     }

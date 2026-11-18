@@ -20,7 +20,45 @@ public sealed class ConnectedPlayer : IShardPlayer
         if ((int)mode is < 0 or > 3)
             throw new ArgumentOutOfRangeException(nameof(mode));
         Volatile.Write(ref _gameMode, (int)mode);
+        CancelMining();
     }
+    public PlayerInventory Inventory { get; }
+    private long _editWindowStarted;
+    private int _editCount;
+
+    public void SelectHotbar(int index) => Inventory.SelectHotbar(index);
+
+    public bool SetCreativeSlot(int slot, int itemId, int count, bool plainItem) =>
+        GameMode == PlayerGameMode.Creative &&
+        Inventory.TryCreativeSet(slot, itemId, count, plainItem);
+
+    public bool TryGetSelectedBlock(int face, out ushort blockState) =>
+        CreativeBlockPalette.TryGetState(Inventory.Held().ItemId, face, out blockState);
+
+    private (int X, int Y, int Z, ushort State, int HeldItem, long Started, int RequiredMs)? _mining;
+    public void StartMining(int x, int y, int z, ushort state, int itemId, int requiredMs) =>
+        _mining = (x, y, z, state, itemId, Environment.TickCount64, requiredMs);
+    public void CancelMining() => _mining = null;
+    public bool FinishMining(int x, int y, int z, ushort state, int heldItem)
+    {
+        var mining = _mining;
+        _mining = null;
+        return mining is { } started && started.X == x && started.Y == y &&
+            started.Z == z && started.State == state && started.HeldItem == heldItem &&
+            Environment.TickCount64 - started.Started + 75 >= started.RequiredMs;
+    }
+
+    public bool TryConsumeEditBudget()
+    {
+        long now = Environment.TickCount64;
+        if (now - _editWindowStarted >= 1000)
+        {
+            _editWindowStarted = now;
+            _editCount = 0;
+        }
+        return ++_editCount <= 64;
+    }
+
     private int _chatMode;
     private long _lastChatAt;
     private readonly CancellationTokenSource _disconnect = new();
@@ -47,10 +85,11 @@ public sealed class ConnectedPlayer : IShardPlayer
         lock (_poseLock) { PlayerPose previous = _pose; _pose = pose; return previous; }
     }
     public ConnectedPlayer(Guid id, string name, ProfileProperty[] properties, int entityId,
-        PacketChannel connection, IShardWorld world)
+        PacketChannel connection, IShardWorld world, string? inventoryDirectory = null)
     {
         PlayerUuid = id; Username = name; Properties = properties;
         EntityId = entityId; Connection = connection; View = world.CreateView();
+        Inventory = new PlayerInventory(inventoryDirectory, id);
     }
 }
 

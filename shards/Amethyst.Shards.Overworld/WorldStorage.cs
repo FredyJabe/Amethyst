@@ -115,7 +115,7 @@ public sealed class WorldStorage : IAsyncDisposable
             {
                 // Drain multiple ready chunks per wake-up. Files remain in the
                 // original atomic .mc26 format; no world migration required.
-                for (int batch = 0; batch < 32 && _saves.Reader.TryRead(out ChunkColumn column); batch++)
+                for (int batch = 0; batch < 32 && _saves.Reader.TryRead(out var column); batch++)
                     Save(column);
             }
         }

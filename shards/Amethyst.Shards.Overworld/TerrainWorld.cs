@@ -93,15 +93,16 @@ public sealed class ChunkColumn
         Sections[(y - MinY) / 16].GetBlock(x, (y - MinY) % 16, z);
 }
 
-public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
+public sealed class TerrainWorld : Amethyst.Shards.IShardWorld, Amethyst.Shards.IShardBlockWorld
 {
     public const string Dimension = "minecraft:overworld";
     public const int PlatformY = 79;
     public const double SpawnX = 0.5, SpawnY = 80, SpawnZ = 0.5;
     private readonly BoundedLazyCache<ChunkPos, ChunkColumn> _columns;
-    private readonly BoundedLazyCache<ChunkPos, ChunkLightEngine.LightData> _lights;
-    private readonly BoundedLazyCache<ChunkPos, ChunkLightEngine.LightSource> _lightSources;
-    private readonly BoundedLazyCache<ChunkPos, byte[]> _frames;
+    private readonly BoundedLazyCache<(ChunkPos Position, ulong Stamp), ChunkLightEngine.LightData> _lights;
+    private readonly BoundedLazyCache<(ChunkPos Position, long Revision), ChunkLightEngine.LightSource> _lightSources;
+    private readonly BoundedLazyCache<(ChunkPos Position, ulong Stamp), byte[]> _frames;
+    private readonly WorldEdits _edits;
     public ChunkPerformance Performance { get; } = new();
     public ChunkPreparationScheduler Scheduler { get; }
     public int CachedColumns => _columns.Count;
@@ -134,9 +135,9 @@ public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
     public TerrainWorld(ServerOptions settings)
     {
         _columns = new BoundedLazyCache<ChunkPos, ChunkColumn>(settings.MaxCachedColumns);
-        _lights = new BoundedLazyCache<ChunkPos, ChunkLightEngine.LightData>(settings.MaxCachedLights);
-        _lightSources = new BoundedLazyCache<ChunkPos, ChunkLightEngine.LightSource>(settings.MaxCachedLightSources);
-        _frames = new BoundedLazyCache<ChunkPos, byte[]>(settings.MaxCachedPackets);
+        _lights = new BoundedLazyCache<(ChunkPos Position, ulong Stamp), ChunkLightEngine.LightData>(settings.MaxCachedLights);
+        _lightSources = new BoundedLazyCache<(ChunkPos Position, long Revision), ChunkLightEngine.LightSource>(settings.MaxCachedLightSources);
+        _frames = new BoundedLazyCache<(ChunkPos Position, ulong Stamp), byte[]>(settings.MaxCachedPackets);
         _terrain = new TerrainGenerator(settings);
         if (settings.GeneratorVersion >= 3)
             _density = new DensitySampler(_terrain, settings);
@@ -155,6 +156,8 @@ public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
             if (settings.SaveGeneratedChunks)
                 _storage = new WorldStorage(settings, Performance);
         }
+        _edits = new WorldEdits(settings.SaveGeneratedChunks && settings.GeneratorVersion >= 5
+            ? settings.WorldPath : null);
         ViewDistance = settings.ViewDistance;
         Scheduler = new ChunkPreparationScheduler(this, settings.ChunkWorkers, settings.MaxQueuedChunks);
     }
@@ -409,20 +412,78 @@ public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
     }
 
 
-    public ushort GetBlock(int x, int y, int z)
+    private static (ChunkPos Position, int X, int Z) Locate(int x, int z)
     {
         int cx = Math.DivRem(x, 16, out int localX);
         int cz = Math.DivRem(z, 16, out int localZ);
         if (localX < 0) { cx--; localX += 16; }
         if (localZ < 0) { cz--; localZ += 16; }
-        return GetColumn(new ChunkPos(cx, cz)).GetBlock(localX, y, localZ);
+        return (new ChunkPos(cx, cz), localX, localZ);
     }
 
-    /// <summary>Full unencrypted Minecraft frame cached per immutable chunk. The
-    /// per-connection AES layer still encrypts it separately for each client.</summary>
+    public ushort GetBlockState(int x, int y, int z)
+    {
+        if (y < ChunkColumn.MinY || y > ChunkColumn.MaxY) return TerrainBlocks.Air;
+        var (pos, localX, localZ) = Locate(x, z);
+        ushort original = GetColumn(pos).GetBlock(localX, y, localZ);
+        return _edits.Get(pos, localX, y, localZ, original);
+    }
+
+    // Original test/terrain helper, now including the persisted edit overlay.
+    public ushort GetBlock(int x, int y, int z) => GetBlockState(x, y, z);
+
+    public bool TrySetBlockState(int x, int y, int z, ushort state, out ushort previousState)
+    {
+        previousState = TerrainBlocks.Air;
+        if (y < ChunkColumn.MinY || y > ChunkColumn.MaxY ||
+            x is < -29_999_984 or > 29_999_984 ||
+            z is < -29_999_984 or > 29_999_984 ||
+            state >= 35723) return false;
+        var (pos, localX, localZ) = Locate(x, z);
+        ushort original = GetColumn(pos).GetBlock(localX, y, localZ);
+        return _edits.TrySet(pos, localX, y, localZ, original, state, out previousState);
+    }
+
+    private ChunkColumn ColumnWithEdits(ChunkPos pos)
+    {
+        ChunkColumn source = GetColumn(pos);
+        var (_, changes) = _edits.Snapshot(pos);
+        if (changes.Length == 0) return source;
+        var copy = new ChunkColumn(pos, 0);
+        for (int i = 0; i < ChunkColumn.SectionCount; i++)
+        {
+            Array.Copy(source.Sections[i].Blocks, copy.Sections[i].Blocks, 4096);
+            Array.Copy(source.Sections[i].Biomes, copy.Sections[i].Biomes, 64);
+            copy.Sections[i].RecomputeCounts();
+        }
+        foreach (var (index, state) in changes)
+        {
+            int y = ChunkColumn.MinY + index / 256;
+            int localZ = (index % 256) >> 4, localX = index & 15;
+            copy.SetBlock(localX, y, localZ, state);
+        }
+        RecomputeHeightmaps(copy);
+        return copy;
+    }
+
+    // Lighting uses a 15-block halo. A revision in any of these 3x3 chunks
+    // changes the frame/cache identity, avoiding stale cached chunk packets.
+    private ulong LightingStamp(ChunkPos pos)
+    {
+        ulong hash = 14695981039346656037UL;
+        for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++)
+            hash = unchecked((hash ^ (ulong)_edits.Revision(new ChunkPos(pos.X + dx, pos.Z + dz)))
+                * 1099511628211UL);
+        return hash;
+    }
+
+    /// <summary>Cache chunk frames by edit/light revision, preserving old immutable
+    /// frames for already running sends without mixing post-edit snapshots.</summary>
     public byte[] PrepareChunkFrame(ChunkPos pos)
     {
-        byte[] frame = _frames.GetOrAdd(pos, BuildFrame, out bool hit);
+        byte[] frame = _frames.GetOrAdd((pos, LightingStamp(pos)),
+            key => BuildFrame(key.Position), out bool hit);
         Performance.CacheHit("packet", hit);
         return frame;
     }
@@ -432,10 +493,10 @@ public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
 
     internal ChunkLightEngine.LightSource GetLightingSource(ChunkPos pos)
     {
-        var source = _lightSources.GetOrAdd(pos, key =>
+        var source = _lightSources.GetOrAdd((pos, _edits.Revision(pos)), key =>
         {
             long started = ChunkPerformance.Start();
-            try { return ChunkLightEngine.PrepareSource(GetColumn(key)); }
+            try { return ChunkLightEngine.PrepareSource(ColumnWithEdits(key.Position)); }
             finally { Performance.Record(ChunkStage.LightSources, started); }
         }, out bool hit);
         Performance.CacheHit("source", hit);
@@ -445,13 +506,13 @@ public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
     private byte[] BuildFrame(ChunkPos pos)
     {
         long start = ChunkPerformance.Start();
-        ChunkColumn column = GetColumn(pos);
+        ChunkColumn column = ColumnWithEdits(pos);
         byte[] sections = EncodeSections(column);
         long[] heights = BuildHeightmap(column);
-        var lighting = _lights.GetOrAdd(pos, key =>
+        var lighting = _lights.GetOrAdd((pos, LightingStamp(pos)), key =>
         {
             long lightStart = ChunkPerformance.Start();
-            try { return ChunkLightEngine.Calculate(this, key); }
+            try { return ChunkLightEngine.Calculate(this, key.Position); }
             finally { Performance.Record(ChunkStage.Lighting, lightStart); }
         }, out bool lightHit);
         Performance.CacheHit("light", lightHit);
@@ -499,7 +560,7 @@ public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
     }
 
     // Exposed for byte-level regression tests and future chunk storage.
-    public byte[] SerializeSections(ChunkPos pos) => EncodeSections(GetColumn(pos));
+    public byte[] SerializeSections(ChunkPos pos) => EncodeSections(ColumnWithEdits(pos));
 
     private static byte[] EncodeSections(ChunkColumn column)
     {
@@ -580,7 +641,7 @@ public sealed class TerrainWorld : Amethyst.Shards.IShardWorld
 // then fill the configured radius in batches as the client acknowledges each
 // completed batch. This prevents large bursts of chunks delaying spawn or
 // leaving the client with a partially loaded view.
-public sealed class PlayerChunkView : Amethyst.Shards.IShardChunkView
+public sealed class PlayerChunkView : Amethyst.Shards.IShardChunkView, Amethyst.Shards.IShardChunkSubscriptions
 {
     private readonly TerrainWorld _world;
     private const int RenderHaloChunks = 1;
@@ -595,6 +656,13 @@ public sealed class PlayerChunkView : Amethyst.Shards.IShardChunkView
     private CancellationTokenSource? _batchCancellation;
     private int _batchSize = 9;
     public PlayerChunkView(TerrainWorld world) => _world = world;
+
+    public async Task<bool> HasLoadedChunkAsync(int chunkX, int chunkZ, CancellationToken ct)
+    {
+        await _sync.WaitAsync(ct);
+        try { return _loaded.Contains(new ChunkPos(chunkX, chunkZ)); }
+        finally { _sync.Release(); }
+    }
 
     public async Task UpdateAsync(PacketChannel channel, PlayerPose pose, CancellationToken ct)
     {

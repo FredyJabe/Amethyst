@@ -71,6 +71,20 @@ public interface IShardChunkView
     Task OnBatchReceivedAsync(PacketChannel connection, float chunksPerTick, CancellationToken ct);
 }
 
+/// <summary>Optional extension for world providers that support runtime block edits.
+/// Implement and register separately from IShardWorld to preserve existing Shard ABI.</summary>
+public interface IShardBlockWorld
+{
+    ushort GetBlockState(int x, int y, int z);
+    bool TrySetBlockState(int x, int y, int z, ushort state, out ushort previousState);
+}
+
+/// <summary>Optional query for loaded chunks; used for targeted broadcasts.</summary>
+public interface IShardChunkSubscriptions
+{
+    Task<bool> HasLoadedChunkAsync(int chunkX, int chunkZ, CancellationToken ct);
+}
+
 /// <summary>One enabled gameplay Shard is responsible for Play-state behavior.
 /// Core exclusively owns socket accept, auth, handshake, login, configuration,
 /// packet framing, and encryption.</summary>
