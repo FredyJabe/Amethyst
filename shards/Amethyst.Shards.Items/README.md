@@ -134,6 +134,156 @@ previously persisted inventory contains an invalid count under a new
 `MaxStackSize`, it may fail to load. Back up `inventories/` before
 lowering stack limits on an existing server.
 
+## YAML recipes
+
+The Items Shard also owns a server-authoritative
+`IShardRecipeRegistry` (capability `recipes`). The bundled starter
+recipes formerly hard-coded in Gameplay are now defined in
+`shards/installed/items/recipes-26.3.yml`, built from
+`shards/Amethyst.Shards.Items/recipes-26.3.yml`.
+
+**Administrator recipes** go into
+`shards/data/items/recipes/*.yml` or `*.yaml`, with nested directories
+supported. The Items Shard creates a commented
+`shards/data/items/recipes/example-recipes.yml` on first startup.
+Edits require a server restart; custom files are never overwritten.
+The same recipe root ID in a user file **replaces the bundled recipe**;
+duplicate recipe IDs in two user files are rejected. Recipe IDs are
+identifiers for server recipes, **not** vanilla protocol IDs.
+
+### Shaped recipes
+
+```yaml
+custom_pickaxe:
+  Type: Shaped
+  Pattern:
+    - "DDD"
+    - " S "
+    - " S "
+  Key:
+    D: minecraft:diamond
+    S: minecraft:stick
+  Result:
+    Id: minecraft:diamond_pickaxe
+    Amount: 1
+```
+
+Rows must have equal width, up to 3×3, and space means an empty slot.
+Patterns match at any offset in the 3×3 crafting grid; mirrored patterns
+are also supported. Every non-space symbol needs an entry under `Key`.
+A key can be a single item or a **list of alternatives**:
+
+```yaml
+stick_from_wood:
+  Type: Shaped
+  Pattern: ["P", "P"]
+  Key:
+    P: [minecraft:oak_planks, minecraft:spruce_planks]
+  Result: { Id: minecraft:stick, Amount: 4 }
+```
+
+### Shapeless recipes
+
+```yaml
+quick_torches:
+  Type: Shapeless
+  Ingredients:
+    - minecraft:coal
+    - minecraft:stick
+  Result:
+    Id: minecraft:torch
+    Amount: 8
+```
+
+Each `Ingredients` entry consumes exactly one item from one grid slot.
+Ingredient order and positioning do not matter, and all other grid
+slots must be empty. Up to nine ingredients are supported. For alternative
+materials, use a nested list, e.g.
+`- [minecraft:coal, minecraft:charcoal]`.
+
+### Furnace, smoker and blast furnace
+
+```yaml
+iron_from_stone:
+  Type: Furnace
+  Ingredient: minecraft:stone
+  Result: { Id: minecraft:iron_ingot, Amount: 1 }
+  CookingTime: 160
+
+fast_cooked_beef:
+  Type: Smoker
+  Ingredient: minecraft:beef
+  Result: { Id: minecraft:cooked_beef, Amount: 1 }
+  CookingTime: 60
+
+gold_from_dirt:
+  Type: BlastFurnace
+  Ingredient: minecraft:dirt
+  Result: { Id: minecraft:gold_ingot, Amount: 1 }
+  CookingTime: 100
+```
+
+Cooking types accept one `Ingredient`, which may also be a list of
+alternative materials. `CookingTime` is a positive number of **server
+ticks** (20 ticks per second) between 1 and 32767, defaulting to
+200 for furnaces and 100 for smokers/blast furnaces.
+Fuel types and fuel burn duration still belong to Gameplay; a recipe
+only defines input, result and processing time.
+
+### Disable or override a default
+
+```yaml
+# Same ID as a bundled recipe; remove it entirely:
+oak_planks_from_log:
+  Enabled: false
+
+# Replace its recipe/output; custom recipes win if another recipe shares
+# the same inputs, unless you override the Priority explicitly:
+sticks:
+  Type: Shaped
+  Pattern: ["P", "P"]
+  Key:
+    P: [oak_planks, birch_planks, spruce_planks]
+  Result: { Id: stick, Amount: 6 }
+```
+
+Optional `Priority` controls which matching recipe wins. Bundled recipes
+default to 0; custom recipes default to 100, with accepted values
+-1000 to 1000. The first matching recipe is selected by descending
+priority, then recipe ID, to make conflicts deterministic.
+
+### Validation and limitations
+
+Every material name or numeric item ID is resolved through
+`IShardItemRegistry` **after item definition YAML overrides load**.
+A custom item *alias* resolves to its existing vanilla base protocol ID
+because per-stack alias identity is not implemented yet. The output
+amount must respect the configured item's maximum stack size. Malformed
+YAML, duplicate IDs, unknown materials, unexpected properties, invalid
+pattern rows and unsafe amounts or cooking times fail startup.
+
+The actual crafting menu, server-side ingredient consumption, inventory
+revisions, furnace ticks and station persistence remain in Gameplay;
+the Items Shard owns **recipe definitions and matching**. Client-side
+recipe book discovery/autoplace and complete vanilla data-pack recipe/tag
+loading are not implemented yet, so craft manually in the 3×3 grid.
+The bundled YAML is a starter subset, not all Minecraft recipes.
+
+Other Shards can query recipes through:
+```csharp
+IShardRecipeRegistry recipes =
+    context.GetRequiredService<IShardRecipeRegistry>();
+
+var grid = new ShardRecipeStack[9];
+grid[4] = new ShardRecipeStack(itemId, 1);
+if (recipes.TryMatchCrafting(grid, out var craft))
+    context.Log($"Matched {craft.RecipeId}, output {craft.Result.ItemId}");
+```
+
+Declare `requires: [recipes]` in consumers' manifests.
+The console command `recipes` lists up to 30 available recipes;
+`recipes shovel` filters by recipe ID.
+
 ## Public Shard API
 
 ```csharp
