@@ -18,10 +18,12 @@ static void Check(bool condition, string message)
 
 // The Items Shard is the sole version-pinned source of item identities
 // and stacking rules, including items that may only stack to one or 16.
+Amethyst.Shards.ShardItemDefinition diamondPickaxe = default;
+Amethyst.Shards.ShardItemDefinition pearls = default;
 Check(itemsCatalog.Count == 1658 &&
-    itemsCatalog.TryGetByIdentifier("minecraft:diamond_pickaxe", out var diamondPickaxe) &&
+    itemsCatalog.TryGetByIdentifier("minecraft:diamond_pickaxe", out diamondPickaxe) &&
     diamondPickaxe.MaxStackSize == 1 &&
-    itemsCatalog.TryGetByIdentifier("minecraft:ender_pearl", out var pearls) &&
+    itemsCatalog.TryGetByIdentifier("minecraft:ender_pearl", out pearls) &&
     pearls.MaxStackSize == 16 &&
     itemsCatalog.TryGetById(405, out var craftingDefinition) &&
     craftingDefinition.Identifier == "minecraft:crafting_table" &&
