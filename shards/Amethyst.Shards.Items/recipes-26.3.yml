@@ -1,0 +1,510 @@
+# Minecraft Java 26.3 (protocol 777) starter recipes.
+# Every root node is a recipe ID. Customized recipes belong in
+# shards/data/items/recipes/*.yml; same IDs replace these defaults.
+# Types: Shaped, Shapeless, Furnace, Smoker, BlastFurnace.
+oak_planks_from_log:
+  Type: Shapeless
+  Ingredients: ["minecraft:oak_log"]
+  Result: { Id: minecraft:oak_planks, Amount: 4 }
+
+spruce_planks_from_log:
+  Type: Shapeless
+  Ingredients: ["minecraft:spruce_log"]
+  Result: { Id: minecraft:spruce_planks, Amount: 4 }
+
+birch_planks_from_log:
+  Type: Shapeless
+  Ingredients: ["minecraft:birch_log"]
+  Result: { Id: minecraft:birch_planks, Amount: 4 }
+
+jungle_planks_from_log:
+  Type: Shapeless
+  Ingredients: ["minecraft:jungle_log"]
+  Result: { Id: minecraft:jungle_planks, Amount: 4 }
+
+acacia_planks_from_log:
+  Type: Shapeless
+  Ingredients: ["minecraft:acacia_log"]
+  Result: { Id: minecraft:acacia_planks, Amount: 4 }
+
+dark_oak_planks_from_log:
+  Type: Shapeless
+  Ingredients: ["minecraft:dark_oak_log"]
+  Result: { Id: minecraft:dark_oak_planks, Amount: 4 }
+
+cherry_planks_from_log:
+  Type: Shapeless
+  Ingredients: ["minecraft:cherry_log"]
+  Result: { Id: minecraft:cherry_planks, Amount: 4 }
+
+pale_oak_planks_from_log:
+  Type: Shapeless
+  Ingredients: ["minecraft:pale_oak_log"]
+  Result: { Id: minecraft:pale_oak_planks, Amount: 4 }
+
+mangrove_planks_from_log:
+  Type: Shapeless
+  Ingredients: ["minecraft:mangrove_log"]
+  Result: { Id: minecraft:mangrove_planks, Amount: 4 }
+
+sticks:
+  Type: Shaped
+  Pattern:
+    - "P"
+    - "P"
+  Key:
+    P: ["minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks", "minecraft:acacia_planks", "minecraft:dark_oak_planks", "minecraft:cherry_planks", "minecraft:pale_oak_planks", "minecraft:mangrove_planks", "minecraft:crimson_planks", "minecraft:warped_planks", "minecraft:bamboo_planks", "minecraft:poplar_planks"]
+  Result: { Id: minecraft:stick, Amount: 4 }
+
+crafting_table:
+  Type: Shaped
+  Pattern:
+    - "PP"
+    - "PP"
+  Key:
+    P: ["minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks", "minecraft:acacia_planks", "minecraft:dark_oak_planks", "minecraft:cherry_planks", "minecraft:pale_oak_planks", "minecraft:mangrove_planks", "minecraft:crimson_planks", "minecraft:warped_planks", "minecraft:bamboo_planks", "minecraft:poplar_planks"]
+  Result: { Id: minecraft:crafting_table, Amount: 1 }
+
+chest:
+  Type: Shaped
+  Pattern:
+    - "PPP"
+    - "P P"
+    - "PPP"
+  Key:
+    P: ["minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks", "minecraft:acacia_planks", "minecraft:dark_oak_planks", "minecraft:cherry_planks", "minecraft:pale_oak_planks", "minecraft:mangrove_planks", "minecraft:crimson_planks", "minecraft:warped_planks", "minecraft:bamboo_planks", "minecraft:poplar_planks"]
+  Result: { Id: minecraft:chest, Amount: 1 }
+
+furnace:
+  Type: Shaped
+  Pattern:
+    - "SSS"
+    - "S S"
+    - "SSS"
+  Key:
+    S: ["minecraft:cobblestone", "minecraft:blackstone", "minecraft:cobbled_deepslate"]
+  Result: { Id: minecraft:furnace, Amount: 1 }
+
+torch_from_coal:
+  Type: Shaped
+  Pattern:
+    - "C"
+    - "S"
+  Key:
+    C: minecraft:coal
+    S: minecraft:stick
+  Result: { Id: minecraft:torch, Amount: 4 }
+
+torch_from_charcoal:
+  Type: Shaped
+  Pattern:
+    - "C"
+    - "S"
+  Key:
+    C: minecraft:charcoal
+    S: minecraft:stick
+  Result: { Id: minecraft:torch, Amount: 4 }
+
+smoker:
+  Type: Shaped
+  Pattern:
+    - " L "
+    - "LFL"
+    - " L "
+  Key:
+    L: ["minecraft:oak_log", "minecraft:spruce_log", "minecraft:birch_log", "minecraft:jungle_log", "minecraft:acacia_log", "minecraft:dark_oak_log", "minecraft:cherry_log", "minecraft:pale_oak_log", "minecraft:mangrove_log"]
+    F: minecraft:furnace
+  Result: { Id: minecraft:smoker, Amount: 1 }
+
+blast_furnace:
+  Type: Shaped
+  Pattern:
+    - "III"
+    - "IFI"
+    - "SSS"
+  Key:
+    I: minecraft:iron_ingot
+    F: minecraft:furnace
+    S: minecraft:smooth_stone
+  Result: { Id: minecraft:blast_furnace, Amount: 1 }
+
+wooden_pickaxe:
+  Type: Shaped
+  Pattern:
+    - "MMM"
+    - " S "
+    - " S "
+  Key:
+    M: ["minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks", "minecraft:acacia_planks", "minecraft:dark_oak_planks", "minecraft:cherry_planks", "minecraft:pale_oak_planks", "minecraft:mangrove_planks", "minecraft:crimson_planks", "minecraft:warped_planks", "minecraft:bamboo_planks", "minecraft:poplar_planks"]
+    S: minecraft:stick
+  Result: { Id: minecraft:wooden_pickaxe, Amount: 1 }
+
+wooden_shovel:
+  Type: Shaped
+  Pattern:
+    - "M"
+    - "S"
+    - "S"
+  Key:
+    M: ["minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks", "minecraft:acacia_planks", "minecraft:dark_oak_planks", "minecraft:cherry_planks", "minecraft:pale_oak_planks", "minecraft:mangrove_planks", "minecraft:crimson_planks", "minecraft:warped_planks", "minecraft:bamboo_planks", "minecraft:poplar_planks"]
+    S: minecraft:stick
+  Result: { Id: minecraft:wooden_shovel, Amount: 1 }
+
+wooden_axe:
+  Type: Shaped
+  Pattern:
+    - "MM"
+    - "MS"
+    - " S"
+  Key:
+    M: ["minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks", "minecraft:acacia_planks", "minecraft:dark_oak_planks", "minecraft:cherry_planks", "minecraft:pale_oak_planks", "minecraft:mangrove_planks", "minecraft:crimson_planks", "minecraft:warped_planks", "minecraft:bamboo_planks", "minecraft:poplar_planks"]
+    S: minecraft:stick
+  Result: { Id: minecraft:wooden_axe, Amount: 1 }
+
+stone_pickaxe:
+  Type: Shaped
+  Pattern:
+    - "MMM"
+    - " S "
+    - " S "
+  Key:
+    M: ["minecraft:cobblestone", "minecraft:blackstone", "minecraft:cobbled_deepslate"]
+    S: minecraft:stick
+  Result: { Id: minecraft:stone_pickaxe, Amount: 1 }
+
+stone_shovel:
+  Type: Shaped
+  Pattern:
+    - "M"
+    - "S"
+    - "S"
+  Key:
+    M: ["minecraft:cobblestone", "minecraft:blackstone", "minecraft:cobbled_deepslate"]
+    S: minecraft:stick
+  Result: { Id: minecraft:stone_shovel, Amount: 1 }
+
+stone_axe:
+  Type: Shaped
+  Pattern:
+    - "MM"
+    - "MS"
+    - " S"
+  Key:
+    M: ["minecraft:cobblestone", "minecraft:blackstone", "minecraft:cobbled_deepslate"]
+    S: minecraft:stick
+  Result: { Id: minecraft:stone_axe, Amount: 1 }
+
+iron_pickaxe:
+  Type: Shaped
+  Pattern:
+    - "MMM"
+    - " S "
+    - " S "
+  Key:
+    M: minecraft:iron_ingot
+    S: minecraft:stick
+  Result: { Id: minecraft:iron_pickaxe, Amount: 1 }
+
+iron_shovel:
+  Type: Shaped
+  Pattern:
+    - "M"
+    - "S"
+    - "S"
+  Key:
+    M: minecraft:iron_ingot
+    S: minecraft:stick
+  Result: { Id: minecraft:iron_shovel, Amount: 1 }
+
+iron_axe:
+  Type: Shaped
+  Pattern:
+    - "MM"
+    - "MS"
+    - " S"
+  Key:
+    M: minecraft:iron_ingot
+    S: minecraft:stick
+  Result: { Id: minecraft:iron_axe, Amount: 1 }
+
+iron_ingot_from_raw_iron_smelting:
+  Type: Furnace
+  Ingredient: minecraft:raw_iron
+  CookingTime: 200
+  Result: { Id: minecraft:iron_ingot, Amount: 1 }
+
+iron_ingot_from_raw_iron_blasting:
+  Type: BlastFurnace
+  Ingredient: minecraft:raw_iron
+  CookingTime: 100
+  Result: { Id: minecraft:iron_ingot, Amount: 1 }
+
+iron_ingot_from_iron_ore_smelting:
+  Type: Furnace
+  Ingredient: minecraft:iron_ore
+  CookingTime: 200
+  Result: { Id: minecraft:iron_ingot, Amount: 1 }
+
+iron_ingot_from_iron_ore_blasting:
+  Type: BlastFurnace
+  Ingredient: minecraft:iron_ore
+  CookingTime: 100
+  Result: { Id: minecraft:iron_ingot, Amount: 1 }
+
+iron_ingot_from_deepslate_iron_ore_smelting:
+  Type: Furnace
+  Ingredient: minecraft:deepslate_iron_ore
+  CookingTime: 200
+  Result: { Id: minecraft:iron_ingot, Amount: 1 }
+
+iron_ingot_from_deepslate_iron_ore_blasting:
+  Type: BlastFurnace
+  Ingredient: minecraft:deepslate_iron_ore
+  CookingTime: 100
+  Result: { Id: minecraft:iron_ingot, Amount: 1 }
+
+gold_ingot_from_raw_gold_smelting:
+  Type: Furnace
+  Ingredient: minecraft:raw_gold
+  CookingTime: 200
+  Result: { Id: minecraft:gold_ingot, Amount: 1 }
+
+gold_ingot_from_raw_gold_blasting:
+  Type: BlastFurnace
+  Ingredient: minecraft:raw_gold
+  CookingTime: 100
+  Result: { Id: minecraft:gold_ingot, Amount: 1 }
+
+gold_ingot_from_gold_ore_smelting:
+  Type: Furnace
+  Ingredient: minecraft:gold_ore
+  CookingTime: 200
+  Result: { Id: minecraft:gold_ingot, Amount: 1 }
+
+gold_ingot_from_gold_ore_blasting:
+  Type: BlastFurnace
+  Ingredient: minecraft:gold_ore
+  CookingTime: 100
+  Result: { Id: minecraft:gold_ingot, Amount: 1 }
+
+gold_ingot_from_deepslate_gold_ore_smelting:
+  Type: Furnace
+  Ingredient: minecraft:deepslate_gold_ore
+  CookingTime: 200
+  Result: { Id: minecraft:gold_ingot, Amount: 1 }
+
+gold_ingot_from_deepslate_gold_ore_blasting:
+  Type: BlastFurnace
+  Ingredient: minecraft:deepslate_gold_ore
+  CookingTime: 100
+  Result: { Id: minecraft:gold_ingot, Amount: 1 }
+
+copper_ingot_from_raw_copper_smelting:
+  Type: Furnace
+  Ingredient: minecraft:raw_copper
+  CookingTime: 200
+  Result: { Id: minecraft:copper_ingot, Amount: 1 }
+
+copper_ingot_from_raw_copper_blasting:
+  Type: BlastFurnace
+  Ingredient: minecraft:raw_copper
+  CookingTime: 100
+  Result: { Id: minecraft:copper_ingot, Amount: 1 }
+
+copper_ingot_from_copper_ore_smelting:
+  Type: Furnace
+  Ingredient: minecraft:copper_ore
+  CookingTime: 200
+  Result: { Id: minecraft:copper_ingot, Amount: 1 }
+
+copper_ingot_from_copper_ore_blasting:
+  Type: BlastFurnace
+  Ingredient: minecraft:copper_ore
+  CookingTime: 100
+  Result: { Id: minecraft:copper_ingot, Amount: 1 }
+
+copper_ingot_from_deepslate_copper_ore_smelting:
+  Type: Furnace
+  Ingredient: minecraft:deepslate_copper_ore
+  CookingTime: 200
+  Result: { Id: minecraft:copper_ingot, Amount: 1 }
+
+copper_ingot_from_deepslate_copper_ore_blasting:
+  Type: BlastFurnace
+  Ingredient: minecraft:deepslate_copper_ore
+  CookingTime: 100
+  Result: { Id: minecraft:copper_ingot, Amount: 1 }
+
+cooked_beef_smelting:
+  Type: Furnace
+  Ingredient: minecraft:beef
+  CookingTime: 200
+  Result: { Id: minecraft:cooked_beef, Amount: 1 }
+
+cooked_beef_smoking:
+  Type: Smoker
+  Ingredient: minecraft:beef
+  CookingTime: 100
+  Result: { Id: minecraft:cooked_beef, Amount: 1 }
+
+cooked_porkchop_smelting:
+  Type: Furnace
+  Ingredient: minecraft:porkchop
+  CookingTime: 200
+  Result: { Id: minecraft:cooked_porkchop, Amount: 1 }
+
+cooked_porkchop_smoking:
+  Type: Smoker
+  Ingredient: minecraft:porkchop
+  CookingTime: 100
+  Result: { Id: minecraft:cooked_porkchop, Amount: 1 }
+
+cooked_chicken_smelting:
+  Type: Furnace
+  Ingredient: minecraft:chicken
+  CookingTime: 200
+  Result: { Id: minecraft:cooked_chicken, Amount: 1 }
+
+cooked_chicken_smoking:
+  Type: Smoker
+  Ingredient: minecraft:chicken
+  CookingTime: 100
+  Result: { Id: minecraft:cooked_chicken, Amount: 1 }
+
+cooked_mutton_smelting:
+  Type: Furnace
+  Ingredient: minecraft:mutton
+  CookingTime: 200
+  Result: { Id: minecraft:cooked_mutton, Amount: 1 }
+
+cooked_mutton_smoking:
+  Type: Smoker
+  Ingredient: minecraft:mutton
+  CookingTime: 100
+  Result: { Id: minecraft:cooked_mutton, Amount: 1 }
+
+cooked_cod_smelting:
+  Type: Furnace
+  Ingredient: minecraft:cod
+  CookingTime: 200
+  Result: { Id: minecraft:cooked_cod, Amount: 1 }
+
+cooked_cod_smoking:
+  Type: Smoker
+  Ingredient: minecraft:cod
+  CookingTime: 100
+  Result: { Id: minecraft:cooked_cod, Amount: 1 }
+
+cooked_salmon_smelting:
+  Type: Furnace
+  Ingredient: minecraft:salmon
+  CookingTime: 200
+  Result: { Id: minecraft:cooked_salmon, Amount: 1 }
+
+cooked_salmon_smoking:
+  Type: Smoker
+  Ingredient: minecraft:salmon
+  CookingTime: 100
+  Result: { Id: minecraft:cooked_salmon, Amount: 1 }
+
+baked_potato_smelting:
+  Type: Furnace
+  Ingredient: minecraft:potato
+  CookingTime: 200
+  Result: { Id: minecraft:baked_potato, Amount: 1 }
+
+baked_potato_smoking:
+  Type: Smoker
+  Ingredient: minecraft:potato
+  CookingTime: 100
+  Result: { Id: minecraft:baked_potato, Amount: 1 }
+
+dried_kelp_smelting:
+  Type: Furnace
+  Ingredient: minecraft:kelp
+  CookingTime: 200
+  Result: { Id: minecraft:dried_kelp, Amount: 1 }
+
+dried_kelp_smoking:
+  Type: Smoker
+  Ingredient: minecraft:kelp
+  CookingTime: 100
+  Result: { Id: minecraft:dried_kelp, Amount: 1 }
+
+stone_from_cobblestone:
+  Type: Furnace
+  Ingredient: minecraft:cobblestone
+  CookingTime: 200
+  Result: { Id: minecraft:stone, Amount: 1 }
+
+smooth_stone_from_stone:
+  Type: Furnace
+  Ingredient: minecraft:stone
+  CookingTime: 200
+  Result: { Id: minecraft:smooth_stone, Amount: 1 }
+
+glass_from_sand:
+  Type: Furnace
+  Ingredient: minecraft:sand
+  CookingTime: 200
+  Result: { Id: minecraft:glass, Amount: 1 }
+
+glass_from_red_sand:
+  Type: Furnace
+  Ingredient: minecraft:red_sand
+  CookingTime: 200
+  Result: { Id: minecraft:glass, Amount: 1 }
+
+charcoal_from_oak_log:
+  Type: Furnace
+  Ingredient: minecraft:oak_log
+  CookingTime: 200
+  Result: { Id: minecraft:charcoal, Amount: 1 }
+
+charcoal_from_spruce_log:
+  Type: Furnace
+  Ingredient: minecraft:spruce_log
+  CookingTime: 200
+  Result: { Id: minecraft:charcoal, Amount: 1 }
+
+charcoal_from_birch_log:
+  Type: Furnace
+  Ingredient: minecraft:birch_log
+  CookingTime: 200
+  Result: { Id: minecraft:charcoal, Amount: 1 }
+
+charcoal_from_jungle_log:
+  Type: Furnace
+  Ingredient: minecraft:jungle_log
+  CookingTime: 200
+  Result: { Id: minecraft:charcoal, Amount: 1 }
+
+charcoal_from_acacia_log:
+  Type: Furnace
+  Ingredient: minecraft:acacia_log
+  CookingTime: 200
+  Result: { Id: minecraft:charcoal, Amount: 1 }
+
+charcoal_from_dark_oak_log:
+  Type: Furnace
+  Ingredient: minecraft:dark_oak_log
+  CookingTime: 200
+  Result: { Id: minecraft:charcoal, Amount: 1 }
+
+charcoal_from_cherry_log:
+  Type: Furnace
+  Ingredient: minecraft:cherry_log
+  CookingTime: 200
+  Result: { Id: minecraft:charcoal, Amount: 1 }
+
+charcoal_from_pale_oak_log:
+  Type: Furnace
+  Ingredient: minecraft:pale_oak_log
+  CookingTime: 200
+  Result: { Id: minecraft:charcoal, Amount: 1 }
+
+charcoal_from_mangrove_log:
+  Type: Furnace
+  Ingredient: minecraft:mangrove_log
+  CookingTime: 200
+  Result: { Id: minecraft:charcoal, Amount: 1 }
