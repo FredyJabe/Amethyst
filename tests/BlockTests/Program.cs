@@ -107,6 +107,17 @@ Check(MiningRules.RequiredMilliseconds(1, 0) >
     "Stone needs a pickaxe to drop cobblestone, correct tools mine faster");
 Check(MiningRules.RequiredMilliseconds(88, 1047) == int.MaxValue,
     "Bedrock is not breakable");
+Check(MiningRules.ForState(8).DropItem == 55,
+    "Grass yields dirt in the simple Survival drop table");
+Check(MiningRules.IsHarvestable(MiningRules.ForState(6863), 1047),
+    "Diamond ore can be harvested using a sufficiently strong pickaxe");
+Check(CreativeBlockPalette.TryGetState(163, 1, out ushort verticalLog) &&
+    verticalLog == 140 &&
+    CreativeBlockPalette.TryGetState(163, 4, out ushort sidewaysLog) &&
+    sidewaysLog == 139, "Log axis follows the placement face");
+Check(CreativeBlockPalette.TryGetState(223, out ushort mangroveLeaves) &&
+    mangroveLeaves >= 491 && mangroveLeaves <= 518,
+    "Vanilla mangrove leaves are supported");
 
 string playerRoot = Path.Combine(Path.GetTempPath(), "amethyst-player-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(playerRoot);
