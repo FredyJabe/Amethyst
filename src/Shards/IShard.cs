@@ -58,6 +58,10 @@ public interface IShardWorld : IAsyncDisposable
     double SpawnYPosition { get; }
     double SpawnZPosition { get; }
     int GetGroundHeight(int x, int z);
+    /// <summary>Read the authoritative global state ID (air = 0).</summary>
+    ushort GetBlockState(int x, int y, int z);
+    /// <summary>Atomically replace a block, returning false for no-op/out-of-bounds.</summary>
+    bool TrySetBlockState(int x, int y, int z, ushort state, out ushort previousState);
     IShardChunkView CreateView();
     string GetPerformanceReport();
     string GetCacheSummary();
