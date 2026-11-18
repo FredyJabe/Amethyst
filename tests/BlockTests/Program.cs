@@ -737,6 +737,173 @@ finally
 }
 Console.WriteLine("PASS: world-scoped player position save, reconnect and initial teleport");
 
+// Workstation UI, recipe and smelting integration: exact protocol-777
+// container/menu ID mapping, slot transactions, and persisted furnace stacks.
+string stationsRoot = Path.Combine(Path.GetTempPath(),
+    "amethyst-stations-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(stationsRoot);
+try
+{
+    var settings = new ServerOptions
+    {
+        Seed = 91841,
+        GeneratorVersion = 5,
+        ViewDistance = 2,
+        SaveGeneratedChunks = false,
+        WorldPath = Path.Combine(stationsRoot, "world")
+    };
+    await using var stationWorld = new TerrainWorld(settings);
+    var stations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld);
+    var bag = new PlayerInventory(null, Guid.NewGuid());
+    Guid playerId = Guid.NewGuid();
+    Check(StationProtocol.MenuType(StationKind.Crafting) == 12 &&
+        StationProtocol.MenuType(StationKind.Furnace) == 14 &&
+        StationProtocol.MenuType(StationKind.BlastFurnace) == 10 &&
+        StationProtocol.MenuType(StationKind.Smoker) == 22,
+        "Java 26.3 workstation menu registry types are pinned");
+    Check(WorkstationManager.FromBlockState(6866) == StationKind.Crafting &&
+        WorkstationManager.FromBlockState(6884) == StationKind.Furnace &&
+        WorkstationManager.FromBlockState(24112) == StationKind.Smoker &&
+        WorkstationManager.FromBlockState(24120) == StationKind.BlastFurnace,
+        "World block states dispatch to the correct workstation");
+    Check(CreativeBlockPalette.TryGetState(407, out ushort furnacePlaced) &&
+        furnacePlaced == 6884 &&
+        CreativeBlockPalette.TryGetState(1507, out ushort smokerPlaced) &&
+        smokerPlaced == 24112 &&
+        CreativeBlockPalette.TryGetState(1508, out ushort blastPlaced) &&
+        blastPlaced == 24120, "Furnace-family blocks are now placeable");
+    Check(MiningRules.ForState(6884).DropItem == 407 &&
+        MiningRules.ForState(24112).DropItem == 1507 &&
+        MiningRules.ForState(24120).DropItem == 1508,
+        "Furnace-family blocks return their own items when mined");
+
+    var craftMenu = stations.Open(playerId, new StationPos(1, 81, 1), StationKind.Crafting);
+    Check(bag.TryCreativeSet(36, 163, 1, true), "Prepare one oak log for crafting");
+    Check(stations.Click(playerId, bag,
+        new InventoryClick(craftMenu.WindowId, 0, 37, 0, 0)),
+        "Pick up a log from the mapped hotbar in the crafting window");
+    Check(stations.Click(playerId, bag,
+        new InventoryClick(craftMenu.WindowId, 1, 1, 0, 0)),
+        "Deposit one oak log in the crafting table grid");
+    var craftPreview = stations.Content(playerId, bag);
+    Check(craftPreview?.Slots[0] == new ItemStack(63, 4),
+        "Server matches vanilla oak log into four oak planks");
+    Check(!stations.Click(playerId, bag,
+        new InventoryClick(craftMenu.WindowId, 1, 0, 0, 0)),
+        "Stale container revision cannot mint another crafting result");
+    Check(stations.Click(playerId, bag,
+        new InventoryClick(craftMenu.WindowId, 2, 0, 0, 0)),
+        "Taking the crafting result consumes its recipe input");
+    Check(stations.Content(playerId, bag)?.Slots[0].Count == 0 &&
+        bag.Snapshot().Cursor == new ItemStack(63, 4),
+        "Crafting output is delivered once, with input removed from the grid");
+    Check(stations.Close(playerId).Length == 0,
+        "Empty crafting grid returns no duplicated ingredients");
+
+    // Real shared furnace: shift-click ingredient and fuel into its slots,
+    // simulate 10s of server ticks, and persist its output and remaining input.
+    var furnacePos = new StationPos(2, 81, 1);
+    var furnaceMenu = stations.Open(playerId, furnacePos, StationKind.Furnace);
+    Check(bag.TryCreativeSet(36, 1017, 2, true) &&
+        bag.TryCreativeSet(37, 1010, 1, true),
+        "Prepare two raw iron and one coal in the hotbar");
+    Check(stations.Click(playerId, bag,
+        new InventoryClick(furnaceMenu.WindowId, 0, 30, 0, 1)),
+        "Shift-click raw iron into furnace input");
+    Check(stations.Click(playerId, bag,
+        new InventoryClick(furnaceMenu.WindowId, 1, 31, 0, 1)),
+        "Shift-click coal into furnace fuel slot");
+    Check(stations.SnapshotStation(furnacePos)[0] == new ItemStack(1017, 2) &&
+        stations.SnapshotStation(furnacePos)[1] == new ItemStack(1010, 1),
+        "Furnace inventory is server-owned");
+    for (int t = 0; t < 200; t++) stations.Tick();
+    var smelted = stations.SnapshotStation(furnacePos);
+    Check(smelted[0] == new ItemStack(1017, 1) &&
+        smelted[1].Count == 0 && smelted[2] == new ItemStack(1018, 1),
+        "A furnace consumes fuel/input and smelts raw iron into an ingot");
+    Check(stations.Data(playerId).Burn > 0,
+        "Furnace progress properties expose remaining burn time");
+    stations.Save();
+    var restoredStations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld);
+    Check(restoredStations.SnapshotStation(furnacePos).SequenceEqual(smelted),
+        "Furnace contents survive a world restart");
+    Check(!stations.Click(playerId, bag,
+        new InventoryClick(furnaceMenu.WindowId, 0, 2, 0, 0)),
+        "A stale furnace click cannot take output");
+    // The next valid revision succeeds. It must consume output only once.
+    Check(stations.Click(playerId, bag,
+        new InventoryClick(furnaceMenu.WindowId, 2, 2, 0, 0)),
+        "Taking furnace output through a valid click");
+    Check(stations.SnapshotStation(furnacePos)[2].Count == 0 &&
+        bag.Snapshot().Cursor == new ItemStack(1018, 1),
+        "Smelted output reaches cursor once and is removed from station");
+    Check(stations.Close(playerId).Length == 0,
+        "Closing furnace leaves shared block inventory in place");
+
+    foreach (var (kind, rawId, resultId, pos) in new[]
+    {
+        (StationKind.Smoker, 1260, 1261, new StationPos(3, 81, 1)),
+        (StationKind.BlastFurnace, 1017, 1018, new StationPos(4, 81, 1))
+    })
+    {
+        Check(StationRecipes.TryCook(kind, rawId, out ItemStack result, out int duration) &&
+            result == new ItemStack(resultId, 1) && duration == 100,
+            "Smoker and blast furnace enforce their accelerated recipe categories");
+        var menu = stations.Open(playerId, pos, kind);
+        // Direct block-state seeding for the persistent cooking simulation.
+        Check(bag.TryCreativeSet(36, rawId, 1, true) &&
+            bag.TryCreativeSet(37, 1010, 1, true),
+            "Prepare quick-cooking station input and fuel");
+        Check(stations.Click(playerId, bag,
+            new InventoryClick(menu.WindowId, 0, 30, 0, 1)) &&
+            stations.Click(playerId, bag,
+            new InventoryClick(menu.WindowId, 1, 31, 0, 1)),
+            "Shift-click both ingredient and coal into workstation");
+        for (int t = 0; t < 100; t++) stations.Tick();
+        Check(stations.SnapshotStation(pos)[2] == new ItemStack(resultId, 1),
+            "Fast cooking produces a real output stack in its workstation");
+        stations.Close(playerId);
+    }
+    Check(!StationRecipes.TryCook(StationKind.Smoker, 1017, out _, out _) &&
+        !StationRecipes.TryCook(StationKind.BlastFurnace, 1260, out _, out _),
+        "Smoker rejects ore and blast furnace rejects food");
+
+    var (released, _) = stations.Break(furnacePos);
+    Check(released.Length > 0 && released.Any(s => s.ItemId == 1017),
+        "Breaking a furnace releases remaining input instead of deleting it");
+    stations.Save();
+    Check(new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld)
+        .SnapshotStation(furnacePos).Length == 0,
+        "Destroyed furnace does not reappear in saved workstation storage");
+
+    using (var stream = new MemoryStream())
+    {
+        using var wire = new PacketChannel(stream);
+        await StationProtocol.OpenAsync(wire, 1,
+            StationProtocol.FurnaceMenu, "Furnace", CancellationToken.None);
+        await StationProtocol.SendContentAsync(wire, 1, 0,
+            new ItemStack[39], ItemStack.Empty, CancellationToken.None);
+        await StationProtocol.SendDataAsync(wire, 1, 0, 1600, CancellationToken.None);
+        stream.Position = 0;
+        Packet? opened = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
+        Check(opened is { Id: StationProtocol.OpenScreen } &&
+            opened.Value.Reader().ReadVarInt() == 1,
+            "Opening a workstation sends clientbound open_screen 0x3C");
+        Packet? contents = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
+        Check(contents is { Id: InventoryProtocol.ClientboundSetContent },
+            "New workstation sends clientbound full window contents");
+        Packet? data = await Protocol.ReadPacketAsync(stream, CancellationToken.None);
+        Check(data is { Id: StationProtocol.ContainerSetData },
+            "Furnace burning and cooking progress use container_set_data 0x13");
+    }
+}
+finally
+{
+    try { Directory.Delete(stationsRoot, recursive: true); }
+    catch (IOException) { }
+}
+Console.WriteLine("PASS: crafting table, furnace, smoker, blast furnace and persistent workstation menus");
+
 Console.WriteLine("PASS: dropped items, item-entity packets, gravity, pickup and persistence");
 Console.WriteLine("PASS: block codec, modes, item stacks, timed mining, edit overlay and persistence");
 
