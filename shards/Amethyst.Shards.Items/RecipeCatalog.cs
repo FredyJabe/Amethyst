@@ -290,20 +290,16 @@ public sealed class RecipeCatalog : IShardRecipeRegistry
     private int ItemId(YamlNode node, string file, string recipeId)
     {
         string value = Scalar(node, file, recipeId).Trim();
-        bool found = int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture,
-            out int numeric)
-            ? _items.TryGetById(numeric, out var byNumber) && Assign(byNumber)
-            : _items.TryGetByIdentifier(value, out var byName) && Assign(byName);
-        if (!found) throw Invalid(file, recipeId, $"Unknown ingredient or result item '{value}'.");
-        return foundId;
-        bool Assign(ShardItemDefinition item)
+        if (int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture,
+            out int numeric))
         {
-            foundId = item.ProtocolId;
-            return item.ProtocolId > 0;
+            if (_items.TryGetById(numeric, out var byNumber) && byNumber.ProtocolId > 0)
+                return byNumber.ProtocolId;
         }
+        else if (_items.TryGetByIdentifier(value, out var byName) && byName.ProtocolId > 0)
+            return byName.ProtocolId;
+        throw Invalid(file, recipeId, $"Unknown ingredient or result item '{value}'.");
     }
-
-    private int foundId;
 
     private static IEnumerable<(string Id, YamlMappingNode Node)> ReadFile(string file)
     {
