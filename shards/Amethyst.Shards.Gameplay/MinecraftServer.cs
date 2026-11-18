@@ -397,7 +397,7 @@ public sealed class MinecraftServer
         ushort selected = 0;
         bool allowed = hit.ValidHit && hit.Hand == 0 &&
             CanEditAt(player, hit.X, hit.Y, hit.Z) && CanEditAt(player, x, y, z) &&
-            player.TryGetSelectedBlock(out selected);
+            player.TryGetSelectedBlock(hit.Face, out selected);
         if (allowed) allowed = _blocks!.GetBlockState(hit.X, hit.Y, hit.Z) != 0 &&
             _blocks.GetBlockState(x, y, z) == 0 && player.TryConsumeEditBudget();
         if (allowed)
