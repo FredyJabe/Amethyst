@@ -873,8 +873,9 @@ try
         "Smoker rejects ore and blast furnace rejects food");
 
     var (released, _) = stations.Break(furnacePos);
-    Check(released.Length > 0 && released.Any(s => s.ItemId == 1017),
-        "Breaking a furnace releases remaining input instead of deleting it");
+    Check(released.Length > 0 && released.All(s => s.ItemId is 1017 or 1018) &&
+        released.Sum(s => s.Count) == 1,
+        "Breaking a furnace releases all remaining input/output instead of deleting it");
     stations.Save();
     Check(new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld)
         .SnapshotStation(furnacePos).Length == 0,
