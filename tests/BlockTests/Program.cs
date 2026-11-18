@@ -149,6 +149,14 @@ Check(CreativeBlockPalette.TryGetState(163, 1, out ushort verticalLog) &&
 Check(CreativeBlockPalette.TryGetState(223, out ushort mangroveLeaves) &&
     mangroveLeaves >= 491 && mangroveLeaves <= 518,
     "Vanilla mangrove leaves are supported");
+Check(CreativeBlockPalette.TryGetState(54, out ushort grassBlock) && grassBlock == 9 &&
+    CreativeBlockPalette.TryGetState(54, 1, out ushort grassOnTop) && grassOnTop == 9,
+    "Minecraft 26.3 grass block item 54 places non-snowy block state 9");
+Check(CreativeBlockPalette.TryGetState(405, out ushort craftingTable) && craftingTable == 6866 &&
+    CreativeBlockPalette.TryGetState(405, 1, out ushort tableOnTop) && tableOnTop == 6866,
+    "Minecraft 26.3 crafting table item 405 places block state 6866");
+Check(MiningRules.ForState(6866).DropItem == 405,
+    "Survival breaking a crafting table returns its own item");
 
 string playerRoot = Path.Combine(Path.GetTempPath(), "amethyst-player-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(playerRoot);
@@ -402,13 +410,53 @@ try
                 ack.Value.Reader().ReadVarInt() == 7,
                 "One-tick START sequence is acknowledged after authoritative air");
         }
+
+        // Exercise the same block-use handler used by connected players.
+        // Both blocks must work in both game modes, and Survival must
+        // consume exactly one held item while Creative consumes none.
+        var placements = new (PlayerGameMode Mode, int ItemId, ushort State)[]
+        {
+            (PlayerGameMode.Creative, 54, 9),
+            (PlayerGameMode.Creative, 405, 6866),
+            (PlayerGameMode.Survival, 54, 9),
+            (PlayerGameMode.Survival, 405, 6866)
+        };
+        for (int index = 0; index < placements.Length; index++)
+        {
+            var test = placements[index];
+            int blockX = index + 1;
+            const int baseZ = 4, groundY = 81, placedY = 82;
+            world.TrySetBlockState(blockX, groundY, baseZ, 10, out _);
+            world.TrySetBlockState(blockX, placedY, baseZ, 0, out _);
+            Check(world.GetBlockState(blockX, groundY, baseZ) == 10 &&
+                world.GetBlockState(blockX, placedY, baseZ) == 0,
+                "Test fixture has a solid support block and an empty target");
+            player.SetGameMode(test.Mode);
+            Check(player.Inventory.TryCreativeSet(36, test.ItemId, 3, true),
+                "Prepare a plain hotbar stack for gameplay placement test");
+            await game.HandleBlockUseAsync(player,
+                new BlockUseOn(0, blockX, groundY, baseZ, 1, 20 + index, true),
+                CancellationToken.None);
+            Check(world.GetBlockState(blockX, placedY, baseZ) == test.State,
+                $"{test.Mode} places item {test.ItemId} as state {test.State}");
+            Check(player.Inventory.Held() == new ItemStack(test.ItemId,
+                    test.Mode == PlayerGameMode.Survival ? 2 : 3),
+                $"{test.Mode} applies correct inventory consumption for item {test.ItemId}");
+        }
     }
     await using (var world = new TerrainWorld(settings))
+    {
         Check(world.GetBlockState(1, blockY, blockZ) == 0 &&
               world.GetBlockState(2, blockY, blockZ) == 0 &&
               world.GetBlockState(3, blockY, blockZ) == 0 &&
               world.GetBlockState(4, blockY, blockZ) == 0,
             "Timed, queued-tick and one-tick Survival breaks persist after world restart");
+        Check(world.GetBlockState(1, 82, 4) == 9 &&
+              world.GetBlockState(2, 82, 4) == 6866 &&
+              world.GetBlockState(3, 82, 4) == 9 &&
+              world.GetBlockState(4, 82, 4) == 6866,
+            "Grass blocks and crafting tables persist after Creative/Survival placement and restart");
+    }
 }
 finally
 {
