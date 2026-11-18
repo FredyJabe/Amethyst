@@ -20,7 +20,7 @@ Current functionality includes:
 - An interactive server console with log-safe input, history, completion and a `perf` command.
 - **Shards plugin runtime** with lifecycle hooks, dependency/capability resolution, service API, packet hooks and command registration.
 - Two built-in Shards: Overworld (generation/chunks/lighting) and Gameplay (players/chat/permissions/time).
-- Experimental **Creative and Survival block interaction**: tool-aware timed mining, simple drops collected into persistent player inventories, stack-consuming placement, per-chunk edit persistence and multiplayer block updates. No complete loot/physics or dynamic client relighting yet.
+- Experimental **Creative and Survival block interaction**: tool-aware timed mining, physical ground item drops and pickup into persistent inventories, stack-consuming placement, per-chunk edit persistence and multiplayer block updates. No complete loot/physics or dynamic client relighting yet.
 
 > **Status:** Prototype. No claim of full vanilla gameplay, complete Survival mechanics, signed chat verification, or production-grade compatibility. Local building and in-game testing are still required for this snapshot.
 
