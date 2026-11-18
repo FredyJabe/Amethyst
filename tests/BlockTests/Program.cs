@@ -836,8 +836,8 @@ try
         "A stale furnace click cannot take output");
     // The next valid revision succeeds. It must consume output only once.
     Check(stations.Click(playerId, bag,
-        new InventoryClick(furnaceMenu.WindowId, 2, 2, 0, 0)),
-        "Taking furnace output through a valid click");
+        new InventoryClick(furnaceMenu.WindowId, furnaceMenu.Revision, 2, 0, 0)),
+        "Taking furnace output through the current authoritative revision");
     Check(stations.SnapshotStation(furnacePos)[2].Count == 0 &&
         bag.Snapshot().Cursor == new ItemStack(1018, 1),
         "Smelted output reaches cursor once and is removed from station");
