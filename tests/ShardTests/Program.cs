@@ -27,6 +27,15 @@ try
         OperatorsFile = Path.Combine(temp, "ops.yaml"),
         WorldPath = Path.Combine(temp, "world")
     };
+    // Test administrator YAML loaded through the real ShardHost data path.
+    string yamlDir = Path.Combine(temp, "shards", "items", "definitions");
+    Directory.CreateDirectory(yamlDir);
+    File.WriteAllText(Path.Combine(yamlDir, "custom.yml"), """
+        crafting_table:
+          Display: "Workshop Table"
+          Lore:
+            - "Configured before the Shard loads"
+        """);
     await using var host = new ShardHost(options, installed, Path.Combine(temp, "shards"));
     await host.LoadAsync();
     Check(host.GetService<IShardWorld>() is not null, "default overworld provider enabled");
@@ -39,6 +48,8 @@ try
     Check(items.TryGetById(405, out var table) &&
         table.Identifier == "minecraft:crafting_table" &&
         table.MaxStackSize == 64 && table.IsBlockItem &&
+        table.Display == "Workshop Table" &&
+        table.Lore is { Count: 1 } &&
         items.TryGetByIdentifier("crafting_table", out var byName) && byName == table,
         "Items can be resolved by protocol ID and canonical/short identifier");
     Check(items.TryGetByIdentifier("netherite_pickaxe", out var pickaxe) &&
