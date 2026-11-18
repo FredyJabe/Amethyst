@@ -797,6 +797,10 @@ try
     Check(stations.Content(playerId, bag)?.Slots[0].Count == 0 &&
         bag.Snapshot().Cursor == new ItemStack(63, 4),
         "Crafting output is delivered once, with input removed from the grid");
+    Check(stations.Click(playerId, bag,
+        new InventoryClick(craftMenu.WindowId, 3, 37, 0, 0)) &&
+        bag.Snapshot().Cursor.Count == 0,
+        "Depositing the crafted planks back into the mapped hotbar clears cursor");
     Check(stations.Close(playerId).Length == 0,
         "Empty crafting grid returns no duplicated ingredients");
 
