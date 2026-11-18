@@ -20,6 +20,7 @@ public sealed class MinecraftServer
     private readonly GroundItemStore? _groundItems;
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
+    private readonly IShardItemRegistry? _items;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private CancellationTokenSource? _clockLifetime;
@@ -29,21 +30,23 @@ public sealed class MinecraftServer
     private Task? _stationSync;
 
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
-        IShardBlockWorld? blocks = null, string? inventoryDirectory = null)
+        IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
+        IShardItemRegistry? items = null)
     {
         _options = options;
         _world = world;
         _blocks = blocks;
         _inventoryDirectory = inventoryDirectory;
+        _items = items;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers);
         _operators = new OperatorStore(options.OperatorsFile);
         _clock = new WorldClock(options);
         _positions = new PlayerPositionStore(inventoryDirectory, options.WorldPath, world);
-        _stations = new WorkstationManager(inventoryDirectory, options.WorldPath, world);
+        _stations = new WorkstationManager(inventoryDirectory, options.WorldPath, world, items);
         if (_blocks is not null)
             _groundItems = new GroundItemStore(inventoryDirectory,
-                options.WorldPath, _players.AllocateEntityId);
+                options.WorldPath, _players.AllocateEntityId, items);
     }
 
     public ShardPlayerSummary[] OnlinePlayers => _players.Snapshot()
@@ -100,7 +103,7 @@ public sealed class MinecraftServer
     public bool TryAdmit(VerifiedProfile profile, PacketChannel channel, int chatMode, out string reason)
     {
         var player = new ConnectedPlayer(profile.Uuid, profile.Username, profile.Properties,
-            _players.AllocateEntityId(), channel, _world, _inventoryDirectory);
+            _players.AllocateEntityId(), channel, _world, _inventoryDirectory, _items);
         // Set the game mode before SpawnPackets.SendAsync constructs the Join Game
         // packet, player abilities, and the initial tab-list state.
         player.SetGameMode(Enum.Parse<PlayerGameMode>(_options.DefaultGameMode, ignoreCase: true));
