@@ -1,7 +1,7 @@
 # Minecraft Java 26.3 (protocol 777) vanilla item registry
 # Source: RosegoldMC/minecraft-data.cr, data/26.3/items.json + blocks.json
 # Format: protocolId<TAB>minecraftIdentifier<TAB>maxStackSize<TAB>isBlockItem
-0	minecraft:air	64	1
+0	minecraft:air	64	0
 1	minecraft:stone	64	1
 2	minecraft:granite	64	1
 3	minecraft:polished_granite	64	1
