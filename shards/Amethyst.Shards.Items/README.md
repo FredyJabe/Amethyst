@@ -1,81 +1,171 @@
-# Amethyst Items Shard
+# Amethyst Items Shard — YAML item definitions
 
-This Shard owns **vanilla item identity and stack limits** for
-**Minecraft Java 26.3 (protocol 777)**. Networking Core owns no item
-definitions. Gameplay's inventory, physical item drops and station menus
-consume this Shard's shared `IShardItemRegistry` service.
+The Items Shard owns the **Java 26.3 / protocol 777 item catalog**.
+Amethyst Core does not contain item definitions. Gameplay consumes the
+`IShardItemRegistry` service for stack sizes and validations in
+inventories, dropped-item entities and crafting/furnace menus.
 
-## What it defines
+## File locations
 
-The `items-26.3.tsv` snapshot includes all **1,658 protocol item IDs**
-(from 0 through 1657), canonical names (`minecraft:...`), maximum stack
-sizes (1, 16 or 64), and whether the item has a corresponding block
-definition. It was generated from:
+- Bundled vanilla definitions:
+  `shards/installed/items/items-26.3.yml` (1658 items, installed from
+  `shards/Amethyst.Shards.Items/items-26.3.yml` on build).
+- Your editable YAML files:
+  **`shards/data/items/definitions/*.yml`** and `*.yaml`,
+  including nested folders. The root data directory follows the
+  `shardsDataDirectory` option in `server.yaml`.
+- On first startup the Shard writes
+  `shards/data/items/definitions/example-items.yml` with commented
+  examples. It never overwrites that file on a subsequent run.
 
-- `RosegoldMC/minecraft-data.cr/data/26.3/items.json`
-- `RosegoldMC/minecraft-data.cr/data/26.3/blocks.json`
+Each file is a **root YAML mapping** whose keys are item identifiers.
+There is no `Items:` wrapper. This follows the core MythicMobs format
+(root item key with `Id`, `Display`, `Lore`, and `Options`).
 
-The `minecraft:air` entry (ID 0) is the empty-stack sentinel, not a
-usable item. `IsBlockItem` means the registry includes a block of the
-same name; it **does not** mean Gameplay currently supports placing it.
-Actual placement, mining, recipes and interaction behaviors are managed
-by their respective Shards.
+### Override a vanilla item
 
-## Using the API from another Shard
+```yaml
+diamond_pickaxe:
+  Id: minecraft:diamond_pickaxe
+  Display: "<aqua>Miner's Pickaxe</aqua>"
+  ItemName: "Mining Tool"
+  Lore:
+    - "An example description"
+    - "Configured with YAML"
+  MaxStackSize: 1
+  Options:
+    Hidden: false
+    BlockItem: false
+
+ender_pearl:
+  MaxStackSize: 8
+```
+
+The root key can also be the **numeric protocol ID**, for example:
+
+```yaml
+405:
+  Id: minecraft:crafting_table
+  Display: "Workshop Table"
+```
+
+The `Id` field is optional for an existing vanilla root and **must
+resolve to the same vanilla item** when supplied. In the bundled
+`items-26.3.yml`, `ProtocolId` pins the actual wire ID. User YAML
+cannot reassign protocol IDs or invent new ones.
+
+`MaxStackSize` must be at least 1 and **cannot exceed the vanilla base
+item's actual maximum** (1, 16 or 64). Lowering it is enforced by the
+server in inventory, pickups and station transactions; vanilla clients
+may still predict the original maximum until reconciled.
+
+`Options.BlockItem` is metadata identifying an item that matches a
+block. Changing it does *not* automatically make a block placeable or
+remove Gameplay's placement restrictions. `Options.Hidden` or the
+top-level `Hidden` field is read as definition metadata.
+
+### Mythic-style aliases
+
+You may use a distinct item root name with a vanilla `Id`:
+
+```yaml
+LegendaryPickaxe:
+  Id: diamond_pickaxe
+  Display: "<gold>Legendary Pickaxe</gold>"
+  Lore:
+    - "An alternative definition using the same vanilla item"
+```
+
+The new identifier is accessible to other Shards as
+`amethyst:legendarypickaxe`, and can also be queried with
+`LegendaryPickaxe`. Its base `ProtocolId` is the vanilla pickaxe ID.
+
+**Important: aliases are metadata, not independent item stacks yet.**
+Amethyst's current `ItemStack` only stores a numeric vanilla protocol ID
+and count. Therefore the client cannot distinguish a legendary pickaxe
+from an ordinary one, and custom alias display/lore cannot be applied
+on individual inventory stacks until per-stack components/identity are
+implemented. Aliases cannot override `MaxStackSize` or
+`Options.BlockItem` to values different from the underlying item.
+
+Similarly, `Display`, `ItemName`, `Lore` and
+`CustomModelData` are currently **loaded, validated and exposed
+through the API** but **are not serialized to Java item data
+components yet**. They will not visually change the item in game in
+this first migration. Never mistake metadata parsing for working
+client rendering or new custom textures.
+
+### Supported keys
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| Root item ID | string or numeric ID | Vanilla item to override, or a custom alias |
+| `Id` | vanilla name / protocol ID | Base item; required for aliases |
+| `ProtocolId` | integer | Version-specific vanilla wire ID; cannot be reassigned |
+| `MaxStackSize` | integer | Server-side max stack, 1 through vanilla max |
+| `Display` | string | Optional display metadata (not yet rendered) |
+| `ItemName` | string | Optional item-name metadata (not yet rendered) |
+| `Lore` | string list | Optional lore metadata (not yet rendered) |
+| `CustomModelData` | nonnegative integer | Optional model metadata (not yet rendered) |
+| `Hidden` | boolean | Optional metadata |
+| `Options.BlockItem` | boolean | Block-item metadata, not placement logic |
+| `Options.Hidden` | boolean | Same as top-level `Hidden` |
+
+`Durability`, `Enchantments`, arbitrary `Options`, skills and
+attributes are not supported by this version of the Items Shard.
+They will cause a descriptive startup validation error rather than
+silently pretending to work.
+
+### Multiple files and errors
+
+All `*.yml` / `*.yaml` files are read recursively in deterministic
+path order. A vanilla root in an override file replaces the corresponding
+properties from the bundled catalog. **Do not define the same root in
+two user files**; this is rejected to prevent accidental overrides.
+Duplicate keys inside a file, unknown properties, nonexistent base
+materials, invalid types, and unsafe stack counts fail startup.
+
+Edits require a **server restart**; there is no hot reload yet. If a
+previously persisted inventory contains an invalid count under a new
+`MaxStackSize`, it may fail to load. Back up `inventories/` before
+lowering stack limits on an existing server.
+
+## Public Shard API
 
 ```csharp
 using Amethyst.Shards;
 
-public Task OnEnableAsync(CancellationToken ct)
-{
-    var items = _context.GetRequiredService<IShardItemRegistry>();
-    if (items.TryGetByIdentifier("minecraft:diamond_pickaxe", out var pickaxe))
-        _context.Log($"ID {pickaxe.ProtocolId}, max stack {pickaxe.MaxStackSize}");
-    return Task.CompletedTask;
-}
+IShardItemRegistry items = context.GetRequiredService<IShardItemRegistry>();
+if (items.TryGetByIdentifier("diamond_pickaxe", out var item))
+    context.Log($"ID {item.ProtocolId}: {item.Identifier}, stack {item.MaxStackSize}");
+
+if (items.TryGetByIdentifier("LegendaryPickaxe", out var custom))
+    context.Log(custom.Display ?? custom.Identifier);
 ```
 
-Declare the dependency in the consumer's `shard.yaml`:
+Declare `requires: [items]` in the consuming Shard manifest.
+The ShardHost enables the provider before Gameplay and prevents
+disabling Items while a dependent Shard remains enabled.
 
-```yaml
-requires:
-  - items
-```
+The console command `iteminfo crafting_table`, `iteminfo 405` or
+`iteminfo LegendaryPickaxe` prints the configured definition.
 
-The ShardHost enables the unique provider before its dependents and
-prevents disabling Items while Gameplay depends on it.
+## Versioning
 
-## Console command
+The bundled `items-26.3.yml` was generated from
+`RosegoldMC/minecraft-data.cr/data/26.3/items.json` and
+`blocks.json`, listing all **1,658** vanilla items (IDs 0–1657)
+with names, stack sizes, and block metadata. The air entry (ID 0)
+is the canonical empty-stack sentinel. `Options.BlockItem` is not a
+guarantee that Gameplay currently supports placing the corresponding
+block.
 
-```text
-iteminfo crafting_table
-iteminfo minecraft:netherite_pickaxe
-iteminfo 405
-```
+**Do not edit vanilla protocol IDs.** Future Minecraft updates require
+regenerating and validating this bundle in coordination with block and
+packet registries. Custom client IDs, textures and behavior require
+additional client registry/asset/protocol work.
 
-These commands print the item identifier, protocol ID, max stack size and
-block-item status.
-
-## Versioning and customization
-
-**Do not change vanilla item IDs.** Those IDs are a version-specific
-wire-protocol registry shared with the unmodified Java 26.3 client.
-Arbitrarily adding `minecraft:my_item` or assigning a custom ID in
-the catalog does not make a corresponding item exist in vanilla client
-assets or registries. The Shard deliberately provides read-only
-definitions rather than pretending to support arbitrary custom items.
-
-When upgrading to a future Minecraft version, regenerate the catalog,
-validate every ID and its max stack size against that version, update
-the version pin in `ItemCatalog`, then coordinate recipe, block, and
-protocol version changes in the other Shards.
-
-Inventory file format remains unchanged. Existing persisted stacks whose
-count is larger than the item's actual max stack size are now rejected
-rather than silently accepted; back up player inventories before enabling
-strict validation on an existing server.
-
-## Tests
+## Testing
 
 ```bash
 dotnet build Amethyst.slnx -c Release
