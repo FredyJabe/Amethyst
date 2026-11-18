@@ -338,19 +338,23 @@ public sealed class MinecraftServer
         PlayerBlockAction action, CancellationToken ct)
     {
         // Run with AMETHYST_TRACE_MINING=1 ./run.sh to see the exact server
-        // decision for every START/CANCEL/STOP and its resulting block state.
+        // decision for every START/DIRECTION/ABORT/STOP and its resulting block state.
         if (TraceMining)
             Console.WriteLine($"[mining] recv {player.Username} mode={player.GameMode} " +
                 $"status={action.Status} pos={action.X},{action.Y},{action.Z} " +
                 $"face={action.Face} seq={action.Sequence} held={player.Inventory.Held().ItemId}");
-        if (action.Status is 3 or 4)
+        if (action.Status is BlockInteractionProtocol.DropAllItems
+            or BlockInteractionProtocol.DropItem)
         {
             // Drop actions have no item entities yet. Resynchronize instead of
             // letting the client invent a dropped item or lose inventory.
             await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
             return;
         }
-        if (action.Status is < 0 or > 2) return;
+        // RELEASE_USE_ITEM, SWAP_ITEM_WITH_OFFHAND, STAB need separate
+        // gameplay implementations; they must NOT be interpreted as mining.
+        if (action.Status is < BlockInteractionProtocol.StartDestroyBlock
+            or > BlockInteractionProtocol.StopDestroyBlock) return;
         bool valid = action.Face is >= 0 and <= 5 &&
             CanEditAt(player, action.X, action.Y, action.Z);
         ushort state = valid ? _blocks!.GetBlockState(action.X, action.Y, action.Z) : (ushort)0;
@@ -359,7 +363,7 @@ public sealed class MinecraftServer
         string outcome = valid ? "no change" : "invalid target / range / mode / not ready";
         switch (action.Status)
         {
-            case 0: // Start digging; Creative and 1-tick Survival breaks are instant.
+            case BlockInteractionProtocol.StartDestroyBlock: // Start; Creative / one-tick Survival are instant.
             {
                 player.CancelMining();
                 if (!valid || state == 0 || !player.TryConsumeEditBudget())
@@ -395,11 +399,16 @@ public sealed class MinecraftServer
                 }
                 break;
             }
-            case 1: // Abort digging
+            case BlockInteractionProtocol.ChangeDestroyDirection:
+                // Java 26.3 sends this while continuing an active dig when
+                // the hit face changes. Preserve the original mining session.
+                outcome = "digging direction changed";
+                break;
+            case BlockInteractionProtocol.AbortDestroyBlock:
                 player.CancelMining();
                 outcome = "digging cancelled";
                 break;
-            case 2: // Finished digging
+            case BlockInteractionProtocol.StopDestroyBlock: // Finished digging
             {
                 if (!survival || !valid || state == 0 || !player.TryConsumeEditBudget())
                 {
@@ -435,7 +444,7 @@ public sealed class MinecraftServer
                 }
             }
         }
-        else if (valid && action.Status == 2)
+        else if (valid && action.Status == BlockInteractionProtocol.StopDestroyBlock)
         {
             // A rejected STOP reconciles the client's predicted air before
             // acknowledging it. A normal START must not correct a live dig.
