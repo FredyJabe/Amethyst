@@ -63,6 +63,9 @@ public sealed class MinecraftServer
     {
         var player = new ConnectedPlayer(profile.Uuid, profile.Username, profile.Properties,
             _players.AllocateEntityId(), channel, _world, _inventoryDirectory);
+        // Set the game mode before SpawnPackets.SendAsync constructs the Join Game
+        // packet, player abilities, and the initial tab-list state.
+        player.SetGameMode(Enum.Parse<PlayerGameMode>(_options.DefaultGameMode, ignoreCase: true));
         player.SetChatMode(chatMode);
         return _players.TryAdd(player, out reason);
     }
