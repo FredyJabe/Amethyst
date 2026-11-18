@@ -597,6 +597,146 @@ finally
     catch (IOException) { }
 }
 
+// Per-player position persistence: disconnected and restarting players return
+// to the same world coordinate and orientation, rather than world spawn.
+string positionsRoot = Path.Combine(Path.GetTempPath(),
+    "amethyst-positions-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(positionsRoot);
+try
+{
+    var config = new ServerOptions
+    {
+        GeneratorVersion = 5,
+        Seed = 319471,
+        ViewDistance = 2,
+        SaveGeneratedChunks = false,
+        WorldPath = Path.Combine(positionsRoot, "world"),
+        OperatorsFile = Path.Combine(positionsRoot, "ops.yaml"),
+        DefaultGameMode = "survival"
+    };
+    string dataRoot = Path.Combine(positionsRoot, "gameplay");
+    Guid userId = Guid.NewGuid(), differentUser = Guid.NewGuid();
+    await using (var world = new TerrainWorld(config))
+    {
+        var store = new PlayerPositionStore(dataRoot, config.WorldPath, world);
+        Check(!store.TryLoad(userId, out _),
+            "First join has no saved position");
+        PlayerPose logoutPosition = new(-35.25, 108.125, 87.875, 133.5f, -27.25f, false);
+        Check(store.Valid(logoutPosition), "Saved Creative/Survival coordinates and facing are valid");
+        store.Save(userId, logoutPosition);
+        Check(store.TryLoad(userId, out PlayerPose restored) && restored == logoutPosition,
+            "Position, yaw, pitch and on-ground flag survive an atomic save");
+        Check(!store.TryLoad(differentUser, out _),
+            "One player's saved coordinates do not affect another player's join");
+        var otherWorldStore = new PlayerPositionStore(dataRoot,
+            Path.Combine(positionsRoot, "different-world"), world);
+        Check(!otherWorldStore.TryLoad(userId, out _),
+            "Different world directories do not share player positions");
+
+        using (var wire = new MemoryStream())
+        using (var channel = new PacketChannel(wire))
+        {
+            var game = new MinecraftServer(config, world, null!, world, dataRoot);
+            Check(game.TryAdmit(new VerifiedProfile(userId, "PositionTester",
+                Array.Empty<ProfileProperty>()), channel, 0, out _),
+                "Reconnecting player can be admitted");
+            ConnectedPlayer joined = game.GetPlayerForTests(userId)!;
+            Check(joined.Pose == logoutPosition,
+                "Gameplay restores the saved position before sending Join Game");
+            Check(joined.GameMode == PlayerGameMode.Survival,
+                "Default gamemode remains independent of saved location");
+
+            // Simulate movement followed by a real ready-player logout.
+            var walkedTo = new PlayerPose(-36.125, 109.75, 89.25, -91.5f, 22.75f, true);
+            joined.MarkReady();
+            joined.SetPose(walkedTo);
+            await game.OnDisconnectedAsync(userId);
+            Check(new PlayerPositionStore(dataRoot, config.WorldPath, world)
+                .TryLoad(userId, out PlayerPose loggedOut) && loggedOut == walkedTo,
+                "Disconnect saves the player's last server-validated position");
+
+            // Recreate Gameplay as if the process restarted: admission must
+            // use the saved coordinates rather than a hard-coded spawn.
+            var restarted = new MinecraftServer(config, world, null!, world, dataRoot);
+            Check(restarted.TryAdmit(new VerifiedProfile(userId, "PositionTester",
+                Array.Empty<ProfileProperty>()), channel, 0, out _),
+                "Reconnecting after gameplay restart succeeds");
+            Check(restarted.GetPlayerForTests(userId)!.Pose == walkedTo,
+                "Reconnecting after restart restores last logout position");
+            // Login not completed: should not erase a previously saved position.
+            await restarted.OnDisconnectedAsync(userId);
+            Check(store.TryLoad(userId, out PlayerPose afterFailedLogin) &&
+                afterFailedLogin == walkedTo,
+                "Incomplete login does not overwrite saved coordinates");
+        }
+
+        // Wire-level verification of the actual initial teleport packet.
+        using (var teleportStream = new MemoryStream())
+        {
+            using var teleportChannel = new PacketChannel(teleportStream);
+            await SpawnPackets.SendPositionAsync(teleportChannel, SpawnPackets.TeleportId,
+                logoutPosition.X, logoutPosition.Y, logoutPosition.Z,
+                logoutPosition.Yaw, logoutPosition.Pitch, CancellationToken.None);
+            teleportStream.Position = 0;
+            Packet? teleport = await Protocol.ReadPacketAsync(teleportStream, CancellationToken.None);
+            Check(teleport is { Id: 0x49 }, "Initial spawn uses protocol 777 position packet");
+            if (teleport is { } positionPacket)
+            {
+                PacketReader p = positionPacket.Reader();
+                Check(p.ReadVarInt() == SpawnPackets.TeleportId &&
+                    p.ReadDouble() == logoutPosition.X &&
+                    p.ReadDouble() == logoutPosition.Y &&
+                    p.ReadDouble() == logoutPosition.Z &&
+                    p.ReadDouble() == 0 && p.ReadDouble() == 0 && p.ReadDouble() == 0 &&
+                    p.ReadFloat() == logoutPosition.Yaw &&
+                    p.ReadFloat() == logoutPosition.Pitch &&
+                    p.ReadInt32() == 0,
+                    "Initial teleport sends restored coordinates, yaw and pitch, not world spawn");
+                p.RequireEnd();
+            }
+        }
+
+        Check(!store.Valid(new PlayerPose(double.NaN, 80, 0, 0, 0, true)) &&
+            !store.Valid(new PlayerPose(30_000_000, 80, 0, 0, 0, true)) &&
+            !store.Valid(new PlayerPose(0, -1000, 0, 0, 0, true)) &&
+            !store.Valid(new PlayerPose(0, 80, 0, 0, 150, true)),
+            "Invalid coordinates and view angles are not restorable");
+        store.Save(userId, new PlayerPose(double.NaN, 80, 0, 0, 0, true));
+        Check(store.TryLoad(userId, out PlayerPose afterRejectedSave) &&
+            afterRejectedSave == walkedTo,
+            "Invalid position cannot overwrite a valid save");
+
+        // Tamper the on-disk seed: a player should return to the new
+        // world's own spawn, not a location from an incompatible world.
+        string filePath = Directory.GetFiles(Path.Combine(dataRoot, "positions"),
+            "*.bin", SearchOption.AllDirectories).Single();
+        byte[] savedBytes = File.ReadAllBytes(filePath);
+        byte[] wrongSeed = (byte[])savedBytes.Clone();
+        wrongSeed[8] ^= 1;
+        File.WriteAllBytes(filePath, wrongSeed);
+        Check(!store.TryLoad(userId, out _), "Position file with a different world seed is ignored");
+        File.WriteAllBytes(filePath, "corrupted"u8.ToArray());
+        Check(!store.TryLoad(userId, out _), "Corrupt position file safely falls back to spawn");
+
+        using var fallbackWire = new MemoryStream();
+        using var fallbackChannel = new PacketChannel(fallbackWire);
+        var fallbackGame = new MinecraftServer(config, world, null!, world, dataRoot);
+        Check(fallbackGame.TryAdmit(new VerifiedProfile(userId, "PositionTester",
+                Array.Empty<ProfileProperty>()), fallbackChannel, 0, out _),
+            "Damaged save must not interrupt player login");
+        PlayerPose fallback = fallbackGame.GetPlayerForTests(userId)!.Pose;
+        Check(fallback.X == world.SpawnXPosition &&
+            fallback.Y == world.SpawnYPosition && fallback.Z == world.SpawnZPosition,
+            "Missing or corrupt saves use the current world spawn");
+    }
+}
+finally
+{
+    try { Directory.Delete(positionsRoot, recursive: true); }
+    catch (IOException) { }
+}
+Console.WriteLine("PASS: world-scoped player position save, reconnect and initial teleport");
+
 Console.WriteLine("PASS: dropped items, item-entity packets, gravity, pickup and persistence");
 Console.WriteLine("PASS: block codec, modes, item stacks, timed mining, edit overlay and persistence");
 
