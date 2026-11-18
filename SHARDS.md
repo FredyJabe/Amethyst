@@ -37,12 +37,40 @@ if (items.TryGetByIdentifier("diamond_pickaxe", out ShardItemDefinition definiti
 ```
 
 Inspect definitions in the server console with `iteminfo diamond_pickaxe`,
-`iteminfo minecraft:crafting_table`, or `iteminfo 405`. Data lives in
-`shards/Amethyst.Shards.Items/items-26.3.tsv`; see
-`shards/Amethyst.Shards.Items/README.md` for data provenance and version
-migration rules. These are **vanilla-client protocol IDs**, not arbitrary
-modded item registration; adding custom IDs would require additional
-registry/asset/protocol support.
+`iteminfo minecraft:crafting_table`, or `iteminfo 405`.
+
+**All item definitions are YAML-configurable.** The pinned vanilla
+catalog is `shards/Amethyst.Shards.Items/items-26.3.yml`, copied to the
+installed Items Shard during build. Place MythicMobs-style override files in
+`shards/data/items/definitions/*.yml` or `*.yaml` (respecting the configured
+`shardsDataDirectory`), each with item IDs as YAML root keys. For example:
+
+```yaml
+diamond_pickaxe:
+  Id: minecraft:diamond_pickaxe
+  Display: "A customized pickaxe"
+  Lore:
+    - "Server-defined metadata"
+  MaxStackSize: 1
+  Options:
+    BlockItem: false
+
+LegendaryPickaxe:
+  Id: diamond_pickaxe
+  Display: "An internal alias of the pickaxe"
+```
+
+Vanilla overrides affect the server-owned stack validation immediately after
+restart. Display, ItemName, Lore and CustomModelData are currently
+**definition metadata only**, not yet serialized to client item components.
+Alias roots can be looked up by name but are not distinct per-stack custom
+items until Gameplay supports item identity/components. Unknown YAML
+properties and illegal protocol ID changes are rejected at startup.
+
+See `shards/Amethyst.Shards.Items/README.md` for complete YAML keys,
+precedence rules, version provenance and examples. Vanilla protocol IDs
+cannot be replaced with arbitrary modded item IDs without client registry,
+asset and protocol support.
 
 ## Build / run
 
