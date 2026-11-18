@@ -245,11 +245,12 @@ public sealed class WorkstationManager
                     : local[index])
                 : playerSlots[pslot(index)];
             bool CanInsert(int index, ItemStack stack) =>
-                index >= count || menu.Kind == StationKind.Crafting
+                ValidStack(stack) &&
+                (index >= count || menu.Kind == StationKind.Crafting
                 || (index != 2 && (stack.Count == 0 ||
                 (index == 0 && StationRecipes.TryCook(menu.Kind, stack.ItemId,
                     out _, out _)) ||
-                (index == 1 && StationRecipes.FuelTicks(stack.ItemId) > 0)));
+                (index == 1 && StationRecipes.FuelTicks(stack.ItemId) > 0))));
             void Put(int index, ItemStack stack)
             {
                 if (index >= count) playerSlots[pslot(index)] = stack;
