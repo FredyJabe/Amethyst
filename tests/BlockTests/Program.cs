@@ -76,7 +76,8 @@ try
     File.WriteAllText(Path.Combine(more, "stacks.yaml"), """
         ender_pearl:
           Id: ender_pearl
-          MaxStackSize: 8
+          Options:
+            StackSize: 8
         405:
           Id: minecraft:crafting_table
           Display: "Workshop Table"
@@ -152,6 +153,12 @@ try
         stone:
           Display: Second
         """, "Duplicate YAML item roots are rejected");
+    InvalidYaml("conflicting-limits.yml", """
+        stone:
+          MaxStackSize: 8
+          Options:
+            StackSize: 4
+        """, "Conflicting MaxStackSize and Options.StackSize are rejected");
 
     string repeated = Path.Combine(yamlTestRoot, "repeated");
     Directory.CreateDirectory(repeated);
@@ -161,6 +168,17 @@ try
     try { _ = new ItemCatalog(itemCatalogPath, repeated); }
     catch (InvalidDataException) { duplicateRejected = true; }
     Check(duplicateRejected, "Overlapping definitions across YAML files are rejected");
+    string numericOverlap = Path.Combine(yamlTestRoot, "numeric-alias-collision");
+    Directory.CreateDirectory(numericOverlap);
+    File.WriteAllText(Path.Combine(numericOverlap, "a.yml"),
+        "405:\n  Display: Workshop\n");
+    File.WriteAllText(Path.Combine(numericOverlap, "b.yml"),
+        "crafting_table:\n  Display: Workbench\n");
+    bool numericCollisionRejected = false;
+    try { _ = new ItemCatalog(itemCatalogPath, numericOverlap); }
+    catch (InvalidDataException) { numericCollisionRejected = true; }
+    Check(numericCollisionRejected,
+        "Numeric and named roots for the same vanilla protocol ID cannot override twice");
 }
 finally
 {
