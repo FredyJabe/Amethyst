@@ -19,10 +19,11 @@ internal static class DurabilityFeatureTests
 
     public static async Task RunAsync(ItemCatalog items, RecipeCatalog recipes)
     {
+        Amethyst.Shards.ShardItemDefinition helm = default, axe = default, shovel = default;
         Check(items.TryGetByIdentifier("wooden_pickaxe", out var wood) &&
-            items.TryGetByIdentifier("iron_helmet", out var helm) &&
-            items.TryGetByIdentifier("diamond_axe", out var axe) &&
-            items.TryGetByIdentifier("iron_shovel", out var shovel),
+            items.TryGetByIdentifier("iron_helmet", out helm) &&
+            items.TryGetByIdentifier("diamond_axe", out axe) &&
+            items.TryGetByIdentifier("iron_shovel", out shovel),
             "Pinned items cover tool and equipment durability");
         ItemStack item = new(wood.ProtocolId, 1) { Damage = 10, Unbreaking = 3 };
         Check(DurabilityRules.ApplyWear(item, wood.MaxDurability, 10,
