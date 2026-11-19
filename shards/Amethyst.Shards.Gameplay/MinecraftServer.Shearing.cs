@@ -65,7 +65,7 @@ public sealed partial class MinecraftServer
         // Grazing simulation: sheared sheep regrow after a configurable
         // interval, with state persisted across server restarts.
         LivingEntity[] regrown = _livingEntities.Regrow(
-            Environment.TickCount64);
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         if (regrown.Length == 0) return;
         foreach (ConnectedPlayer observer in _players.Snapshot()
             .Where(x => x.Ready))
