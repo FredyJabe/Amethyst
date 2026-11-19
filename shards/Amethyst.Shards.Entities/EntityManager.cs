@@ -4,13 +4,14 @@ namespace Amethyst.BuiltinShards;
 
 /// <summary>Thread-safe authoritative instance store. No automatic spawn,
 /// AI or physics: other Shards can implement those via the typed service.</summary>
-public sealed class EntityManager : IShardEntityManager
+public sealed class EntityManager : IShardEntityManager, IShardEntityInteractions
 {
     private const int MaximumEntities = 10_000;
     private const double MaximumCoordinate = 30_000_000;
     private readonly IShardEntityRegistry _definitions;
     private readonly Dictionary<int, ShardEntityInstance> _instances = new();
     private readonly Queue<ShardEntityInstance> _deaths = new();
+    private readonly HashSet<int> _sheared = [];
     private readonly object _gate = new();
     private int _nextEntityId;
 
@@ -50,7 +51,11 @@ public sealed class EntityManager : IShardEntityManager
 
     public bool TryRemove(int entityId)
     {
-        lock (_gate) return _instances.Remove(entityId);
+        lock (_gate)
+        {
+            _sheared.Remove(entityId);
+            return _instances.Remove(entityId);
+        }
     }
 
     public bool TryTeleport(int entityId, double x, double y, double z,
@@ -80,6 +85,7 @@ public sealed class EntityManager : IShardEntityManager
             if (updated.Health <= 0)
             {
                 _instances.Remove(entityId);
+                _sheared.Remove(entityId);
                 EnqueueDeath(updated);
             }
             else _instances[entityId] = updated;
@@ -98,9 +104,45 @@ public sealed class EntityManager : IShardEntityManager
                 return false;
             killed = entity with { Health = entity.Health.HasValue ? 0 : null };
             _instances.Remove(entityId);
+            _sheared.Remove(entityId);
             EnqueueDeath(killed);
             return true;
         }
+    }
+
+    public bool TryMilk(int entityId, out ShardEntityInstance entity)
+    {
+        entity = default;
+        lock (_gate)
+        {
+            if (!_instances.TryGetValue(entityId, out var found) ||
+                !_definitions.TryGetById(found.ProtocolId, out var kind) ||
+                kind.Identifier is not ("minecraft:cow" or "minecraft:mooshroom" or
+                    "minecraft:goat"))
+                return false;
+            entity = found;
+            return true;
+        }
+    }
+
+    public bool TryShear(int entityId, out ShardEntityInstance entity)
+    {
+        entity = default;
+        lock (_gate)
+        {
+            if (!_instances.TryGetValue(entityId, out var found) ||
+                !_definitions.TryGetById(found.ProtocolId, out var kind) ||
+                kind.Identifier != "minecraft:sheep" || _sheared.Contains(entityId))
+                return false;
+            _sheared.Add(entityId);
+            entity = found;
+            return true;
+        }
+    }
+
+    public bool IsSheared(int entityId)
+    {
+        lock (_gate) return _sheared.Contains(entityId);
     }
 
     public ShardEntityInstance[] DrainDeaths()

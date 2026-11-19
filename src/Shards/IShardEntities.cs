@@ -33,6 +33,21 @@ public interface IShardEntityRegistry
 /// Players and dropped items must use AllocateEntityId to avoid network ID
 /// collisions. World physics, AI, combat, drops and persistence are separate
 /// systems and are not implied by this service.</summary>
+/// <summary>Server-authoritative interactions with living entities. The
+/// protocol and inventory belong to Gameplay; Entities owns species rules
+/// and per-entity sheared state. Successful actions can emit Core triggers.</summary>
+public interface IShardEntityInteractions
+{
+    /// <summary>Check and process milking. No entity state is consumed;
+    /// cows, mooshrooms and goats can be milked repeatedly.</summary>
+    bool TryMilk(int entityId, out ShardEntityInstance entity);
+    /// <summary>Mark a sheep sheared once; repeat calls cannot duplicate wool.
+    /// Vanilla wool colour, regrowth and equipment metadata remain future work.</summary>
+    bool TryShear(int entityId, out ShardEntityInstance entity);
+    bool IsSheared(int entityId);
+}
+
+/// <summary>Authoritative entity store and network identifier allocator.</summary>
 public interface IShardEntityManager
 {
     int AllocateEntityId();
