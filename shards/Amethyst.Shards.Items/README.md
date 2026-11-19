@@ -124,36 +124,84 @@ silently pretending to work.
 
 ### Vanilla durability and survival mining
 
-The bundled Java 26.3 item catalog pins `MaxDurability` for all
-**84 damageable vanilla items** (including tools, swords, armor and shears).
-Use `iteminfo diamond_pickaxe` to inspect the max durability. Custom
-YAML definitions may repeat the vanilla `MaxDurability`, but cannot
-change it until Gameplay can send a full `max_damage` component override.
+The bundled Java 26.3 item catalog pins `MaxDurability` for all **84
+damageable vanilla items**, including tools, weapons, armor, and shears. Use
+`iteminfo diamond_pickaxe` in the server console to inspect the catalog.
+Custom YAML files may repeat the same `MaxDurability`, but cannot change
+the version-pinned maximum without corresponding client components.
 
-Each player inventory stack has an accumulated integer `Damage`.
-A successful **Survival** block break decreases durability for mining
-tools (pickaxes, axes, shovels and hoes), swords and shears.
-Normal mining tools and shears lose one durability point; swords lose
-two. Breaking blocks with zero hardness costs no durability for normal
-tools and swords; shears also wear on instant blocks (except fire). An
-item disappears when its damage reaches the maximum. Creative mining,
-rejected digs, aborted digs, and blocks that were already air cause
-no wear.
+#### Mining and tool actions
 
-The Java client receives an updated held-slot packet with the
-`minecraft:damage` component (protocol 777, component type **3**) so
-it can display the vanilla durability bar. Damage is carried during
-inventory clicks and workstation transfers.
+Successful Survival block breaks deduct one durability for mining tools
+and shears (swords lose two). Zero-hardness blocks do not wear ordinary
+tools; shears have vanilla's instant-block exception. Tools break and
+disappear on their last durability point. A rejected, cancelled, or
+already-completed dig does not consume durability. Creative does not
+consume durability.
 
-Inventory persistence is now `AMINV003`; station persistence is
-`AMSTAT02`. Both readers accept the respective previous formats
-(`AMINV002` / `AMSTAT01`) and migrate to the new format when saved.
-Existing saves are not deleted or reset.
+The Gameplay Shard also handles **axe stripping and copper
+scraping/unwaxing, hoe tilling, shovel paths and campfire extinguishing,
+pumpkin carving with shears, and flint-and-steel ignition/relighting**.
+Only a committed block-state transformation consumes wear. Vanilla
+Java 26.3 block-state variants are preserved by the transform tables.
 
-Current limitations: enchantment-based **Unbreaking** and **Mending**
-effects are not yet implemented; neither are item-use actions like
-combat, shearing sheep, tilling fields or using flint and steel.
-Only block mining consumes durability in this milestone.
+#### Enchantments and repairs
+
+Item stacks now store the authoritative `minecraft:damage`,
+`minecraft:enchantments` (Unbreaking I–III, Mending I),
+`minecraft:unbreakable`, and `minecraft:repair_cost` properties.
+Unbreaking rolls independently per damage point, including the reduced
+armor protection chance. Unbreakable items never lose durability.
+
+**Mending** consumes physical XP orbs collected from the world, repairs
+up to two damage points per XP, and applies leftover XP to persistent
+player level/progress. Supported ores spawn persistent XP orbs only on
+a valid Survival harvest. Equipped damaged Mending items (selected main
+hand, offhand and armor) are eligible.
+
+Damaged items can be repaired by combining two matching items in a
+crafting table (5% repair bonus). **Grindstones** support combining
+matching damaged items and removing the currently modeled non-curse
+enchantments. **Anvils** support matching-item and compatible-material
+repairs, enchantment combination, level costs, and the 12% chance to
+chip, damage, or break the anvil after a successful Survival repair.
+Vanilla's full enchantment catalog, anvil naming/renaming, and
+enchanting-table behavior remain separate features.
+
+Until a full enchanting table exists, operators can grant the supported
+durability enchantments in-game with:
+
+```text
+/enchant <online-player> unbreaking [level 1-3]
+/enchant <online-player> mending
+```
+
+These commands use server-side inventory changes and resynchronize the
+held item. Creative packet contents are not trusted to author
+enchantments.
+
+#### Durability state and migration
+
+Inventory, workstation transfers, crafting inputs, dropped item
+entities, and pickups preserve wear, enchantments and repair cost.
+Minecraft Java 26.3 receives corresponding component patches so
+durability bars and enchantment tooltips display.
+
+New persisted file versions are `AMINV004` (player inventory),
+`AMSTAT03` (workstations), and `AMDROP02` (ground items).
+Their readers accept the prior respective formats,
+`AMINV002`/`AMINV003`, `AMSTAT01`/`AMSTAT02`, and `AMDROP01`.
+XP levels are stored in `AMEXP001`; XP orbs in `AMXPORB1`.
+Back up an existing world before switching branches or versions; an
+older server may not understand the newer save formats.
+
+**Known limits:** Combat damage, blocking, shearing living entities,
+bows and crossbows, tridents and thrown weapons, fishing, and Elytra
+gliding need their underlying gameplay systems before those events
+can apply wear. Armor wear is implemented as an authoritative API but
+is not invoked until player damage is modeled. Grindstone XP refunds,
+the full set of enchantments and curses, and complete vanilla anvil
+combination/renaming rules are not yet implemented.
 
 ### Multiple files and errors
 
