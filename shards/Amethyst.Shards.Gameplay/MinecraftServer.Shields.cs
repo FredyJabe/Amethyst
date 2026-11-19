@@ -10,6 +10,7 @@ public sealed partial class MinecraftServer
         if (!player.Ready) return;
         if (await HandleShieldUseAsync(player, action, ct)) return;
         if (await HandleProjectileUseAsync(player, action, ct)) return;
+        if (await HandleFishingUseAsync(player, action, ct)) return;
         await BlockInteractionProtocol.SendAckAsync(player.Connection,
             action.Sequence, ct);
     }
