@@ -78,26 +78,29 @@ for misc entities and players. `item` entities are handled by the
 existing drop system instead. Enabling a special-purpose type manually
 does not implement its required item, projectile or display metadata.
 
-## Loot drops
+## Event-driven item drops
 
-Entity loot definitions belong exclusively to the **Items Shard**, not the
-Entities Shard. The Items Shard provides `IShardLootRegistry` with a
-bundled `loot-26.3.yml` starter set plus administrator overrides at
-`shards/data/items/loot/*.yml`. Loot root keys match entity IDs, including
-custom aliases; entries define item IDs, count ranges and chance. For example:
+The **Items Shard**, not Entities, owns `IShardSkillRegistry` and the
+`dropItem` skill action. User definitions live in
+`shards/data/items/skills/*.yml`; they use entity root keys and a
+MythicMobs-like skill line with a `~onDeath` trigger:
 
 ```yaml
 guardian_cow:
-  Drops:
-    - { Item: minecraft:diamond, Min: 1, Max: 2, Chance: 1 }
+  Skills:
+    - 'dropItem{item=minecraft:diamond;amount=1-2;chance=1} ~onDeath'
 ```
 
-`entitykill <runtime-id>` or lethal `TryDamage` emits one entity-death
-event. Gameplay rolls the Items Shard's loot and creates physical dropped
-items that players may collect. `entityremove` is a silent despawn,
-not a death. If no loot table exists, the entity drops nothing; a custom
-alias falls back to its vanilla base type unless a specific alias table
-is defined. Natural combat and vanilla kill modifiers remain future work.
+The Entities Shard emits a death event from `entitykill` or lethal
+`TryDamage`. Gameplay executes the Items Shard's death skills and
+spawns physical ground items, respecting the Items registry's stack
+limits. `entityremove` never triggers death skills. Alias-specific
+skills take precedence, with fallback to the vanilla type when an
+alias has no skills. `Skills: []` explicitly suppresses fallback.
+Other triggers and actions are not implemented yet.
+
+See [the Items Shard guide](../Amethyst.Shards.Items/README.md)
+for parameters and YAML validation rules.
 
 ## Console commands
 

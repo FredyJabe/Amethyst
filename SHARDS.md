@@ -8,7 +8,7 @@ Amethyst is now organized into a **network kernel** and independently compiled *
 | --- | --- |
 | `src/Amethyst.csproj` | TCP listener, status/ping, protocol framing, Mojang authentication, encryption, login/configuration, connection lifetime, Shard loader, operator console host |
 | `shards/Amethyst.Shards.Overworld` | Terrain/biomes, chunks, lighting, save files, chunk preparation and streaming |
-| `shards/Amethyst.Shards.Items` | YAML-based item definitions and recipe registry: 1,658 vanilla item IDs, stacking rules, shaped/shapeless crafting and cooking recipes |
+| `shards/Amethyst.Shards.Items` | YAML-based item definitions, recipes, and triggered item skills (`dropItem` on `~onDeath`) for Java 26.3 |
 | `shards/Amethyst.Shards.Entities` | YAML-configured registry of 161 vanilla Java 26.3 entity types and in-memory runtime for spawned entities |
 | `shards/Amethyst.Shards.Gameplay` | Play-state packets, players, movement, game modes, inventory, crafting stations, chat, day/night clock; consumes Items, Recipe, Entity and World services |
 | `shards/Amethyst.Shards.Hello` | Disabled-by-default example: a `hello` console command and a Play packet observer |
@@ -148,31 +148,40 @@ and physics remain in Gameplay; spawned entity instances are transient.
 See [the Entities Shard guide](shards/Amethyst.Shards.Entities/README.md)
 for the exact YAML schema, C# service API, examples and limitations.
 
-## Loot drops (Items Shard)
+## Event skills and death drops (Items Shard)
 
-`IShardLootRegistry` is an **Items Shard** service: entity types are not
-allowed to carry item drop rules in their own entity YAML. The Items Shard
-loads bundled `loot-26.3.yml` tables, then user overrides from
-`shards/data/items/loot/*.yml` and `*.yaml`. The root is the entity ID,
-and each `Drops` entry contains `Item`, `Min`, `Max`, and `Chance`.
-Aliases can provide their own tables, or inherit the vanilla entity
-type's loot. `Drops: []` disables a table.
+`IShardSkillRegistry` is an **Items Shard** service. It loads
+MythicMobs-style YAML from bundled `skills-26.3.yml` and
+administrator overrides at `shards/data/items/skills/*.yml` or `*.yaml`.
+Entity roots contain `Skills` entries with mechanic parameters,
+an optional `@self` target, and a trigger:
 
 ```yaml
 cow:
-  Drops:
-    - { Item: minecraft:beef, Min: 1, Max: 3 }
-    - { Item: minecraft:leather, Min: 0, Max: 2, Chance: 0.5 }
+  Skills:
+    - 'dropItem{item=minecraft:beef;amount=1-3} ~onDeath'
+    - 'dropItem{item=minecraft:leather;amount=0-2;chance=0.5} @self ~onDeath'
 ```
 
-When the Entities manager reports a death (lethal `TryDamage` or
-`entitykill`), Gameplay rolls the Items-owned table and spawns real
-item entities with the existing pickup, despawn and persistence logic.
-`entityremove` is not a kill, and produces no loot. Use `lootinfo cow`
-to inspect a table from the server terminal. The shipped tables cover a
-starter set of common mobs; more advanced vanilla loot functions and
-conditions are not implemented yet. See
-[Items Shard configuration](shards/Amethyst.Shards.Items/README.md).
+`dropItem` supports `item` (vanilla item identifier), `amount`
+(an inclusive integer or `min-max`), and `chance` (0–1).
+The event engine currently supports `~onDeath` only;
+unsupported triggers or actions fail YAML validation. User skill
+lists replace bundled defaults by entity ID, and `Skills: []` disables
+drops. Named entity aliases can have separate skill lists or inherit
+their vanilla type's skills.
+
+On lethal `TryDamage` or `entitykill`, the Entities manager
+queues a one-time death. Gameplay calls `IShardSkillRegistry.TryExecute`
+and spawns real dropped items, using existing pickup, expiry and
+persistence code. `entityremove` is a silent despawn, so no death
+skills run. Inspect `skillinfo cow` from the server terminal.
+
+Earlier experimental `items/loot/*.yml` files with active `Drops:`
+mappings must be manually migrated; startup rejects them with a
+clear error so old configurations cannot be silently ignored.
+See the [Items Shard skill guide](shards/Amethyst.Shards.Items/README.md)
+for examples and limitations.
 
 ## Build / run
 
@@ -213,7 +222,7 @@ Manifest fields:
 - `requires`: capabilities that must have exactly one enabled provider
 - `dependsOn`: explicit Shard IDs (for non-substitutable dependencies)
 
-A dependency cycle, missing required provider, duplicate ID, incompatible API version, missing DLL, or invalid manifest causes a clear startup error. The Gameplay Shard requires the `world`, `items`, `recipes`, `loot` and `entities` capabilities rather than referring directly to `overworld` or the built-in Items implementation; alternative providers can be substituted **without changing the gameplay binary**.
+A dependency cycle, missing required provider, duplicate ID, incompatible API version, missing DLL, or invalid manifest causes a clear startup error. The Gameplay Shard requires the `world`, `items`, `recipes`, `skills` and `entities` capabilities rather than referring directly to `overworld` or the built-in Items implementation; alternative providers can be substituted **without changing the gameplay binary**.
 
 To replace the built-in world provider, set `enabled: false` on the installed `overworld/shard.yaml`, install a trusted Shard that declares `provides: [world]`, and set `enabled: true` on that Shard. Its enable hook must register one `IShardWorld` service. Keep the same world save only if the new provider is actually save-format and generator compatible; otherwise choose a new `worldPath`.
 
@@ -239,8 +248,8 @@ shard disable gameplay
 shard disable items
 shard disable entities
 shard disable overworld
-shard enable gameplay   # automatically enables world, items, recipes, loot and entities
-lootinfo cow
+shard enable gameplay   # automatically enables world, items, recipes, skills and entities
+skillinfo cow
 entitykill 1
 iteminfo minecraft:diamond_pickaxe
 entityinfo minecraft:cow
