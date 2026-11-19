@@ -3,35 +3,360 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#171329">
-  <meta name="description" content="Amethyst is an open-source Minecraft Java Edition server written in C# and .NET.">
-  <title>Amethyst · Minecraft Server for .NET</title>
+  <meta name="theme-color" content="#f8f5fc">
+  <meta name="description" content="Meet Amethyst: an open-source, experimental Minecraft Java Edition server built from scratch in C# and .NET 10, with a modular Shards plugin system.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Amethyst — Minecraft Java Server in C#">
+  <meta property="og:description" content="A modular, open-source Minecraft Java Edition server built from scratch with C# and .NET 10.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/FredyJabe/Amethyst/gh-pages/assets/amethyst-wordmark.png">
+  <title>Amethyst — An open-source Minecraft Java server in C#</title>
   <style>
-    :root { color-scheme: dark; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; color: #f5f0ff;
-      background: radial-gradient(ellipse at 50% 10%, #483174 0, #241936 42%, #131020 100%); }
-    main { width: min(100% - 2.5rem, 720px); padding: 5rem 0; text-align: center; }
-    .gem { font-size: 4.5rem; line-height: 1; filter: drop-shadow(0 7px 30px #a77bff70); }
-    h1 { font-size: clamp(3rem, 9vw, 5.5rem); letter-spacing: -.055em; margin: .8rem 0 1rem; }
-    p { color: #cdc3df; font-size: clamp(1rem, 3vw, 1.2rem); line-height: 1.65; }
-    .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .8rem; margin-top: 2rem; }
-    a { display: inline-block; color: #fff; text-decoration: none; font-weight: 600; padding: .8rem 1.25rem;
-      border: 1px solid #74628f; border-radius: .7rem; }
-    a.primary { background: #8b5bdd; border-color: #8b5bdd; }
-    a:hover, a:focus-visible { background: #644399; outline: 2px solid transparent; }
-    .note { margin-top: 3.5rem; font-size: .9rem; color: #a99dbf; }
+    :root {
+      color-scheme: light;
+      --page: #faf8fd;
+      --paper: #ffffff;
+      --ink: #24152e;
+      --muted: #665874;
+      --purple: #7627aa;
+      --deep: #251230;
+      --border: #e8dfef;
+      --shadow: 0 22px 60px rgba(61, 23, 84, .08);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 92px; }
+    body { margin: 0; background: var(--page); color: var(--ink); line-height: 1.6; }
+    a { color: inherit; }
+    img { display: block; max-width: 100%; }
+    ::selection { background: #dbb5f4; color: #271138; }
+    .container { width: min(1140px, calc(100% - 40px)); margin-inline: auto; }
+    .site-header { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid rgba(107, 64, 137, .11);
+      background: rgba(250, 248, 253, .91); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+    .nav { min-height: 82px; display: flex; gap: 28px; align-items: center; justify-content: space-between; }
+    .brand { display: inline-flex; flex: 0 0 auto; text-decoration: none; align-items: center; }
+    .brand img { width: 178px; height: auto; }
+    .nav-links { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
+    .nav-links a { font-size: .87rem; font-weight: 650; text-decoration: none; color: #58476a; transition: color .2s; }
+    .nav-links a:hover { color: var(--purple); }
+    .nav-links a.nav-cta { background: var(--deep); color: #fff; padding: 9px 16px; border-radius: 9px; }
+    .nav-links a.nav-cta:hover { background: #53236d; }
+    .hero-wrap { position: relative; overflow: hidden; border-bottom: 1px solid var(--border);
+      background: radial-gradient(ellipse 70% 100% at 96% 32%, #edddfa 0%, transparent 76%),
+                  radial-gradient(ellipse 45% 80% at 4% 1%, #f4eaff 0%, transparent 90%), #fbf9fe; }
+    .hero-wrap::after { content: ""; position: absolute; z-index: 0; inset: 0; pointer-events: none; opacity: .35;
+      background-image: radial-gradient(#b39ac5 0.7px, transparent 0.7px); background-size: 22px 22px;
+      mask-image: linear-gradient(to right, transparent 25%, #000); }
+    .hero { position: relative; z-index: 1; padding: 96px 0 106px; display: grid;
+      grid-template-columns: 1.13fr .87fr; align-items: center; gap: 64px; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 9px; text-transform: uppercase;
+      font-size: .71rem; letter-spacing: .13em; font-weight: 800; color: #7a368f; }
+    .eyebrow::before { content: ""; display: block; width: 8px; height: 8px;
+      border-radius: 50%; background: #ac55de; box-shadow: 0 0 0 5px #ecd7f8; }
+    .hero-logo { width: min(100%, 520px); margin: 26px 0 10px -7px; height: auto; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: clamp(2rem, 3.3vw, 3.25rem); line-height: 1.12; letter-spacing: -.047em;
+      font-weight: 790; max-width: 640px; margin: 23px 0 24px; }
+    .lead { font-size: 1.13rem; line-height: 1.75; max-width: 575px; color: var(--muted); margin-bottom: 28px; }
+    .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .btn { display: inline-flex; min-height: 49px; justify-content: center; align-items: center;
+      padding: 12px 21px; font-size: .9rem; font-weight: 750; text-decoration: none;
+      border-radius: 10px; border: 1px solid transparent; transition: transform .2s, background .2s, border-color .2s; }
+    .btn:hover { transform: translateY(-2px); }
+    .btn-primary { background: #742ca5; color: #fff; box-shadow: 0 9px 22px rgba(114, 44, 165, .2); }
+    .btn-primary:hover { background: #5e208b; }
+    .btn-secondary { background: rgba(255,255,255,.78); border-color: #d9c9e6; color: #3b2350; }
+    .btn-secondary:hover { background: white; border-color: #b792ce; }
+    .hero-facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+    .fact { padding: 6px 11px; border: 1px solid #e2d1ed; background: rgba(255,255,255,.61);
+      color: #6b5378; border-radius: 99px; font-size: .75rem; font-weight: 700; }
+    .terminal { width: 100%; overflow: hidden; background: #22152c; color: #efe5f6;
+      border: 1px solid rgba(104, 64, 131, .4); border-radius: 16px;
+      box-shadow: 0 32px 70px rgba(45, 15, 64, .25), 0 0 0 7px rgba(255,255,255,.3);
+      transform: rotate(1deg); }
+    .terminal-bar { display: flex; align-items: center; gap: 8px; padding: 16px 18px;
+      background: #321e42; border-bottom: 1px solid #493151; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #845c94; }
+    .dot:first-child { background: #ea8099; } .dot:nth-child(2) { background: #e4be71; }
+    .dot:nth-child(3) { background: #7ac8a2; }
+    .terminal-label { margin-left: auto; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      color: #b79ec5; font-size: .7rem; }
+    .terminal-body { padding: 27px 29px 30px; font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: .84rem; line-height: 2; overflow-x: auto; }
+    .terminal-body pre { margin: 0; white-space: pre; }
+    .comment { color: #bd93d0; } .command { color: #f5f0f8; }
+    .prompt { color: #b882e7; } .output { color: #9ddebd; }
+    .terminal-foot { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+      border-top: 1px solid #493151; padding: 13px 29px; font-size: .72rem; color: #cbb9d4; }
+    .terminal-foot strong { color: #c6f5d8; font-weight: 600; }
+    section { padding: 92px 0; }
+    .section-top { max-width: 715px; margin-bottom: 38px; }
+    .kicker { text-transform: uppercase; letter-spacing: .14em; font-weight: 800;
+      font-size: .74rem; color: #823fb1; margin-bottom: 12px; }
+    h2 { letter-spacing: -.045em; font-size: clamp(1.95rem, 3.4vw, 3rem); line-height: 1.18; margin-bottom: 14px; }
+    .section-intro { font-size: 1.03rem; color: var(--muted); margin: 0; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 17px; }
+    .feature { padding: 30px; border: 1px solid var(--border); border-radius: 16px;
+      background: var(--paper); box-shadow: 0 10px 25px rgba(68, 34, 89, .035); }
+    .feature-number { display: inline-grid; place-items: center; width: 43px; height: 43px;
+      font: 800 .8rem ui-monospace, SFMono-Regular, Consolas, monospace;
+      color: #7835a5; background: #f1e7f8; border-radius: 11px; margin-bottom: 23px; }
+    .feature h3 { font-size: 1.12rem; line-height: 1.3; letter-spacing: -.02em; margin-bottom: 9px; }
+    .feature p { color: var(--muted); font-size: .93rem; margin: 0; }
+    .shards-wrap { background: var(--deep); color: #f6effb; position: relative; overflow: hidden; }
+    .shards-wrap::before { content: ""; width: 500px; height: 500px; border: 1px solid #553369;
+      position: absolute; right: -160px; top: -220px; border-radius: 50%; box-shadow: 0 0 0 80px rgba(123,72,159,.09),0 0 0 160px rgba(123,72,159,.06); }
+    .shards { display: grid; grid-template-columns: .9fr 1.1fr; gap: 84px; align-items: center; position: relative; }
+    .shards .kicker { color: #c990ec; }
+    .shards p { color: #cdbdd6; font-size: 1rem; }
+    .shards strong { color: #fff; }
+    .text-link { display: inline-flex; margin-top: 12px; font-weight: 760; text-decoration: none;
+      border-bottom: 1px solid currentColor; padding-bottom: 3px; }
+    .shards .text-link { color: #e5beff; }
+    .shard-list { display: grid; gap: 12px; }
+    .shard { padding: 20px 23px; display: flex; gap: 17px; align-items: flex-start;
+      background: rgba(255,255,255,.055); border: 1px solid rgba(226,200,245,.16); border-radius: 13px; }
+    .shard-mark { flex: 0 0 auto; width: 35px; height: 35px; border-radius: 9px;
+      border: 1px solid #8651a4; display: grid; place-items: center; color: #e3b4ff; font-size: .9rem; font-weight: 800; }
+    .shard h3 { margin: 0 0 4px; font-size: 1.04rem; }
+    .shard p { margin: 0; font-size: .87rem; }
+    .start-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 72px; align-items: center; }
+    .requirements { color: #645470; padding-left: 20px; margin: 20px 0 0; }
+    .requirements li { margin: 7px 0; }
+    .code-box { background: #21172d; border: 1px solid #42304f; color: #f8f4fc; border-radius: 14px;
+      overflow: hidden; box-shadow: var(--shadow); }
+    .code-title { display: flex; justify-content: space-between; align-items: center;
+      padding: 15px 20px; border-bottom: 1px solid #43304f; font-size: .8rem; color: #cbb7d8; }
+    .code-title span:last-child { color: #b18bc9; }
+    .code-box pre { padding: 24px 22px 27px; margin: 0; overflow-x: auto; white-space: pre; line-height: 2;
+      font: .82rem/2 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+    .code-box .code-comment { color: #b995cf; }
+    .code-caption { margin-top: 15px; font-size: .87rem; color: var(--muted); }
+    .code-caption a { color: #6f239e; font-weight: 700; }
+    .notice { margin-top: 74px; border: 1px solid #e7d8ef; background: #f5ecfa;
+      border-radius: 13px; padding: 23px 27px; display: flex; gap: 18px; align-items: flex-start; }
+    .notice-title { flex: 0 0 auto; font-size: .83rem; font-weight: 800; color: #6d2a96; text-transform: uppercase; letter-spacing: .05em; }
+    .notice p { margin: 0; color: #574762; font-size: .91rem; }
+    footer { border-top: 1px solid var(--border); padding: 30px 0 40px; }
+    .footer-flex { display: flex; justify-content: space-between; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+    footer p { font-size: .8rem; color: #786d82; margin: 0; max-width: 630px; }
+    .footer-links { display: flex; gap: 18px; flex-wrap: wrap; }
+    .footer-links a { font-size: .8rem; font-weight: 650; color: #624776; text-decoration: none; }
+    .footer-links a:hover { text-decoration: underline; }
+    :focus-visible { outline: 3px solid #bc76e2; outline-offset: 4px; }
+    @media (max-width: 920px) {
+      .hero { grid-template-columns: 1fr; gap: 46px; padding: 70px 0 80px; }
+      .hero-logo { width: min(100%, 570px); }
+      .terminal { max-width: 600px; transform: none; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .shards, .start-grid { grid-template-columns: 1fr; gap: 36px; }
+      .shards .section-top { margin-bottom: 0; }
+    }
+    @media (max-width: 640px) {
+      .container { width: min(100% - 32px, 1140px); }
+      .nav { min-height: 72px; align-items: flex-start; flex-direction: column; gap: 6px; padding: 14px 0; }
+      .brand img { width: 150px; }
+      .nav-links { gap: 16px; }
+      .nav-links a { font-size: .78rem; }
+      .nav-links a.nav-cta { padding: 5px 10px; }
+      .hero { padding: 55px 0 67px; }
+      .hero-logo { margin: 22px 0 0 -5px; }
+      .lead { font-size: 1rem; }
+      .terminal-body { padding: 19px; font-size: .73rem; }
+      .terminal-foot { padding: 12px 19px; }
+      section { padding: 65px 0; }
+      .grid { grid-template-columns: 1fr; }
+      .feature { padding: 24px; }
+      .notice { margin-top: 48px; flex-direction: column; gap: 6px; }
+      .code-box pre { font-size: .72rem; padding: 18px; }
+      html { scroll-padding-top: 120px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition: none !important; }
+    }
   </style>
 </head>
 <body>
-  <main>
-    <div class="gem" aria-hidden="true">💎</div>
-    <h1>Amethyst</h1>
-    <p>An open-source Minecraft Java Edition server built from scratch in C# and .NET.</p>
-    <div class="actions">
-      <a class="primary" href="https://github.com/FredyJabe/Amethyst">View on GitHub</a>
+  <header class="site-header">
+    <nav class="container nav" aria-label="Main navigation">
+      <a class="brand" href="#top" aria-label="Amethyst home">
+        <img src="assets/amethyst-wordmark.png" width="1400" height="400" alt="Amethyst — Minecraft Java server in C# and .NET 10">
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#shards">Shards</a>
+        <a href="#get-started">Get started</a>
+        <a class="nav-cta" href="https://github.com/FredyJabe/Amethyst">GitHub ↗</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="top">
+    <div class="hero-wrap">
+      <div class="container hero">
+        <div>
+          <div class="eyebrow">Open source · experimental</div>
+          <img class="hero-logo" src="assets/amethyst-wordmark.png" width="1400" height="400"
+            alt="Amethyst — Minecraft Java server / C# + .NET 10">
+          <h1>A Minecraft server, built from the ground up.</h1>
+          <p class="lead">Amethyst is an independent Minecraft Java Edition server written from scratch in <strong>C# and .NET 10</strong>. A custom world engine, modular plugin architecture, and evolving gameplay systems — all in one open-source project.</p>
+          <div class="actions">
+            <a class="btn btn-primary" href="https://github.com/FredyJabe/Amethyst">Explore the source →</a>
+            <a class="btn btn-secondary" href="#get-started">Get started</a>
+          </div>
+          <div class="hero-facts" aria-label="Project technology">
+            <span class="fact">Minecraft Java 26.3</span>
+            <span class="fact">.NET 10</span>
+            <span class="fact">MIT licensed</span>
+          </div>
+        </div>
+
+        <div class="terminal" aria-label="Example Amethyst setup commands">
+          <div class="terminal-bar">
+            <span class="dot" aria-hidden="true"></span>
+            <span class="dot" aria-hidden="true"></span>
+            <span class="dot" aria-hidden="true"></span>
+            <span class="terminal-label">terminal / Amethyst</span>
+          </div>
+          <div class="terminal-body"><pre><span class="comment"># Clone the project</span>
+<span class="prompt">$</span> <span class="command">git clone https://github.com/FredyJabe/Amethyst.git</span>
+<span class="prompt">$</span> <span class="command">cd Amethyst</span>
+
+<span class="comment"># Build with .NET 10</span>
+<span class="prompt">$</span> <span class="command">dotnet build Amethyst.slnx</span>
+
+<span class="comment"># Start your server</span>
+<span class="prompt">$</span> <span class="command">./run.sh</span>
+<span class="output">● Ready to explore.</span></pre></div>
+          <div class="terminal-foot">
+            <span>Modular by design</span>
+            <strong>Powered by Shards</strong>
+          </div>
+        </div>
+      </div>
     </div>
-    <p class="note">Project website and documentation are coming soon.</p>
+
+    <section id="features" aria-labelledby="features-heading">
+      <div class="container">
+        <div class="section-top">
+          <div class="kicker">What makes Amethyst different</div>
+          <h2 id="features-heading">A new foundation for familiar worlds.</h2>
+          <p class="section-intro">Amethyst implements its own server engine rather than wrapping or modifying the vanilla server. Here's what's already taking shape.</p>
+        </div>
+        <div class="grid">
+          <article class="feature">
+            <span class="feature-number" aria-hidden="true">01</span>
+            <h3>Native Java protocol</h3>
+            <p>Minecraft Java Edition 26.3 connection handling, authenticated login, chunk streaming, and player synchronization.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-number" aria-hidden="true">02</span>
+            <h3>Procedural Overworld</h3>
+            <p>Seeded continents, mountains, biomes, caves, aquifers, trees, ores, and small structures from a custom generator.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-number" aria-hidden="true">03</span>
+            <h3>Shards plugin system</h3>
+            <p>Extend behavior through lifecycle hooks, services, capabilities, packet hooks, and command registration.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-number" aria-hidden="true">04</span>
+            <h3>Creative &amp; Survival</h3>
+            <p>Experimental mining, block placement, physical item drops, item pickup, and inventory management.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-number" aria-hidden="true">05</span>
+            <h3>Items &amp; workstations</h3>
+            <p>YAML-defined items and recipes, plus early crafting-table, furnace, smoker, and blast-furnace support.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-number" aria-hidden="true">06</span>
+            <h3>World persistence</h3>
+            <p>Persisted generated worlds, block edits, player locations, inventories, and workstation contents.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="shards-wrap" id="shards" aria-labelledby="shards-heading">
+      <div class="container shards">
+        <div>
+          <div class="kicker">The Shards architecture</div>
+          <h2 id="shards-heading">A small core. An expandable universe.</h2>
+          <p>The Amethyst core focuses on connections, communication, and Minecraft packets. <strong>Shards</strong> provide world generation, item definitions, gameplay, and other server capabilities without hardwiring everything into the engine.</p>
+          <p>Build your own Shard or explore the bundled implementations and their APIs.</p>
+          <a class="text-link" href="https://github.com/FredyJabe/Amethyst/blob/main/SHARDS.md">Read the Shards developer guide →</a>
+        </div>
+        <div class="shard-list">
+          <article class="shard">
+            <span class="shard-mark" aria-hidden="true">O</span>
+            <div>
+              <h3>Overworld</h3>
+              <p>Terrain generation, chunk delivery, and world lighting.</p>
+            </div>
+          </article>
+          <article class="shard">
+            <span class="shard-mark" aria-hidden="true">I</span>
+            <div>
+              <h3>Items</h3>
+              <p>YAML-configurable item definitions, aliases, stack rules, and crafting/cooking recipes.</p>
+            </div>
+          </article>
+          <article class="shard">
+            <span class="shard-mark" aria-hidden="true">G</span>
+            <div>
+              <h3>Gameplay</h3>
+              <p>Players, inventories, workstations, chat, permissions, and in-game time.</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="get-started" aria-labelledby="start-heading">
+      <div class="container">
+        <div class="start-grid">
+          <div>
+            <div class="kicker">Start exploring</div>
+            <h2 id="start-heading">Build it. Run it. Make it yours.</h2>
+            <p class="section-intro">The source is public and ready for contributors and curious developers. Clone the repository, build the solution, and start your own local test server.</p>
+            <ul class="requirements">
+              <li><a href="https://dotnet.microsoft.com/download/dotnet/10.0">.NET 10 SDK</a></li>
+              <li>Minecraft Java Edition 26.3 client</li>
+              <li>Authenticated Java account for joining</li>
+            </ul>
+          </div>
+          <div>
+            <div class="code-box">
+              <div class="code-title"><span>Quick start</span><span>bash</span></div>
+              <pre><span class="code-comment"># Clone and build</span>
+git clone https://github.com/FredyJabe/Amethyst.git
+cd Amethyst
+dotnet build Amethyst.slnx
+
+<span class="code-comment"># Run with the default configuration</span>
+dotnet run --no-build --project src/Amethyst.csproj -- server.yaml</pre>
+            </div>
+            <p class="code-caption">On Linux/macOS, you can also run <code>./run.sh</code>. For configuration and setup details, see the <a href="https://github.com/FredyJabe/Amethyst#readme">project README</a>.</p>
+          </div>
+        </div>
+        <aside class="notice" aria-label="Project maturity">
+          <span class="notice-title">Prototype status</span>
+          <p>Amethyst is experimental and not production-ready. Gameplay, vanilla compatibility, lighting, and some server mechanics remain incomplete. It's a project to build, test, explore, and improve — not a drop-in replacement for a fully featured Minecraft server.</p>
+        </aside>
+      </div>
+    </section>
   </main>
+
+  <footer>
+    <div class="container footer-flex">
+      <p>Amethyst is an independent, community-created project, not affiliated with Mojang Studios or Microsoft. Minecraft is a trademark of its respective owners.</p>
+      <div class="footer-links">
+        <a href="https://github.com/FredyJabe/Amethyst">Source code</a>
+        <a href="https://github.com/FredyJabe/Amethyst/blob/main/CONTRIBUTING.md">Contribute</a>
+        <a href="https://github.com/FredyJabe/Amethyst/blob/main/LICENSE">MIT license</a>
+      </div>
+    </div>
+  </footer>
 </body>
 </html>
