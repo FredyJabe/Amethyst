@@ -44,6 +44,19 @@ try
           Ingredients: [dirt]
           Result: { Id: iron_shovel, Amount: 1 }
         """);
+    string entityDir = Path.Combine(temp, "shards", "entities", "definitions");
+    Directory.CreateDirectory(entityDir);
+    File.WriteAllText(Path.Combine(entityDir, "custom.yml"), """
+        cow:
+          Display: "Farm Cow"
+          Health: 30
+        guardian_cow:
+          Id: minecraft:cow
+          Display: "Guardian Cow"
+          Options:
+            Health: 50
+            Invulnerable: true
+        """);
     // Exercise every Java 26.3 recipe serializer through the real Shard
     // loader. Special recipes remain registered but are not executable with
     // Gameplay's current component-free ItemStack.
@@ -132,6 +145,46 @@ try
     await host.LoadAsync();
     Check(host.GetService<IShardWorld>() is not null, "default overworld provider enabled");
     Check(host.GetService<IShardGameplay>() is not null, "gameplay enabled with world provider");
+    IShardEntityRegistry entityTypes = host.GetService<IShardEntityRegistry>() ??
+        throw new Exception("FAIL: Entities Shard service not registered");
+    IShardEntityManager entityWorld = host.GetService<IShardEntityManager>() ??
+        throw new Exception("FAIL: Entities runtime service not registered");
+    Check(entityTypes.MinecraftVersion == "26.3" && entityTypes.Count == 161 &&
+        entityTypes.All.Count == 161 &&
+        entityTypes.TryGetById(72, out var itemEntity) &&
+        itemEntity.Identifier == "minecraft:item" &&
+        entityTypes.TryGetByIdentifier("cow", out var cowType) &&
+        cowType.Display == "Farm Cow" && cowType.MaxHealth == 30,
+        "Entities Shard exposes pinned 26.3 entity IDs and YAML overrides");
+    Check(entityTypes.TryGetByIdentifier("guardian_cow", out var guardianType) &&
+        guardianType.ProtocolId == cowType.ProtocolId &&
+        guardianType.Identifier == "amethyst:guardian_cow" &&
+        guardianType.MaxHealth == 50 && guardianType.Invulnerable,
+        "Mythic-style entity aliases retain the vanilla network type");
+    Check(!entityWorld.TrySpawn("item", 0, 70, 0, out _) &&
+        !entityWorld.TrySpawn("not_a_real_mob", 0, 70, 0, out _) &&
+        !entityWorld.TrySpawn("cow", double.NaN, 70, 0, out _) &&
+        entityWorld.TrySpawn("cow", 2, 70, 3, out var spawned) &&
+        entityWorld.TrySpawn("guardian_cow", 3, 70, 4, out var guardian) &&
+        spawned.EntityId != guardian.EntityId &&
+        spawned.ProtocolId == cowType.ProtocolId &&
+        entityWorld.AllocateEntityId() > guardian.EntityId,
+        "Entity instances validate spawn types and allocate collision-free IDs");
+    Check(entityWorld.TryDamage(spawned.EntityId, 5, out var injured) &&
+        injured.Health == 25 &&
+        !entityWorld.TryDamage(guardian.EntityId, 1, out _) &&
+        entityWorld.TryTeleport(spawned.EntityId, 5, 71, 6, 90, 0) &&
+        entityWorld.Snapshot().Any(e => e.EntityId == spawned.EntityId &&
+            e.X == 5 && e.Yaw == 90) &&
+        entityWorld.TryRemove(spawned.EntityId) &&
+        !entityWorld.TryRemove(spawned.EntityId),
+        "Entity manager supports controlled damage, teleport, and removal");
+    Check(host.RegisteredConsoleCommands.Contains("entityinfo") &&
+        host.RegisteredConsoleCommands.Contains("entityspawn") &&
+        await host.TryExecuteConsoleAsync("entityinfo cow", CancellationToken.None) &&
+        await host.TryExecuteConsoleAsync("entityspawn cow 0 75 0", CancellationToken.None) &&
+        entityWorld.Snapshot().Length == 2,
+        "Entity Shard registers informational and spawn commands");
     IShardItemRegistry items = host.GetService<IShardItemRegistry>() ??
         throw new Exception("FAIL: Items Shard service not registered");
     Check(items.MinecraftVersion == "26.3" && items.Count == 1658 &&
@@ -237,6 +290,11 @@ try
     catch (InvalidOperationException) { itemsBlocked = true; }
     Check(itemsBlocked, "Gameplay dependency protects the Items Shard from being disabled");
 
+    bool entitiesBlocked = false;
+    try { await host.DisableAsync("entities"); }
+    catch (InvalidOperationException) { entitiesBlocked = true; }
+    Check(entitiesBlocked, "Gameplay dependency protects entity runtime provider");
+
     await host.DisableAsync("gameplay");
     Check(host.GetService<IShardGameplay>() is null, "gameplay service removed");
     await host.DisableAsync("items");
@@ -245,6 +303,11 @@ try
         !host.RegisteredConsoleCommands.Contains("recipes") &&
         !host.RegisteredConsoleCommands.Contains("iteminfo"),
         "Disabling Items Shard unregisters its definitions and iteminfo command");
+    await host.DisableAsync("entities");
+    Check(host.GetService<IShardEntityManager>() is null &&
+        host.GetService<IShardEntityRegistry>() is null &&
+        !host.RegisteredConsoleCommands.Contains("entityspawn"),
+        "Disabling Entities Shard unregisters its services and commands");
     await host.DisableAsync("overworld");
     Check(host.GetService<IShardWorld>() is null, "world service removed");
 
@@ -252,8 +315,10 @@ try
     Check(host.GetService<IShardWorld>() is not null &&
         host.GetService<IShardGameplay>() is not null &&
         host.GetService<IShardItemRegistry>() is not null &&
-        host.GetService<IShardRecipeRegistry>() is not null,
-        "Enabling Gameplay automatically enables World, Items, and Recipe providers");
+        host.GetService<IShardRecipeRegistry>() is not null &&
+        host.GetService<IShardEntityManager>() is not null &&
+        host.GetService<IShardEntityRegistry>() is not null,
+        "Enabling Gameplay automatically enables World, Items, Recipe and Entity providers");
 }
 finally
 {
