@@ -86,8 +86,12 @@ public sealed class LootCatalog : IShardLootRegistry
 
     private readonly Dictionary<int, int> _stackSizes = new();
 
-    private static string Normalize(string id) => id.Trim().ToLowerInvariant() is string s &&
-        s.StartsWith("minecraft:", StringComparison.Ordinal) ? s["minecraft:".Length..] : s;
+    private static string Normalize(string id)
+    {
+        string value = id.Trim().ToLowerInvariant();
+        return value.StartsWith("minecraft:", StringComparison.Ordinal)
+            ? value["minecraft:".Length..] : value;
+    }
 
     private IEnumerable<(string Key, ShardLootTable Value)> ReadFile(
         string path, IShardItemRegistry items)

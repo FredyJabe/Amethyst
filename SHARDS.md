@@ -148,6 +148,32 @@ and physics remain in Gameplay; spawned entity instances are transient.
 See [the Entities Shard guide](shards/Amethyst.Shards.Entities/README.md)
 for the exact YAML schema, C# service API, examples and limitations.
 
+## Loot drops (Items Shard)
+
+`IShardLootRegistry` is an **Items Shard** service: entity types are not
+allowed to carry item drop rules in their own entity YAML. The Items Shard
+loads bundled `loot-26.3.yml` tables, then user overrides from
+`shards/data/items/loot/*.yml` and `*.yaml`. The root is the entity ID,
+and each `Drops` entry contains `Item`, `Min`, `Max`, and `Chance`.
+Aliases can provide their own tables, or inherit the vanilla entity
+type's loot. `Drops: []` disables a table.
+
+```yaml
+cow:
+  Drops:
+    - { Item: minecraft:beef, Min: 1, Max: 3 }
+    - { Item: minecraft:leather, Min: 0, Max: 2, Chance: 0.5 }
+```
+
+When the Entities manager reports a death (lethal `TryDamage` or
+`entitykill`), Gameplay rolls the Items-owned table and spawns real
+item entities with the existing pickup, despawn and persistence logic.
+`entityremove` is not a kill, and produces no loot. Use `lootinfo cow`
+to inspect a table from the server terminal. The shipped tables cover a
+starter set of common mobs; more advanced vanilla loot functions and
+conditions are not implemented yet. See
+[Items Shard configuration](shards/Amethyst.Shards.Items/README.md).
+
 ## Build / run
 
 ```bash
@@ -187,7 +213,7 @@ Manifest fields:
 - `requires`: capabilities that must have exactly one enabled provider
 - `dependsOn`: explicit Shard IDs (for non-substitutable dependencies)
 
-A dependency cycle, missing required provider, duplicate ID, incompatible API version, missing DLL, or invalid manifest causes a clear startup error. The Gameplay Shard requires the `world`, `items`, `recipes` and `entities` capabilities rather than referring directly to `overworld` or the built-in Items implementation; alternative providers can be substituted **without changing the gameplay binary**.
+A dependency cycle, missing required provider, duplicate ID, incompatible API version, missing DLL, or invalid manifest causes a clear startup error. The Gameplay Shard requires the `world`, `items`, `recipes`, `loot` and `entities` capabilities rather than referring directly to `overworld` or the built-in Items implementation; alternative providers can be substituted **without changing the gameplay binary**.
 
 To replace the built-in world provider, set `enabled: false` on the installed `overworld/shard.yaml`, install a trusted Shard that declares `provides: [world]`, and set `enabled: true` on that Shard. Its enable hook must register one `IShardWorld` service. Keep the same world save only if the new provider is actually save-format and generator compatible; otherwise choose a new `worldPath`.
 
@@ -213,7 +239,9 @@ shard disable gameplay
 shard disable items
 shard disable entities
 shard disable overworld
-shard enable gameplay   # automatically enables world, items, recipes and entities
+shard enable gameplay   # automatically enables world, items, recipes, loot and entities
+lootinfo cow
+entitykill 1
 iteminfo minecraft:diamond_pickaxe
 entityinfo minecraft:cow
 entityspawn cow 0 80 0

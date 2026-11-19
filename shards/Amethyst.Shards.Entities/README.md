@@ -78,6 +78,27 @@ for misc entities and players. `item` entities are handled by the
 existing drop system instead. Enabling a special-purpose type manually
 does not implement its required item, projectile or display metadata.
 
+## Loot drops
+
+Entity loot definitions belong exclusively to the **Items Shard**, not the
+Entities Shard. The Items Shard provides `IShardLootRegistry` with a
+bundled `loot-26.3.yml` starter set plus administrator overrides at
+`shards/data/items/loot/*.yml`. Loot root keys match entity IDs, including
+custom aliases; entries define item IDs, count ranges and chance. For example:
+
+```yaml
+guardian_cow:
+  Drops:
+    - { Item: minecraft:diamond, Min: 1, Max: 2, Chance: 1 }
+```
+
+`entitykill <runtime-id>` or lethal `TryDamage` emits one entity-death
+event. Gameplay rolls the Items Shard's loot and creates physical dropped
+items that players may collect. `entityremove` is a silent despawn,
+not a death. If no loot table exists, the entity drops nothing; a custom
+alias falls back to its vanilla base type unless a specific alias table
+is defined. Natural combat and vanilla kill modifiers remain future work.
+
 ## Console commands
 
 From the server terminal:
@@ -89,6 +110,7 @@ entityinfo 72
 entityspawn guardian_cow 0 80 0
 entities
 entityremove 1
+entitykill 2
 ```
 
 `entityspawn` takes a definition ID and **absolute** coordinates.

@@ -61,6 +61,82 @@ try
         entities.Snapshot().Length == 0,
         "Invulnerability, health, death and movement are authoritative");
 
+    Check(entities.DrainDeaths() is { Length: 1 } &&
+        entities.DrainDeaths().Length == 0,
+        "Entity deaths are reported exactly once, independently of despawning");
+    Check(entities.TrySpawn("cow", 1, 80, 1, out var toKill) &&
+        entities.TryKill(toKill.EntityId, out var killed) &&
+        killed.EntityId == toKill.EntityId &&
+        entities.DrainDeaths() is { Length: 1 } &&
+        !entities.TryKill(toKill.EntityId, out _),
+        "Explicit kill reports death exactly once");
+    string lootVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
+        "loot-26.3.yml");
+    string itemVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
+        "items-26.3.yml");
+    var itemCatalog = new ItemCatalog(itemVanilla);
+    var vanillaLoot = new LootCatalog(itemCatalog, lootVanilla);
+    Check(vanillaLoot.TableCount >= 10 &&
+        vanillaLoot.TryRollEntity("minecraft:cow", out var cowLoot, new Random(123)) &&
+        cowLoot.Length > 0 &&
+        itemCatalog.TryGetByIdentifier("beef", out var beef) &&
+        cowLoot.Any(d => d.ItemId == beef.ProtocolId && d.Count is >= 1 and <= 3),
+        "Bundled entity loot is resolved through the Items Shard");
+
+    string lootRoot = Path.Combine(temp, "loot");
+    Directory.CreateDirectory(lootRoot);
+    string lootFile = Path.Combine(lootRoot, "custom.yml");
+    File.WriteAllText(lootFile, """
+        cow:
+          Drops: []
+        guardian_cow:
+          Drops:
+            - { Item: minecraft:diamond_sword, Min: 3, Max: 3, Chance: 1 }
+            - { Item: minecraft:beef, Min: 1, Max: 1, Chance: 0 }
+        """);
+    var customLoot = new LootCatalog(itemCatalog, lootVanilla, lootRoot);
+    Check(customLoot.TryRollEntity("minecraft:cow", out var emptyLoot) &&
+        emptyLoot.Length == 0 &&
+        customLoot.TryRollEntity("amethyst:guardian_cow", out var aliasLoot, new Random(42)) &&
+        aliasLoot.Length == 3 && aliasLoot.All(d => d.Count == 1) &&
+        itemCatalog.TryGetByIdentifier("diamond_sword", out var sword) &&
+        aliasLoot.All(d => d.ItemId == sword.ProtocolId),
+        "Custom YAML overrides/aliases support empty tables, chances and splitting stacks");
+
+    void RejectLoot(string yaml, string label)
+    {
+        File.WriteAllText(lootFile, yaml);
+        bool rejected = false;
+        try { _ = new LootCatalog(itemCatalog, lootVanilla, lootRoot); }
+        catch (InvalidDataException) { rejected = true; }
+        Check(rejected, label);
+    }
+    RejectLoot("""
+        cow:
+          Drops:
+            - { Item: minecraft:not_an_item, Min: 1, Max: 1 }
+        """, "Loot rejects unknown item IDs");
+    RejectLoot("""
+        cow:
+          Drops:
+            - { Item: minecraft:beef, Min: 5, Max: 2 }
+        """, "Loot rejects inverted counts");
+    RejectLoot("""
+        cow:
+          Drops:
+            - { Item: minecraft:beef, Chance: 2 }
+        """, "Loot rejects probability above 1");
+    RejectLoot("""
+        cow:
+          Drops: []
+        cow:
+          Drops: []
+        """, "Loot rejects duplicate roots");
+    RejectLoot("""
+        cow:
+          ExoticEffect: true
+        """, "Loot rejects unsupported properties");
+
     File.WriteAllText(path, """
         cow:
           ProtocolId: 999

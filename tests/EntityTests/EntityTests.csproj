@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../shards/Amethyst.Shards.Entities/Amethyst.Shards.Entities.csproj" />
+    <ProjectReference Include="../../shards/Amethyst.Shards.Items/Amethyst.Shards.Items.csproj" />
   </ItemGroup>
 </Project>

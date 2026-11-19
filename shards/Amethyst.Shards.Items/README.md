@@ -5,6 +5,48 @@ Amethyst Core does not contain item definitions. Gameplay consumes the
 `IShardItemRegistry` service for stack sizes and validations in
 inventories, dropped-item entities and crafting/furnace menus.
 
+## Entity loot tables
+
+The Items Shard also owns `IShardLootRegistry`. The bundled starter tables
+are in `shards/Amethyst.Shards.Items/loot-26.3.yml` and are copied into the
+installed Items Shard when building. Place administrator overrides under
+**`shards/data/items/loot/**/*.yml`** or `*.yaml` (relative to
+`shardsDataDirectory`). No `Loot:` wrapper is required; the root key is the
+entity type whose loot is being configured.
+
+```yaml
+cow:
+  Drops:
+    - { Item: minecraft:beef, Min: 1, Max: 3, Chance: 1.0 }
+    - { Item: minecraft:leather, Min: 0, Max: 2, Chance: 0.65 }
+
+guardian_cow:
+  Drops:
+    - { Item: minecraft:diamond, Min: 1, Max: 2, Chance: 1.0 }
+
+zombie:
+  Drops: []  # explicitly drop nothing
+```
+
+`Item` must resolve to a valid Items Shard material. `Min` and `Max`
+are inclusive integers (0–64, defaults 1); `Chance` is a probability
+from 0 to 1 (default 1). Each entry rolls independently and splits
+outputs according to the item's actual max stack size. The same root
+entity type in user YAML **replaces** the bundled table; defining the
+same user root in multiple files is rejected. `Enabled: false` or
+`Drops: []` disables that entity's drops. Alias-specific tables take
+precedence over the vanilla base type's table; if no alias table exists,
+Gameplay falls back to the vanilla entity type. The server console
+`lootinfo cow` shows configured drops.
+
+These are **starter tables**, not a complete vanilla loot system: advanced
+loot conditions, looting enchantment, cooking by fire, equipment, XP and
+player-kill conditions are not supported. When an Entities-Shard-managed
+entity dies (`TryDamage` to zero or `TryKill`), Gameplay uses these
+tables to spawn ordinary pickable dropped items. Entity despawns do not
+create loot. Existing item-stack aliases cannot create distinguishable
+custom stack identities without item component support.
+
 ## File locations
 
 - Bundled vanilla definitions:

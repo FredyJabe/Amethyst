@@ -44,6 +44,13 @@ try
           Ingredients: [dirt]
           Result: { Id: iron_shovel, Amount: 1 }
         """);
+    string lootDir = Path.Combine(temp, "shards", "items", "loot");
+    Directory.CreateDirectory(lootDir);
+    File.WriteAllText(Path.Combine(lootDir, "custom.yml"), """
+        cow:
+          Drops:
+            - { Item: minecraft:diamond, Min: 1, Max: 1, Chance: 1 }
+        """);
     string entityDir = Path.Combine(temp, "shards", "entities", "definitions");
     Directory.CreateDirectory(entityDir);
     File.WriteAllText(Path.Combine(entityDir, "custom.yml"), """
@@ -145,6 +152,17 @@ try
     await host.LoadAsync();
     Check(host.GetService<IShardWorld>() is not null, "default overworld provider enabled");
     Check(host.GetService<IShardGameplay>() is not null, "gameplay enabled with world provider");
+    IShardLootRegistry lootTables = host.GetService<IShardLootRegistry>() ??
+        throw new Exception("FAIL: Items Shard loot registry not registered");
+    Check(lootTables.TableCount >= 10 &&
+        lootTables.TryRollEntity("minecraft:cow", out var diamondLoot, new Random(9)) &&
+        diamondLoot.Length == 1 &&
+        itemsRegistryLookup() == diamondLoot[0].ItemId &&
+        host.RegisteredConsoleCommands.Contains("lootinfo") &&
+        await host.TryExecuteConsoleAsync("lootinfo cow", CancellationToken.None),
+        "Items Shard registers editable YAML loot tables and console lookup");
+    int itemsRegistryLookup() => host.GetService<IShardItemRegistry>()!
+        .TryGetByIdentifier("diamond", out var item) ? item.ProtocolId : -1;
     IShardEntityRegistry entityTypes = host.GetService<IShardEntityRegistry>() ??
         throw new Exception("FAIL: Entities Shard service not registered");
     IShardEntityManager entityWorld = host.GetService<IShardEntityManager>() ??
@@ -302,6 +320,8 @@ try
     await host.DisableAsync("items");
     Check(host.GetService<IShardItemRegistry>() is null &&
         host.GetService<IShardRecipeRegistry>() is null &&
+        host.GetService<IShardLootRegistry>() is null &&
+        !host.RegisteredConsoleCommands.Contains("lootinfo") &&
         !host.RegisteredConsoleCommands.Contains("recipes") &&
         !host.RegisteredConsoleCommands.Contains("iteminfo"),
         "Disabling Items Shard unregisters its definitions and iteminfo command");
@@ -318,6 +338,7 @@ try
         host.GetService<IShardGameplay>() is not null &&
         host.GetService<IShardItemRegistry>() is not null &&
         host.GetService<IShardRecipeRegistry>() is not null &&
+        host.GetService<IShardLootRegistry>() is not null &&
         host.GetService<IShardEntityManager>() is not null &&
         host.GetService<IShardEntityRegistry>() is not null,
         "Enabling Gameplay automatically enables World, Items, Recipe and Entity providers");

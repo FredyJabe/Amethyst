@@ -1364,6 +1364,36 @@ try
             "Real server use-on-block sends the Open Screen packet first");
     }
 
+    // Kill a real Entities-Shard instance and verify the Items-Shard YAML
+    // produces physical, pickable GroundItemStore stacks without repeat drops.
+    var lootTypes = new EntityCatalog(Path.Combine(solutionRoot.FullName,
+        "shards", "Amethyst.Shards.Entities", "entities-26.3.yml"));
+    var lootWorld = new EntityManager(lootTypes);
+    var lootTables = new LootCatalog(itemsCatalog, Path.Combine(solutionRoot.FullName,
+        "shards", "Amethyst.Shards.Items", "loot-26.3.yml"));
+    var lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
+        Path.Combine(stationsRoot, "loot-gameplay"), itemsCatalog, recipesCatalog,
+        lootWorld, lootTables, lootTypes);
+    Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var testCow) &&
+        lootWorld.TryKill(testCow.EntityId, out _),
+        "Prepare an entity death for the Gameplay loot pipeline");
+    await lootGame.TickEntitiesAsync(CancellationToken.None);
+    GroundItem[] spawnedDrops = lootGame.GroundItemsForTests;
+    Check(itemsCatalog.TryGetByIdentifier("beef", out var beefLoot) &&
+        spawnedDrops.Any(d => d.ItemId == beefLoot.ProtocolId && d.Count is >= 1 and <= 3) &&
+        spawnedDrops.All(d => d.X == 11 && d.Z == 12),
+        "Entity death uses Items YAML to spawn real world-ground item stacks");
+    await lootGame.TickEntitiesAsync(CancellationToken.None);
+    Check(lootGame.GroundItemsForTests.Length == spawnedDrops.Length &&
+        lootWorld.DrainDeaths().Length == 0,
+        "Processing one entity death never duplicates dropped loot");
+    Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var despawnCow) &&
+        lootWorld.TryRemove(despawnCow.EntityId),
+        "Prepare silent entity despawn without death");
+    await lootGame.TickEntitiesAsync(CancellationToken.None);
+    Check(lootGame.GroundItemsForTests.Length == spawnedDrops.Length,
+        "An ordinary entity despawn does not generate loot");
+
     using (var stream = new MemoryStream())
     {
         using var wire = new PacketChannel(stream);
