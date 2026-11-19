@@ -3,7 +3,7 @@ namespace Amethyst;
 public static class PlayerPackets
 {
     // Player entity ID for the 26.3 vanilla entity registry (not the entity EID).
-    public const int PlayerEntityType = 165;
+    public const int PlayerEntityType = 159;
 
     public static async Task SendVisibleAsync(PacketChannel receiver, ConnectedPlayer subject, CancellationToken ct)
     {
