@@ -1,3 +1,4 @@
+using System.Text;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -143,7 +144,7 @@ internal static class ItemComponentWire
 
     private static void WriteNbtUtf8(PacketWriter writer, string value)
     {
-        byte[] bytes = Protocol.EncodeUtf8(value);
+        byte[] bytes = Encoding.UTF8.GetBytes(value);
         if (bytes.Length > short.MaxValue)
             throw new InvalidDataException("NBT text too large.");
         writer.WriteInt16((short)bytes.Length);
