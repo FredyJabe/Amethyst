@@ -21,9 +21,11 @@ public sealed class ConnectedPlayer : IShardPlayer
             throw new ArgumentOutOfRangeException(nameof(mode));
         Volatile.Write(ref _gameMode, (int)mode);
         CancelMining();
+        UseState.StopShield();
     }
     public PlayerInventory Inventory { get; }
     public PlayerVitals Vitals { get; }
+    public PlayerUseState UseState { get; } = new();
     public PlayerExperience Experience { get; }
     private long _editWindowStarted;
     private int _editCount;
