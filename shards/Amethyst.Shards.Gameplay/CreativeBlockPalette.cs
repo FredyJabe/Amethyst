@@ -8,6 +8,10 @@ public static class CreativeBlockPalette
 {
     private static readonly Dictionary<int, ushort> States = new()
     {
+        [553] = 12962, // anvil (facing=north)
+        [554] = 12966, // chipped anvil
+        [555] = 12970, // damaged anvil
+        [1511] = 24129, // grindstone (floor, north)
         [215] = 292, // minecraft:oak_leaves: distance=7,persistent=true,waterlogged=false
         [216] = 320, // minecraft:spruce_leaves: distance=7,persistent=true,waterlogged=false
         [217] = 348, // minecraft:birch_leaves: distance=7,persistent=true,waterlogged=false
