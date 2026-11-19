@@ -166,6 +166,97 @@ internal static class DurabilityFeatureTests
                     false, out _),
                 "Mining tools perform genuine block transformations and reject invalid faces");
 
+            // Exercise the actual revision-checked anvil and grindstone
+            // menus, including XP costs and authoritative inventory output.
+            var repairWorldSettings = new ServerOptions
+            {
+                Seed = 991728, GeneratorVersion = 5,
+                ViewDistance = 2, SaveGeneratedChunks = false,
+                WorldPath = worldPath
+            };
+            await using (var repairWorld = new TerrainWorld(repairWorldSettings))
+            {
+                var stations = new WorkstationManager(null, worldPath,
+                    repairWorld, items, recipes);
+                var repairInventory = new PlayerInventory(null, Guid.NewGuid(), items);
+                Guid anvilPlayerId = Guid.NewGuid();
+                var repairExperience = new PlayerExperience(null, anvilPlayerId);
+                Check(items.TryGetByIdentifier("oak_planks",
+                    out var repairPlanks) &&
+                    repairInventory.TryCreativeSet(36, wood.ProtocolId, 1, true) &&
+                    repairInventory.TryCreativeSet(37, repairPlanks.ProtocolId, 2, true),
+                    "Prepare damaged wooden tool and matching anvil materials");
+                var (repairSlots, repairCursor, repairRev) = repairInventory.Snapshot();
+                repairSlots[36] = repairSlots[36] with { Damage = 29 };
+                Check(repairInventory.TryCommitWindow(repairRev, repairSlots,
+                    repairCursor), "Authoritative damaged tool fixture accepted");
+                repairExperience.Award((int)PlayerExperience.RequiredTotalForLevel(5));
+                var anvilMenu = stations.Open(anvilPlayerId,
+                    new StationPos(1, 81, 1), StationKind.Anvil);
+                Check(StationProtocol.MenuType(StationKind.Anvil) == 8 &&
+                    WorkstationManager.FromBlockState(12962) == StationKind.Anvil &&
+                    CreativeBlockPalette.TryGetState(553, out _),
+                    "Anvil opens with Java 26.3 menu type and is placeable");
+                Check(stations.Click(anvilPlayerId, repairInventory,
+                    new InventoryClick(anvilMenu.WindowId, 0, 30, 0, 0)) &&
+                    stations.Click(anvilPlayerId, repairInventory,
+                    new InventoryClick(anvilMenu.WindowId, 1, 0, 0, 0)) &&
+                    stations.Click(anvilPlayerId, repairInventory,
+                    new InventoryClick(anvilMenu.WindowId, 2, 31, 0, 0)) &&
+                    stations.Click(anvilPlayerId, repairInventory,
+                    new InventoryClick(anvilMenu.WindowId, 3, 1, 0, 0)),
+                    "Anvil accepts real tool and material container clicks");
+                var preview = stations.Content(anvilPlayerId, repairInventory);
+                int anvilLevelCost = stations.Data(anvilPlayerId).Burn;
+                Check(preview is { } anvilContent &&
+                    anvilContent.Slots[2].ItemId == wood.ProtocolId &&
+                    anvilContent.Slots[2].Damage < 29 &&
+                    anvilLevelCost > 0,
+                    "Anvil displays repaired tool and required level cost");
+                int experienceBefore = repairExperience.Snapshot().Level;
+                Check(stations.Click(anvilPlayerId, repairInventory,
+                    new InventoryClick(anvilMenu.WindowId, 4, 2, 0, 0),
+                    repairExperience) &&
+                    repairInventory.Snapshot().Cursor.ItemId == wood.ProtocolId &&
+                    repairInventory.Snapshot().Cursor.Damage < 29 &&
+                    repairExperience.Snapshot().Level < experienceBefore &&
+                    stations.Content(anvilPlayerId, repairInventory)?.Slots[0].Count == 0,
+                    "Anvil consumes materials and XP atomically when output is taken");
+                Check(stations.Close(anvilPlayerId).Length == 0,
+                    "Anvil keeps no phantom inputs after successful repair");
+
+                var grindInventory = new PlayerInventory(null, Guid.NewGuid(), items);
+                Check(grindInventory.TryCreativeSet(36, wood.ProtocolId, 1, true) &&
+                    grindInventory.ConfigureHeld(2, true, false) &&
+                    grindInventory.DamageSlot(36, wood.ProtocolId, 1,
+                        random: new FixedRandom(false)),
+                    "Prepare damaged enchanted tool for grindstone");
+                Guid grindPlayerId = Guid.NewGuid();
+                var grindMenu = stations.Open(grindPlayerId,
+                    new StationPos(2, 81, 1), StationKind.Grindstone);
+                Check(StationProtocol.MenuType(StationKind.Grindstone) == 15 &&
+                    WorkstationManager.FromBlockState(24129) == StationKind.Grindstone &&
+                    CreativeBlockPalette.TryGetState(1511, out _),
+                    "Grindstone uses correct menu type and blockstate mapping");
+                Check(stations.Click(grindPlayerId, grindInventory,
+                    new InventoryClick(grindMenu.WindowId, 0, 30, 0, 0)) &&
+                    stations.Click(grindPlayerId, grindInventory,
+                    new InventoryClick(grindMenu.WindowId, 1, 0, 0, 0)),
+                    "Grindstone accepts a damaged enchanted tool");
+                var grindPreview = stations.Content(grindPlayerId, grindInventory);
+                Check(grindPreview is { } grindContent &&
+                    grindContent.Slots[2].Damage == 1 &&
+                    grindContent.Slots[2].Unbreaking == 0 &&
+                    !grindContent.Slots[2].Mending,
+                    "Grindstone result strips enchantments but keeps existing damage");
+                Check(stations.Click(grindPlayerId, grindInventory,
+                    new InventoryClick(grindMenu.WindowId, 2, 2, 0, 0)) &&
+                    grindInventory.Snapshot().Cursor.Damage == 1 &&
+                    !grindInventory.Snapshot().Cursor.Mending &&
+                    stations.Close(grindPlayerId).Length == 0,
+                    "Taking grindstone output consumes one input without duplicating it");
+            }
+
             var settings = new ServerOptions
             {
                 Seed = 991728, GeneratorVersion = 5,
