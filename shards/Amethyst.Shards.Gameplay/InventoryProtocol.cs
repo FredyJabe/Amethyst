@@ -3,6 +3,10 @@ namespace Amethyst;
 public readonly record struct ItemStack(int ItemId, int Count)
 {
     public static readonly ItemStack Empty = new(0, 0);
+
+    /// <summary>Accumulated item damage. Zero is undamaged; valid nonzero
+    /// damage must be strictly below the item definition's MaxDurability.</summary>
+    public int Damage { get; init; }
 }
 
 public readonly record struct InventoryClick(int Window, int Revision, int Slot,
@@ -22,8 +26,16 @@ public static class InventoryProtocol
         writer.WriteVarInt(stack.Count);
         if (stack.Count == 0) return;
         writer.WriteVarInt(stack.ItemId);
-        writer.WriteVarInt(0); // added data components
+        // Java 26.3 minecraft:data_component_type registry: damage = 3.
+        // The client's default item components supply max_damage. Only the
+        // damage override is needed to display the durability bar.
+        writer.WriteVarInt(stack.Damage > 0 ? 1 : 0);
         writer.WriteVarInt(0); // removed data components
+        if (stack.Damage > 0)
+        {
+            writer.WriteVarInt(3); // minecraft:damage
+            writer.WriteVarInt(stack.Damage);
+        }
     }
 
     public static Task SendContentAsync(PacketChannel channel, PlayerInventory inventory, CancellationToken ct)
