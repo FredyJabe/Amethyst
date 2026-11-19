@@ -9,7 +9,7 @@
     <ProjectReference Include="../../src/Amethyst.csproj" />
     <None Include="items-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="recipes-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="loot-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="skills-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="InstallShard" AfterTargets="Build">
     <MakeDir Directories="$(MSBuildProjectDirectory)/../../shards/installed/items" />
@@ -17,6 +17,6 @@
     <Copy SourceFiles="$(MSBuildProjectDirectory)/shard.yaml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)/items-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)/recipes-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
-    <Copy SourceFiles="$(MSBuildProjectDirectory)/loot-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/skills-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
   </Target>
 </Project>

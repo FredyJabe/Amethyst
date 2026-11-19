@@ -383,28 +383,41 @@ public sealed class ItemsShard : IShard
                 """ + Environment.NewLine);
         var recipes = new RecipeCatalog(catalog,
             Path.Combine(directory, "recipes-26.3.yml"), recipeDirectory);
-        string lootDirectory = Path.Combine(ctx.DataDirectory, "loot");
-        Directory.CreateDirectory(lootDirectory);
-        string lootExample = Path.Combine(lootDirectory, "example-loot.yml");
-        if (!File.Exists(lootExample))
-            File.WriteAllText(lootExample, """
-                # YAML entity loot tables; uncomment to configure.
+        string skillsDirectory = Path.Combine(ctx.DataDirectory, "skills");
+        Directory.CreateDirectory(skillsDirectory);
+        string exampleSkill = Path.Combine(skillsDirectory, "example-skills.yml");
+        if (!File.Exists(exampleSkill))
+            File.WriteAllText(exampleSkill, """
+                # Entity death skills, owned by the Items Shard. Uncomment to enable.
                 # cow:
-                #   Drops:
-                #     - { Item: minecraft:beef, Min: 1, Max: 3 }
-                #     - { Item: minecraft:leather, Min: 0, Max: 2, Chance: 0.5 }
+                #   Skills:
+                #     - 'dropItem{item=minecraft:beef;amount=1-3} ~onDeath'
+                #     - 'dropItem{item=minecraft:leather;amount=0-2;chance=0.5} @self ~onDeath'
                 #
                 # guardian_cow:
-                #   Drops:
-                #     - { Item: minecraft:diamond, Min: 1, Max: 2 }
+                #   Skills:
+                #     - 'dropItem{item=minecraft:diamond;amount=1-2} ~onDeath'
                 #
-                # To disable a bundled table, define Drops: [] or Enabled: false.
+                # To disable vanilla drops: Skills: [] or Enabled: false.
                 """ + Environment.NewLine);
-        var loot = new LootCatalog(catalog,
-            Path.Combine(directory, "loot-26.3.yml"), lootDirectory);
+        // Prevent silently losing administrator drops defined by an older
+        // experimental version. Leave existing files untouched for migration.
+        string oldLootDirectory = Path.Combine(ctx.DataDirectory, "loot");
+        if (Directory.Exists(oldLootDirectory))
+            foreach (string file in Directory.EnumerateFiles(oldLootDirectory, "*",
+                SearchOption.AllDirectories)
+                .Where(p => p.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) ||
+                            p.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase)))
+                if (File.ReadLines(file).Any(line =>
+                    !string.IsNullOrWhiteSpace(line) && !line.TrimStart().StartsWith('#')))
+                    throw new InvalidDataException(
+                        $"Legacy loot YAML '{file}' requires migration to the Items Shard Skills format: " +
+                        "dropItem{item=...;amount=...} ~onDeath. See Items Shard README.");
+        var skills = new SkillCatalog(catalog,
+            Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
         ctx.RegisterService<IShardItemRegistry>(catalog);
         ctx.RegisterService<IShardRecipeRegistry>(recipes);
-        ctx.RegisterService<IShardLootRegistry>(loot);
+        ctx.RegisterService<IShardSkillRegistry>(skills);
         ctx.RegisterConsoleCommand("iteminfo", (args, token) =>
         {
             string query = args.Trim();
@@ -437,27 +450,22 @@ public sealed class ItemsShard : IShard
                 (ids.Length == 30 ? " … (showing first 30)" : ""));
             return Task.CompletedTask;
         });
-        ctx.RegisterConsoleCommand("lootinfo", (args, token) =>
+        ctx.RegisterConsoleCommand("skillinfo", (args, token) =>
         {
             string key = args.Trim();
-            bool exists = loot.TryRollEntity(key, out _, new Random(0));
-            ShardLootTable? rule = loot.Definitions.FirstOrDefault(t =>
-                string.Equals(t.EntityId, key, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(t.EntityId, key.StartsWith("minecraft:", StringComparison.OrdinalIgnoreCase)
-                    ? key["minecraft:".Length..] : key, StringComparison.OrdinalIgnoreCase));
-            if (!exists || rule is null)
-                ctx.Log("Usage: lootinfo <entity-id> (known configured loot table)");
+            if (!skills.TryGetSkills(key, out var selected))
+                ctx.Log("Usage: skillinfo <entity-id> (configured entity skills)");
             else
-                ctx.Log($"Loot {rule.EntityId}: " +
-                    (rule.Drops.Count == 0 ? "(no drops)" :
-                        string.Join(", ", rule.Drops.Select(d =>
-                        $"{catalog.All[d.ItemId].Identifier} {d.Min}-{d.Max} @ {d.Chance:P0}"))));
+                ctx.Log($"Skills {key}: " + (selected.Count == 0 ? "(none)" :
+                    string.Join(", ", selected.Select(skill =>
+                        $"dropItem{{item={catalog.All[skill.ItemId].Identifier};" +
+                        $"amount={skill.Min}-{skill.Max};" +
+                        $"chance={skill.Chance.ToString(CultureInfo.InvariantCulture)}}} ~onDeath"))));
             return Task.CompletedTask;
         });
-        ctx.Log($"Registered {catalog.Count} vanilla Java {catalog.MinecraftVersion} " +
-            $"item definitions, {recipes.RecipeCount} YAML recipes, " +
-            $"and {loot.TableCount} entity loot tables; " +
-            $"item overrides: {definitions}; recipe overrides: {recipeDirectory}; loot: {lootDirectory}.");
+        ctx.Log($"Registered {catalog.Count} Java {catalog.MinecraftVersion} items, " +
+            $"{recipes.RecipeCount} recipes, and {skills.Definitions.Count} skills for " +
+            $"{skills.OwnerCount} entity types; Skills YAML: {skillsDirectory}.");
         return Task.CompletedTask;
     }
 

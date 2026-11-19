@@ -22,7 +22,7 @@ public sealed class MinecraftServer
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
     private readonly IShardEntityManager? _entities;
-    private readonly IShardLootRegistry? _loot;
+    private readonly IShardSkillRegistry? _skills;
     private readonly IShardEntityRegistry? _entityTypes;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
@@ -37,7 +37,7 @@ public sealed class MinecraftServer
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
         IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
-        IShardEntityManager? entities = null, IShardLootRegistry? loot = null,
+        IShardEntityManager? entities = null, IShardSkillRegistry? skills = null,
         IShardEntityRegistry? entityTypes = null)
     {
         _options = options;
@@ -46,7 +46,7 @@ public sealed class MinecraftServer
         _inventoryDirectory = inventoryDirectory;
         _items = items;
         _entities = entities;
-        _loot = loot;
+        _skills = skills;
         _entityTypes = entityTypes;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers, entities is null ? null : entities.AllocateEntityId);
@@ -836,21 +836,21 @@ public sealed class MinecraftServer
     {
         if (_entities is null) return;
         // Death notifications are emitted by the Entities Shard. Items owns
-        // the loot rolls; Gameplay alone handles physical dropped-item entities.
+        // death-triggered skills; Gameplay alone handles physical dropped items.
         // Drain before the snapshot so a death cannot be rendered after its drop.
-        if (_groundItems is not null && _loot is not null && _entityTypes is not null)
+        if (_groundItems is not null && _skills is not null && _entityTypes is not null)
         {
             foreach (ShardEntityInstance dead in _entities.DrainDeaths())
             {
                 string typeId = dead.DefinitionId;
-                if (!_loot.TryRollEntity(typeId, out ShardLootStack[] results))
+                if (!_skills.TryExecute(typeId, ShardSkillTrigger.OnDeath, out ShardSkillDrop[] results))
                 {
                     // Custom entity aliases inherit their vanilla base type's
-                    // table unless Items provides an explicit alias override.
+                    // skills unless Items provides an explicit alias override.
                     if (_entityTypes.TryGetById(dead.ProtocolId, out var vanilla))
-                        _loot.TryRollEntity(vanilla.Identifier, out results);
+                        _skills.TryExecute(vanilla.Identifier, ShardSkillTrigger.OnDeath, out results);
                 }
-                foreach (ShardLootStack drop in results)
+                foreach (ShardSkillDrop drop in results)
                     if (!_groundItems.TrySpawn(drop.ItemId, drop.Count,
                         dead.X, dead.Y + 0.2, dead.Z, out _))
                         Console.WriteLine($"[loot] Could not spawn item {drop.ItemId} x{drop.Count} for {typeId}");
