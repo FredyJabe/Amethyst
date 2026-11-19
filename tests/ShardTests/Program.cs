@@ -149,11 +149,13 @@ try
         throw new Exception("FAIL: Entities Shard service not registered");
     IShardEntityManager entityWorld = host.GetService<IShardEntityManager>() ??
         throw new Exception("FAIL: Entities runtime service not registered");
+    ShardEntityDefinition cowType = default;
+    ShardEntityInstance spawned = default, guardian = default;
     Check(entityTypes.MinecraftVersion == "26.3" && entityTypes.Count == 161 &&
         entityTypes.All.Count == 161 &&
         entityTypes.TryGetById(72, out var itemEntity) &&
         itemEntity.Identifier == "minecraft:item" &&
-        entityTypes.TryGetByIdentifier("cow", out var cowType) &&
+        entityTypes.TryGetByIdentifier("cow", out cowType) &&
         cowType.Display == "Farm Cow" && cowType.MaxHealth == 30,
         "Entities Shard exposes pinned 26.3 entity IDs and YAML overrides");
     Check(entityTypes.TryGetByIdentifier("guardian_cow", out var guardianType) &&
@@ -164,8 +166,8 @@ try
     Check(!entityWorld.TrySpawn("item", 0, 70, 0, out _) &&
         !entityWorld.TrySpawn("not_a_real_mob", 0, 70, 0, out _) &&
         !entityWorld.TrySpawn("cow", double.NaN, 70, 0, out _) &&
-        entityWorld.TrySpawn("cow", 2, 70, 3, out var spawned) &&
-        entityWorld.TrySpawn("guardian_cow", 3, 70, 4, out var guardian) &&
+        entityWorld.TrySpawn("cow", 2, 70, 3, out spawned) &&
+        entityWorld.TrySpawn("guardian_cow", 3, 70, 4, out guardian) &&
         spawned.EntityId != guardian.EntityId &&
         spawned.ProtocolId == cowType.ProtocolId &&
         entityWorld.AllocateEntityId() > guardian.EntityId,

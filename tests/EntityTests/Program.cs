@@ -45,8 +45,9 @@ try
         "YAML overrides and aliases apply without changing the protocol IDs");
 
     var entities = new EntityManager(catalog);
+    ShardEntityInstance two = default;
     Check(entities.TrySpawn("unbreakable_cow", 1, 80, 1, out var one) &&
-        entities.TrySpawn("cow", 2, 80, 2, out var two) &&
+        entities.TrySpawn("cow", 2, 80, 2, out two) &&
         one.EntityId != two.EntityId && one.Uuid != two.Uuid &&
         !entities.TrySpawn("item", 1, 80, 1, out _) &&
         !entities.TrySpawn("cow", double.PositiveInfinity, 1, 1, out _),
