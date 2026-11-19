@@ -255,6 +255,14 @@ public sealed partial class MinecraftServer
                         await HandleAttackAsync(player, entityId, lifetime.Token);
                         break;
                     }
+                    case EntityInteractionProtocol.ServerboundInteract:
+                    {
+                        EntityInteraction interaction =
+                            EntityInteractionProtocol.Read(packet.Value);
+                        await HandleEntityInteractAsync(player, interaction,
+                            lifetime.Token);
+                        break;
+                    }
                     case 0x1C: // KeepAlive reply
                         _ = reader.ReadInt64(); reader.RequireEnd();
                         break;
@@ -983,6 +991,7 @@ public sealed partial class MinecraftServer
             await TickExperienceOrbsAsync(ct);
             await TickLivingEntitiesAsync(ct);
             await TickProjectilesAsync(ct);
+            await TickWoolRegrowthAsync(ct);
     }
 
     /// <summary>One authoritative 20Hz tick for loose items. Exposed internally
