@@ -1353,6 +1353,21 @@ public static class MiningRules
             held.Kind == block.ToolKind;
     }
 
+    /// <summary>Survival block-break wear. Only successfully broken blocks
+    /// can damage tools; hardness-zero blocks cost nothing.</summary>
+    public static int DurabilityCostForBlock(ushort state, int heldItem,
+        Amethyst.Shards.IShardItemRegistry? items)
+    {
+        if (ForState(state).Hardness <= 0 || items is null ||
+            !items.TryGetById(heldItem, out var item) ||
+            item.MaxDurability <= 0)
+            return 0;
+        if (Tools.ContainsKey(heldItem)) return 1;
+        if (item.Identifier.EndsWith("_sword", StringComparison.Ordinal)) return 2;
+        if (item.Identifier == "minecraft:shears") return 1;
+        return 0;
+    }
+
     public static int RequiredMilliseconds(ushort state, int heldItem)
     {
         BlockInfo info = ForState(state);
