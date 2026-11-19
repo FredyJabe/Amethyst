@@ -610,7 +610,15 @@ public sealed class MinecraftServer
         if (content is not { } menu) return;
         await StationProtocol.SendContentAsync(player.Connection, menu.WindowId,
             menu.Revision, menu.Slots, menu.Cursor, ct);
-        if (_stations.GetMenu(player.PlayerUuid)?.Kind != StationKind.Crafting)
+        StationKind? kind = _stations.GetMenu(player.PlayerUuid)?.Kind;
+        if (kind == StationKind.Anvil)
+        {
+            var data = _stations.Data(player.PlayerUuid);
+            await StationProtocol.SendDataAsync(player.Connection,
+                menu.WindowId, 0, data.Burn, ct); // anvil level cost
+        }
+        else if (kind is StationKind.Furnace or StationKind.Smoker or
+            StationKind.BlastFurnace)
         {
             var data = _stations.Data(player.PlayerUuid);
             await StationProtocol.SendDataAsync(player.Connection, menu.WindowId, 0, data.Burn, ct);
@@ -633,10 +641,16 @@ public sealed class MinecraftServer
             await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
             return;
         }
-        bool changed = _stations.Click(player.PlayerUuid, player.Inventory, click);
+        bool changed = _stations.Click(player.PlayerUuid, player.Inventory,
+            click, player.Experience,
+            player.GameMode == PlayerGameMode.Creative);
         // Even rejected predictions need an authoritative menu resync.
         await SendStationContentAsync(player, ct);
-        if (!changed || active.Kind == StationKind.Crafting) return;
+        if (changed && active.Kind == StationKind.Anvil)
+            await ExperienceProtocol.SendExperienceAsync(player.Connection,
+                player.Experience, ct);
+        if (!changed || active.Kind is StationKind.Crafting or
+            StationKind.Anvil or StationKind.Grindstone) return;
         foreach (ConnectedPlayer observer in _players.Snapshot().Where(p =>
             p.Ready && p.ConnectionId != player.ConnectionId &&
             _stations.GetMenu(p.PlayerUuid)?.Position == active.Position))
