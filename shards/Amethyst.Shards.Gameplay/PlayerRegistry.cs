@@ -23,10 +23,12 @@ public sealed class ConnectedPlayer : IShardPlayer
         CancelMining();
         UseState.StopShield();
         UseState.CancelCharge();
+        Flight.End();
     }
     public PlayerInventory Inventory { get; }
     public PlayerVitals Vitals { get; }
     public PlayerUseState UseState { get; } = new();
+    public PlayerFlightState Flight { get; } = new();
     public PlayerExperience Experience { get; }
     private long _editWindowStarted;
     private int _editCount;
