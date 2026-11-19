@@ -94,6 +94,10 @@ change the base material's physical capacity, durability, or block nature.
 
 ### Item components (Java 26.3 / protocol 777)
 
+For the **complete, numbered registry of all 122 components** (including
+unimplemented codecs), see [COMPONENTS.md](COMPONENTS.md).
+
+
 **Mythic-style top-level fields** and the explicit `Components` map
 can be used in your item definition YAML:
 
