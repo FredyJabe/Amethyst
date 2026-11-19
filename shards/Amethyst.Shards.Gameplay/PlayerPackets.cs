@@ -21,6 +21,13 @@ public static class PlayerPackets
             p.WriteByte(ToAngle(pos.Yaw));
             p.WriteVarInt(0); // auxiliary data
         }, ct);
+        ItemStack chest = subject.Inventory.Snapshot().Slots[6];
+        if (chest.Count > 0)
+            await FlightProtocol.SendElytraEquipmentAsync(receiver,
+                subject.EntityId, chest, ct);
+        if (subject.Flight.IsGliding)
+            await FlightProtocol.SendGlidingAsync(receiver,
+                subject.EntityId, true, ct);
     }
 
     public static Task SendTabEntryAsync(PacketChannel receiver, ConnectedPlayer subject, CancellationToken ct) =>
