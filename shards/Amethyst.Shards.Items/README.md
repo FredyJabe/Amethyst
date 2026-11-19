@@ -28,6 +28,10 @@ guardian_cow:
   Skills:
     - 'dropItem{item=minecraft:diamond;amount=1-2;chance=1} ~onDeath'
 
+sheep:
+  Skills:
+    - 'dropItem{item=minecraft:white_wool;amount=1-3} ~onShear'
+
 zombie:
   Skills: [] # Explicitly suppress this entity's default drops
 ```
@@ -37,8 +41,9 @@ Supported mechanic: `dropItem`, with these parameters: `item`
 `a`) is an inclusive integer/range, `0-64`, default `1`;
 `chance` (or `c`) is a per-skill independent probability from
 0 to 1, default `1`. A skill can be written with or without
-`@self`; both drop at the dying entity's location. Only
-`~onDeath` is currently executable; unsupported triggers,
+`@self`; both drop at the event entity's location. The
+Entities Shard registers `~onMilk` and `~onShear`, alongside
+the built-in `~onDeath`. Unsupported triggers,
 target selectors, mechanics and parameters cause validation errors
 rather than being silently ignored. Stack quantities are split to
 respect the configured item stack limit.
@@ -51,6 +56,15 @@ Shard's bundled skills for that root; independent skill packs
 registered by other Shards combine through Core; duplicate user roots and malformed expressions
 cause a startup error. Run `skillinfo cow` in the server console
 to inspect its configured event skills.
+
+The Entities Shard registers `onMilk` / `onShear` triggers and
+provides validated species and sheared-state interactions. Gameplay
+handles bucket-to-milk conversion and dispatches `~onMilk`; when
+a sheep is sheared, Gameplay dispatches `~onShear`, which runs
+the configured Items `dropItem` skill to spawn wool. Each sheep
+can be sheared once until regrowth is implemented. The vanilla
+starter sheep skill emits white wool; sheep colours and shears
+durability are not yet represented by the current item/entity data.
 
 The Entities Shard emits a one-time death event on `TryKill` or
 lethal `TryDamage`. Gameplay dispatches `~onDeath` via

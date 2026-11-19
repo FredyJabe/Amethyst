@@ -103,6 +103,32 @@ Other triggers and actions are not implemented yet.
 See [the Items Shard guide](../Amethyst.Shards.Items/README.md)
 for parameters and YAML validation rules.
 
+## Milking and shearing triggers
+
+Entities registers the `~onMilk` and `~onShear` triggers
+with Amethyst Core's `IShardSkillEngine`. The `IShardEntityInteractions`
+service validates the living target and stores sheared state;
+it does **not** parse skills or mint items.
+
+Right-clicking a cow, goat, or mooshroom with an empty bucket
+converts one bucket into a milk bucket, then dispatches `~onMilk`.
+Right-clicking a sheep with shears marks it sheared and emits
+`~onShear`; the Items Shard supplies the default wool-drop skill:
+
+```yaml
+sheep:
+  Skills:
+    - 'dropItem{item=minecraft:white_wool;amount=1-3} ~onShear'
+```
+
+Custom aliases inherit the underlying species' interaction rules.
+Any enabled Shard can register a skill using those event triggers;
+an additional action is only executed after successful, in-range
+interactions. Client packet 0x1A is validated, offhand remains
+unsupported until Gameplay models that slot, and a second shearing
+cannot duplicate drops. There is no sheep grazing/regrowth, coloured
+wool, sheared visual metadata or shears durability yet.
+
 ## Console commands
 
 From the server terminal:

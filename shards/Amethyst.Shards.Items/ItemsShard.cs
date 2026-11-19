@@ -392,6 +392,7 @@ public sealed class ItemsShard : IShard
                 # cow:
                 #   Skills:
                 #     - 'dropItem{item=minecraft:beef;amount=1-3} ~onDeath'
+                #     - 'dropItem{item=minecraft:emerald;amount=1} ~onMilk'
                 #     - 'dropItem{item=minecraft:leather;amount=0-2;chance=0.5} @self ~onDeath'
                 #
                 # guardian_cow:

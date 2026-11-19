@@ -212,10 +212,34 @@ entities. Gameplay owns ground-item physics/pickup/persistence;
 `entityremove` never dispatches a death event. Use `skillinfo cow`
 to inspect the combined registered skills.
 
-The initial implementation has `dropItem` and `~onDeath` only.
+The Entities Shard now registers `~onMilk` and `~onShear` in Core
+and exposes `IShardEntityInteractions`. Gameplay validates the Java
+26.3 `interact` packet (0x1A), reach and main-hand item before
+applying the interaction. Cows, goats and mooshrooms convert a held
+empty bucket into a milk bucket (including safe stacked-bucket
+inventory handling). Sheep are sheared only once per spawn; their
+wool comes from the Items Shard's `dropItem` skill:
+
+```yaml
+sheep:
+  Skills:
+    - 'dropItem{item=minecraft:mutton;amount=1-2} ~onDeath'
+    - 'dropItem{item=minecraft:white_wool;amount=1-3} ~onShear'
+```
+
+Both triggers can be used by any Shard's skills. For example,
+an administrator could add `dropItem{item=minecraft:emerald;amount=1}`
+with `~onMilk` to the cow skills, creating an additional reward.
+The built-in physical actions do not require a skill definition;
+the skill dispatcher runs **after a successful interaction**.
+
+The initial implementation has the `dropItem` mechanic plus
+`~onDeath`, `~onMilk` and `~onShear` triggers.
 Other mechanics and triggers can be added by enabled Shards;
 there is no full MythicMobs runtime or advanced Minecraft loot
-condition/enchantment support yet.
+condition/enchantment support yet. Sheep wool colour, visual
+sheared-flag metadata, grazing/regrowth, mooshroom transformations,
+and shears durability on this interaction remain future work.
 
 Old experimental `items/loot/*.yml` files with active `Drops:`
 entries require manual migration to `Skills:` under
