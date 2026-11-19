@@ -652,11 +652,11 @@ public sealed class MinecraftServer
         PlayerPose pose = player.Pose;
         foreach (ItemStack item in stacks)
         {
-            int inserted = player.Inventory.Give(item.ItemId, item.Count);
+            int inserted = player.Inventory.GiveStack(item);
             int left = item.Count - inserted;
             if (left > 0 && (_groundItems is null ||
-                !_groundItems.TrySpawn(item.ItemId, left, pose.X, pose.Y + 0.2,
-                    pose.Z, out _)))
+                !_groundItems.TrySpawn(item with { Count = left },
+                    pose.X, pose.Y + 0.2, pose.Z, out _)))
                 Console.WriteLine($"[station] Unable to return {left} of item {item.ItemId} " +
                     $"for {player.Username}");
         }
