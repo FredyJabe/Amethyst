@@ -1476,12 +1476,12 @@ try
         farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
         Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 2, true),
             "Prepare stacked buckets for a full-inventory check");
-        Check(itemsCatalog.TryGetByIdentifier("stone", out var stone),
+        Check(itemsCatalog.TryGetByIdentifier("stone", out var fillerStone),
             "Load the stackable test item");
-        foreach (int slot in Enumerable.Range(9, 36))
+        foreach (int inventorySlot in Enumerable.Range(9, 36))
         {
-            if (slot == 36) continue;
-            Check(farmer.Inventory.TryCreativeSet(slot, stone.ProtocolId, 64, true),
+            if (inventorySlot == 36) continue;
+            Check(farmer.Inventory.TryCreativeSet(inventorySlot, fillerStone.ProtocolId, 64, true),
                 "Fill inventory slot to block milk output");
         }
         var lockedInventory = farmer.Inventory.Snapshot().Slots;
