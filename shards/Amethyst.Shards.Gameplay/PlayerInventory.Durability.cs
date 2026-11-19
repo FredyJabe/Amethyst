@@ -4,6 +4,11 @@ namespace Amethyst;
 
 public sealed partial class PlayerInventory
 {
+    private static bool IsDefinitionUnbreakable(ShardItemDefinition definition) =>
+        definition.Components is not null &&
+        definition.Components.TryGetValue("minecraft:unbreakable", out string? value) &&
+        value == "true";
+
     /// <summary>Wear a specific equipped slot after a successful gameplay
     /// action. Slot 5-8 is armor; 36-44 selected hotbar; 45 is offhand.</summary>
     public bool DamageSlot(int slot, int expectedItemId, int points,
@@ -15,7 +20,8 @@ public sealed partial class PlayerInventory
             ItemStack old = _slots[slot];
             if (old.Count != 1 || old.ItemId != expectedItemId ||
                 _items is null || !_items.TryGetById(old.ItemId, out var item) ||
-                item.MaxDurability <= 0) return false;
+                item.MaxDurability <= 0 ||
+                IsDefinitionUnbreakable(item)) return false;
             ItemStack next = DurabilityRules.ApplyWear(old, item.MaxDurability,
                 points, slot is >= 5 and <= 8 &&
                 DurabilityRules.IsArmor(item.Identifier), random);
@@ -41,7 +47,8 @@ public sealed partial class PlayerInventory
                 ItemStack old = _slots[slot];
                 if (old.Count != 1 ||
                     !_items.TryGetById(old.ItemId, out var item) ||
-                    item.MaxDurability <= 0) continue;
+                    item.MaxDurability <= 0 ||
+                    IsDefinitionUnbreakable(item)) continue;
                 ItemStack next = DurabilityRules.ApplyWear(old, item.MaxDurability,
                     points, armor: true, random);
                 if (next == old) continue;
