@@ -5,7 +5,7 @@ namespace Amethyst;
 
 /// <summary>Gameplay runtime supplied by the gameplay Shard. Network listener,
 /// login authentication and configuration are handled by AmethystNetworkServer.</summary>
-public sealed class MinecraftServer
+public sealed class MinecraftServer : IShardItemDropSink
 {
     private static readonly bool TraceMining =
         Environment.GetEnvironmentVariable("AMETHYST_TRACE_MINING") == "1";
@@ -22,7 +22,7 @@ public sealed class MinecraftServer
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
     private readonly IShardEntityManager? _entities;
-    private readonly IShardSkillRegistry? _skills;
+    private readonly IShardSkillEngine? _skills;
     private readonly IShardEntityRegistry? _entityTypes;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
@@ -37,7 +37,7 @@ public sealed class MinecraftServer
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
         IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
-        IShardEntityManager? entities = null, IShardSkillRegistry? skills = null,
+        IShardEntityManager? entities = null, IShardSkillEngine? skills = null,
         IShardEntityRegistry? entityTypes = null)
     {
         _options = options;
@@ -835,25 +835,19 @@ public sealed class MinecraftServer
     internal async Task TickEntitiesAsync(CancellationToken ct)
     {
         if (_entities is null) return;
-        // Death notifications are emitted by the Entities Shard. Items owns
-        // death-triggered skills; Gameplay alone handles physical dropped items.
-        // Drain before the snapshot so a death cannot be rendered after its drop.
-        if (_groundItems is not null && _skills is not null && _entityTypes is not null)
+        // The Entities Shard reports death exactly once; Core dispatches
+        // the trigger to registered mechanics without understanding item IDs.
+        // The Items Shard owns dropItem and calls Gameplay's world-item sink.
+        if (_skills is not null)
         {
             foreach (ShardEntityInstance dead in _entities.DrainDeaths())
             {
-                string typeId = dead.DefinitionId;
-                if (!_skills.TryExecute(typeId, ShardSkillTrigger.OnDeath, out ShardSkillDrop[] results))
-                {
-                    // Custom entity aliases inherit their vanilla base type's
-                    // skills unless Items provides an explicit alias override.
-                    if (_entityTypes.TryGetById(dead.ProtocolId, out var vanilla))
-                        _skills.TryExecute(vanilla.Identifier, ShardSkillTrigger.OnDeath, out results);
-                }
-                foreach (ShardSkillDrop drop in results)
-                    if (!_groundItems.TrySpawn(drop.ItemId, drop.Count,
-                        dead.X, dead.Y + 0.2, dead.Z, out _))
-                        Console.WriteLine($"[loot] Could not spawn item {drop.ItemId} x{drop.Count} for {typeId}");
+                string? fallback = _entityTypes is not null &&
+                    _entityTypes.TryGetById(dead.ProtocolId, out var vanilla)
+                        ? vanilla.Identifier : null;
+                await _skills.DispatchAsync(new ShardSkillEvent(
+                    dead.DefinitionId, "onDeath", dead.X, dead.Y, dead.Z,
+                    dead.EntityId, fallback), ct);
             }
         }
         ShardEntityInstance[] instances = _entities.Snapshot();
@@ -1423,5 +1417,11 @@ public sealed class MinecraftServer
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
     }
+
+    /// <summary>World item effect for Core skill executors. The Gameplay
+    /// Shard continues to own dropped-item physics, pickup and persistence.</summary>
+    public bool TryDropItem(int itemId, int count, double x, double y, double z) =>
+        _groundItems is not null && _groundItems.TrySpawn(itemId, count,
+            x, y, z, out _);
 
 }

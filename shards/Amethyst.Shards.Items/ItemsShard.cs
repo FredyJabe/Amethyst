@@ -413,11 +413,13 @@ public sealed class ItemsShard : IShard
                     throw new InvalidDataException(
                         $"Legacy loot YAML '{file}' requires migration to the Items Shard Skills format: " +
                         "dropItem{item=...;amount=...} ~onDeath. See Items Shard README.");
-        var skills = new SkillCatalog(catalog,
-            Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
+        var dropItem = new DropItemSkillMechanic(catalog,
+            () => ctx.GetService<IShardItemDropSink>(), ctx.Log);
+        ctx.RegisterSkillMechanic("dropItem", dropItem.Validate, dropItem.ExecuteAsync);
+        ctx.RegisterSkillDefinitions(Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
+        IShardSkillEngine skills = ctx.GetRequiredService<IShardSkillEngine>();
         ctx.RegisterService<IShardItemRegistry>(catalog);
         ctx.RegisterService<IShardRecipeRegistry>(recipes);
-        ctx.RegisterService<IShardSkillRegistry>(skills);
         ctx.RegisterConsoleCommand("iteminfo", (args, token) =>
         {
             string query = args.Trim();
@@ -458,14 +460,15 @@ public sealed class ItemsShard : IShard
             else
                 ctx.Log($"Skills {key}: " + (selected.Count == 0 ? "(none)" :
                     string.Join(", ", selected.Select(skill =>
-                        $"dropItem{{item={catalog.All[skill.ItemId].Identifier};" +
-                        $"amount={skill.Min}-{skill.Max};" +
-                        $"chance={skill.Chance.ToString(CultureInfo.InvariantCulture)}}} ~onDeath"))));
+                        $"{skill.Mechanic}{{{string.Join(";", skill.Arguments.Select(arg =>
+                            $"{arg.Key}={arg.Value}"))}}} " +
+                        (skill.Target is null ? "" : $"@{skill.Target} ") +
+                        $"~{skill.Trigger}"))));
             return Task.CompletedTask;
         });
         ctx.Log($"Registered {catalog.Count} Java {catalog.MinecraftVersion} items, " +
-            $"{recipes.RecipeCount} recipes, and {skills.Definitions.Count} skills for " +
-            $"{skills.OwnerCount} entity types; Skills YAML: {skillsDirectory}.");
+            $"{recipes.RecipeCount} recipes, and Core has {skills.Definitions.Count} skills " +
+            $"for {skills.OwnerCount} entity types; Items skills YAML: {skillsDirectory}.");
         return Task.CompletedTask;
     }
 
