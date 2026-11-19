@@ -1502,12 +1502,14 @@ try
                 "Fill inventory slot to block milk output");
         }
         var lockedInventory = farmer.Inventory.Snapshot().Slots;
-        int milkRewardsBefore = lootGame.GroundItemsForTests.Length;
+        int milkRewardsBefore = lootGame.GroundItemsForTests.Count(
+            d => d.ItemId == milkReward.ProtocolId);
         await lootGame.HandleEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(lockedInventory) &&
-            lootGame.GroundItemsForTests.Length == milkRewardsBefore,
-            "Full inventory refuses stacked-bucket conversion and emits no onMilk reward");
+            lootGame.GroundItemsForTests.Count(d =>
+                d.ItemId == milkReward.ProtocolId) == milkRewardsBefore,
+            "Full inventory refuses milk conversion and emits no onMilk reward (onRightClick still fires)");
 
         farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
         Check(itemsCatalog.TryGetByIdentifier("shears", out shears) &&
