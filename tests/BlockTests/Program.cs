@@ -1369,9 +1369,13 @@ try
     var lootTypes = new EntityCatalog(Path.Combine(solutionRoot.FullName,
         "shards", "Amethyst.Shards.Entities", "entities-26.3.yml"));
     var lootWorld = new EntityManager(lootTypes);
-    var deathSkills = new SkillCatalog(itemsCatalog, Path.Combine(solutionRoot.FullName,
+    var deathSkills = new SkillEngine();
+    MinecraftServer? lootGame = null;
+    var dropItem = new DropItemSkillMechanic(itemsCatalog, () => lootGame);
+    deathSkills.RegisterMechanic("items", "dropItem", dropItem.Validate, dropItem.ExecuteAsync);
+    deathSkills.RegisterDefinitions("items", Path.Combine(solutionRoot.FullName,
         "shards", "Amethyst.Shards.Items", "skills-26.3.yml"));
-    var lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
+    lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
         Path.Combine(stationsRoot, "loot-gameplay"), itemsCatalog, recipesCatalog,
         lootWorld, deathSkills, lootTypes);
     Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var testCow) &&

@@ -75,18 +75,30 @@ try
     string itemVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
         "items-26.3.yml");
     var items = new ItemCatalog(itemVanilla);
-    var starterSkills = new SkillCatalog(items, skillVanilla);
+    var drops = new TestDropSink();
+    SkillEngine CreateEngine()
+    {
+        var engine = new SkillEngine();
+        var mechanic = new DropItemSkillMechanic(items, () => drops);
+        engine.RegisterMechanic("items", "dropItem", mechanic.Validate, mechanic.ExecuteAsync);
+        return engine;
+    }
+
+    var starterSkills = CreateEngine();
+    starterSkills.RegisterDefinitions("items", skillVanilla);
     Check(starterSkills.OwnerCount >= 10 &&
         starterSkills.TryGetSkills("minecraft:cow", out var cowSkills) &&
         cowSkills.Count == 2 &&
-        cowSkills.All(s => s.Trigger == ShardSkillTrigger.OnDeath &&
-            s.Action == ShardSkillAction.DropItem) &&
-        starterSkills.TryExecute("minecraft:cow", ShardSkillTrigger.OnDeath,
-            out var cowDrops, new Random(123)) &&
-        cowDrops.Length > 0 &&
+        cowSkills.All(s => s.Trigger.Equals("onDeath", StringComparison.OrdinalIgnoreCase) &&
+            s.Mechanic.Equals("dropItem", StringComparison.OrdinalIgnoreCase)),
+        "Core parses Items Shard death skills with generic event/mechanic names");
+    Check(await starterSkills.DispatchAsync(new ShardSkillEvent(
+            "minecraft:cow", "onDeath", 2, 80, 3, Random: new Random(123))) &&
+        drops.Items.Count > 0 &&
         items.TryGetByIdentifier("beef", out var beef) &&
-        cowDrops.Any(d => d.ItemId == beef.ProtocolId && d.Count is >= 1 and <= 3),
-        "Items Shard provides bundled Mythic-style dropItem death skills");
+        drops.Items.Any(d => d.ItemId == beef.ProtocolId && d.Count is >= 1 and <= 3 &&
+            d.X == 2 && d.Z == 3),
+        "Core dispatches Items dropItem with real resolved item effects");
 
     string skillsDir = Path.Combine(temp, "skills");
     Directory.CreateDirectory(skillsDir);
@@ -99,24 +111,75 @@ try
             - 'dropItem{i=minecraft:diamond_sword;a=3;c=1} @self ~onDeath'
             - 'dropItem{item=minecraft:beef;amount=1;chance=0} ~onDeath'
         """);
-    var customSkills = new SkillCatalog(items, skillVanilla, skillsDir);
-    Check(customSkills.TryExecute("minecraft:cow", ShardSkillTrigger.OnDeath,
-        out var emptyDrops) && emptyDrops.Length == 0 &&
-        customSkills.TryGetSkills("cow", out var disabledSkills) &&
+    var configured = CreateEngine();
+    configured.RegisterDefinitions("items", skillVanilla, skillsDir);
+    drops.Items.Clear();
+    Check(configured.TryGetSkills("minecraft:cow", out var disabledSkills) &&
         disabledSkills.Count == 0 &&
-        customSkills.TryExecute("amethyst:guardian_cow", ShardSkillTrigger.OnDeath,
-            out var aliasDrops, new Random(42)) &&
-        aliasDrops.Length == 3 && aliasDrops.All(d => d.Count == 1) &&
+        await configured.DispatchAsync(new ShardSkillEvent(
+            "minecraft:cow", "onDeath", Random: new Random(123))) &&
+        drops.Items.Count == 0 &&
+        configured.TryGetSkills("amethyst:guardian_cow", out var aliasSkills) &&
+        aliasSkills.Count == 2,
+        "Core respects custom entity aliases and explicitly empty skill lists");
+    Check(await configured.DispatchAsync(new ShardSkillEvent(
+            "amethyst:guardian_cow", "onDeath", 5, 71, 6,
+            FallbackOwnerId: "minecraft:cow", Random: new Random(42))) &&
+        drops.Items.Count == 3 &&
+        drops.Items.All(d => d.Count == 1 && d.X == 5 && d.Z == 6) &&
         items.TryGetByIdentifier("diamond_sword", out var sword) &&
-        aliasDrops.All(d => d.ItemId == sword.ProtocolId) &&
-        !customSkills.TryExecute("unknown_mob", ShardSkillTrigger.OnDeath, out _),
-        "Custom skills override defaults, accept aliases, honor chances and stack limits");
+        drops.Items.All(d => d.ItemId == sword.ProtocolId),
+        "Core executes Items skills honoring aliases, probability and stack limits");
+
+    string testCustomPack = Path.Combine(temp, "other-shard.yml");
+    File.WriteAllText(testCustomPack, """
+        cow:
+          Skills:
+            - 'trace{tag=shared} ~onDeath'
+            - 'trace{tag=spawned} ~onSpawn'
+        """);
+    var messages = new List<string>();
+    configured.RegisterTrigger("entities", "onSpawn");
+    configured.RegisterMechanic("other", "trace",
+        skill => { if (!skill.Arguments.ContainsKey("tag")) throw new InvalidDataException("tag"); },
+        (skill, evt, token) =>
+        {
+            messages.Add(skill.Arguments["tag"] + ":" + evt.Trigger);
+            return ValueTask.CompletedTask;
+        });
+    configured.RegisterDefinitions("other", testCustomPack);
+    drops.Items.Clear();
+    Check(configured.OwnerCount >= 10 &&
+        configured.TryGetSkills("cow", out var joined) &&
+        joined.Count == 2 &&
+        await configured.DispatchAsync(new ShardSkillEvent("cow", "onSpawn")) &&
+        messages.SequenceEqual(new[] { "spawned:onSpawn" }) &&
+        await configured.DispatchAsync(new ShardSkillEvent("cow", "onDeath")) &&
+        messages.Last() == "shared:onDeath" &&
+        drops.Items.Count == 0,
+        "Core combines separate Shard skill packs and executes new mechanics/triggers");
+    configured.Unregister("other");
+    configured.Unregister("entities");
+    messages.Clear();
+    Check(configured.TryGetSkills("cow", out var restored) &&
+        restored.Count == 0 &&
+        await configured.DispatchAsync(new ShardSkillEvent("cow", "onDeath")) &&
+        messages.Count == 0,
+        "Core unregisters one Shard's skills without affecting other providers");
+    configured.Unregister("items");
+    Check(!configured.TryGetSkills("cow", out _) &&
+        !await configured.DispatchAsync(new ShardSkillEvent("cow", "onDeath")),
+        "Core removes skill definitions and mechanics on Shard disable");
 
     void RejectSkill(string yaml, string label)
     {
         File.WriteAllText(skillsFile, yaml);
         bool rejected = false;
-        try { _ = new SkillCatalog(items, skillVanilla, skillsDir); }
+        try
+        {
+            var checker = CreateEngine();
+            checker.RegisterDefinitions("items", skillVanilla, skillsDir);
+        }
         catch (InvalidDataException) { rejected = true; }
         Check(rejected, label);
     }
@@ -139,17 +202,17 @@ try
         cow:
           Skills:
             - 'dropItem{item=minecraft:beef} ~onSpawn'
-        """, "Reject unimplemented event triggers instead of ignoring them");
+        """, "Reject unregistered event triggers instead of ignoring them");
     RejectSkill("""
         cow:
           Skills:
             - 'teleport{to=spawn} ~onDeath'
-        """, "Reject unsupported mechanics instead of ignoring them");
+        """, "Reject mechanics not registered by any Shard");
     RejectSkill("""
         cow:
           Skills:
             - 'dropItem{item=minecraft:beef;i=minecraft:diamond} ~onDeath'
-        """, "Reject duplicate aliased parameters");
+        """, "Reject duplicate aliased parameters in the mechanic");
     RejectSkill("""
         cow:
           Skills: []
@@ -159,12 +222,12 @@ try
     RejectSkill("""
         cow:
           Drops: []
-        """, "Reject the old Drops property; require Skills");
+        """, "Reject old Drops property; require Core Skills");
     RejectSkill("""
         cow:
           Skills:
             - 'dropItem{item=minecraft:beef;amount=1} @target ~onDeath'
-        """, "Reject unsupported skill target selectors");
+        """, "Reject unsupported item-drop target selectors");
 
     File.WriteAllText(path, """
         cow:
@@ -209,3 +272,13 @@ finally
     catch (IOException) { }
 }
 Console.WriteLine("PASS: Entity catalog and runtime tests");
+
+sealed class TestDropSink : IShardItemDropSink
+{
+    public readonly List<(int ItemId, int Count, double X, double Y, double Z)> Items = [];
+    public bool TryDropItem(int itemId, int count, double x, double y, double z)
+    {
+        Items.Add((itemId, count, x, y, z));
+        return true;
+    }
+}

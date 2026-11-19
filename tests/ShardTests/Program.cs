@@ -152,18 +152,17 @@ try
     await host.LoadAsync();
     Check(host.GetService<IShardWorld>() is not null, "default overworld provider enabled");
     Check(host.GetService<IShardGameplay>() is not null, "gameplay enabled with world provider");
-    IShardSkillRegistry skillRegistry = host.GetService<IShardSkillRegistry>() ??
-        throw new Exception("FAIL: Items Shard skill registry not registered");
-    Check(skillRegistry.OwnerCount >= 10 &&
-        skillRegistry.TryExecute("minecraft:cow", ShardSkillTrigger.OnDeath,
-            out var diamondDrops, new Random(9)) &&
-        diamondDrops.Length == 1 &&
-        itemsRegistryLookup() == diamondDrops[0].ItemId &&
+    IShardSkillEngine skillEngine = host.GetService<IShardSkillEngine>() ??
+        throw new Exception("FAIL: Core skill engine not registered");
+    var dropSink = host.GetService<IShardItemDropSink>() ??
+        throw new Exception("FAIL: Gameplay item drop sink not registered");
+    Check(skillEngine.OwnerCount >= 10 &&
+        skillEngine.TryGetSkills("minecraft:cow", out var configuredSkills) &&
+        configuredSkills.Count == 1 &&
+        configuredSkills[0].Mechanic == "dropItem" &&
         host.RegisteredConsoleCommands.Contains("skillinfo") &&
         await host.TryExecuteConsoleAsync("skillinfo cow", CancellationToken.None),
-        "Items Shard registers Mythic-style triggered death skills");
-    int itemsRegistryLookup() => host.GetService<IShardItemRegistry>()!
-        .TryGetByIdentifier("diamond", out var item) ? item.ProtocolId : -1;
+        "Core skill engine is shared and Items registers its dropItem mechanic");
     IShardEntityRegistry entityTypes = host.GetService<IShardEntityRegistry>() ??
         throw new Exception("FAIL: Entities Shard service not registered");
     IShardEntityManager entityWorld = host.GetService<IShardEntityManager>() ??
@@ -321,7 +320,9 @@ try
     await host.DisableAsync("items");
     Check(host.GetService<IShardItemRegistry>() is null &&
         host.GetService<IShardRecipeRegistry>() is null &&
-        host.GetService<IShardSkillRegistry>() is null &&
+        host.GetService<IShardSkillEngine>() == skillEngine &&
+        skillEngine.OwnerCount == 0 &&
+        host.GetService<IShardItemDropSink>() is null &&
         !host.RegisteredConsoleCommands.Contains("skillinfo") &&
         !host.RegisteredConsoleCommands.Contains("recipes") &&
         !host.RegisteredConsoleCommands.Contains("iteminfo"),
@@ -339,7 +340,9 @@ try
         host.GetService<IShardGameplay>() is not null &&
         host.GetService<IShardItemRegistry>() is not null &&
         host.GetService<IShardRecipeRegistry>() is not null &&
-        host.GetService<IShardSkillRegistry>() is not null &&
+        host.GetService<IShardSkillEngine>() == skillEngine &&
+        host.GetService<IShardItemDropSink>() is not null &&
+        skillEngine.OwnerCount >= 10 &&
         host.GetService<IShardEntityManager>() is not null &&
         host.GetService<IShardEntityRegistry>() is not null,
         "Enabling Gameplay automatically enables World, Items, Recipe and Entity providers");
