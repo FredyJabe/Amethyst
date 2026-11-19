@@ -185,7 +185,7 @@ public sealed class PacketWriter
         ulong packed = (Quantize(x, scale) << 3) |
             (Quantize(y, scale) << 18) |
             (Quantize(z, scale) << 33) |
-            (ulong)(scale & 3) |
+            (uint)(scale & 3) |
             (scale > 3 ? 4UL : 0UL);
         WriteByte((byte)packed);
         WriteByte((byte)(packed >> 8));
