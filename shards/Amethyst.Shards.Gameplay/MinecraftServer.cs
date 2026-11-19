@@ -1284,62 +1284,8 @@ public sealed class MinecraftServer
                 break;
             }
             case "enchant":
-            {
-                string[] words = argument.Split(' ',
-                    StringSplitOptions.RemoveEmptyEntries);
-                if (words.Length is < 2 or > 3)
-                {
-                    await ReplyAsync(player,
-                        "Usage: /enchant <online-player> <unbreaking|mending> [level]", ct);
-                    break;
-                }
-                ConnectedPlayer? target = FindOnline(words[0]);
-                if (target is null)
-                {
-                    await ReplyAsync(player, "Player not found.", ct);
-                    break;
-                }
-                string enchantment = words[1].ToLowerInvariant();
-                if (enchantment.StartsWith("minecraft:", StringComparison.Ordinal))
-                    enchantment = enchantment["minecraft:".Length..];
-                int enchantmentLevel = 1;
-                if (words.Length == 3 &&
-                    !int.TryParse(words[2], out enchantmentLevel))
-                {
-                    await ReplyAsync(player, "Invalid enchantment level.", ct);
-                    break;
-                }
-                if ((enchantment == "mending" && enchantmentLevel != 1) ||
-                    (enchantment == "unbreaking" &&
-                     enchantmentLevel is < 1 or > 3) ||
-                    (enchantment is not ("mending" or "unbreaking")))
-                {
-                    await ReplyAsync(player,
-                        "Supported enchantments: mending I, unbreaking I–III.", ct);
-                    break;
-                }
-                ItemStack held = target.Inventory.Held();
-                bool applied = enchantment == "mending"
-                    ? target.Inventory.ConfigureHeld(
-                        held.Unbreaking, true, held.Unbreakable)
-                    : target.Inventory.ConfigureHeld(
-                        enchantmentLevel, held.Mending, held.Unbreakable);
-                if (!applied)
-                {
-                    await ReplyAsync(player,
-                        "Unable to enchant: target must hold an enchantable item without that exact enchantment.", ct);
-                    break;
-                }
-                await InventoryProtocol.SendSlotAsync(
-                    target.Connection, target.Inventory,
-                    target.Inventory.SelectedSlot, ct);
-                await ReplyAsync(player,
-                    $"Applied {enchantment} {enchantmentLevel} to {target.Username}'s held item.", ct);
-                if (target != player)
-                    await ReplyAsync(target,
-                        $"Your held item received {enchantment} {enchantmentLevel}.", ct);
+                await ReplyAsync(player, await EnchantHeldAsync(argument, ct), ct);
                 break;
-            }
             case "msg":
             case "tell":
             case "w":
@@ -1401,6 +1347,38 @@ public sealed class MinecraftServer
                 await ReplyAsync(player, $"Unknown command: /{verb}", ct);
                 break;
         }
+    }
+
+    private async Task<string> EnchantHeldAsync(string argument, CancellationToken ct)
+    {
+        string[] words = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length is < 2 or > 3)
+            return "Usage: enchant <online-player> <unbreaking|mending> [level]";
+        ConnectedPlayer? target = FindOnline(words[0]);
+        if (target is null) return "Player not found or not fully connected.";
+        string enchantment = words[1].ToLowerInvariant();
+        if (enchantment.StartsWith("minecraft:", StringComparison.Ordinal))
+            enchantment = enchantment["minecraft:".Length..];
+        int level = 1;
+        if (words.Length == 3 && !int.TryParse(words[2], out level))
+            return "Invalid enchantment level.";
+        if ((enchantment == "mending" && level != 1) ||
+            (enchantment == "unbreaking" && level is < 1 or > 3) ||
+            enchantment is not ("mending" or "unbreaking"))
+            return "Supported enchantments: Mending I and Unbreaking I–III.";
+        ItemStack held = target.Inventory.Held();
+        bool applied = enchantment == "mending"
+            ? target.Inventory.ConfigureHeld(
+                held.Unbreaking, true, held.Unbreakable)
+            : target.Inventory.ConfigureHeld(
+                level, held.Mending, held.Unbreakable);
+        if (!applied)
+            return "Target must hold a damageable item; the requested enchantment may already be applied.";
+        await InventoryProtocol.SendSlotAsync(target.Connection,
+            target.Inventory, target.Inventory.SelectedSlot, ct);
+        await ReplyAsync(target,
+            $"Your held item received {enchantment} {level}.", ct);
+        return $"Applied {enchantment} {level} to {target.Username}'s held item.";
     }
 
     private async Task ChangeGameModeAsync(ConnectedPlayer target, PlayerGameMode mode,
@@ -1509,6 +1487,10 @@ public sealed class MinecraftServer
                 if (argument.Length > 0 && !argument.Contains(' '))
                     await RevokeOperatorAsync(argument, null, stop);
                 else Console.WriteLine("Usage: deop <name|uuid>");
+                break;
+            case "enchant":
+                Console.WriteLine("[enchant] " +
+                    await EnchantHeldAsync(argument, stop));
                 break;
             case "say":
                 if (ChatProtocol.IsSafeMessage(argument, _options.ChatMaxLength))
