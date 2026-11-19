@@ -271,7 +271,7 @@ try
     var durable = new PacketReader(durableWriter.ToArray());
     Check(durable.ReadVarInt() == 1 &&
         durable.ReadVarInt() == configuredPickaxe.ProtocolId &&
-        durable.ReadVarInt() == 6 && durable.ReadVarInt() == 0 &&
+        durable.ReadVarInt() == 5 && durable.ReadVarInt() == 0 &&
         durable.ReadVarInt() == 3 && durable.ReadVarInt() == 11 &&
         durable.ReadVarInt() == 4 &&
         durable.ReadVarInt() == 10 &&
