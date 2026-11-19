@@ -349,6 +349,7 @@ public sealed partial class MinecraftServer
                         break;
                     case BlockInteractionProtocol.ServerboundSetHeldItem:
                         player.SelectHotbar(BlockInteractionProtocol.ReadHeldItem(packet.Value));
+                        await ReleaseUsingItemAsync(player, lifetime.Token);
                         break;
                     case BlockInteractionProtocol.ServerboundCreativeSlot:
                     {
@@ -397,6 +398,12 @@ public sealed partial class MinecraftServer
                     {
                         BlockUseOn hit = BlockInteractionProtocol.ReadUseOn(packet.Value);
                         await HandleBlockUseAsync(player, hit, lifetime.Token);
+                        break;
+                    }
+                    case UseItemProtocol.ServerboundUseItem:
+                    {
+                        UseItemAction use = UseItemProtocol.ReadUseItem(packet.Value);
+                        await HandleUseItemAsync(player, use, lifetime.Token);
                         break;
                     }
                     case 0x0E: // Client information (Play): chat visibility preference
@@ -471,6 +478,13 @@ public sealed partial class MinecraftServer
             Console.WriteLine($"[mining] recv {player.Username} mode={player.GameMode} " +
                 $"status={action.Status} pos={action.X},{action.Y},{action.Z} " +
                 $"face={action.Face} seq={action.Sequence} held={player.Inventory.Held().ItemId}");
+        if (action.Status == BlockInteractionProtocol.ReleaseUseItem)
+        {
+            await ReleaseUsingItemAsync(player, ct);
+            await BlockInteractionProtocol.SendAckAsync(
+                player.Connection, action.Sequence, ct);
+            return;
+        }
         if (action.Status is BlockInteractionProtocol.DropAllItems
             or BlockInteractionProtocol.DropItem)
         {
