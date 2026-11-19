@@ -417,6 +417,16 @@ public sealed class ItemsShard : IShard
         var dropItem = new DropItemSkillMechanic(catalog,
             () => ctx.GetService<IShardItemDropSink>(), ctx.Log);
         ctx.RegisterSkillMechanic("dropItem", dropItem.Validate, dropItem.ExecuteAsync);
+        // Item-originated events are owned by Items even though Gameplay
+        // detects packet/inventory actions and Core dispatches their skills.
+        // Register every trigger before loading administrator YAML so unknown
+        // actions are still rejected but valid new triggers can be configured.
+        foreach (string trigger in new[]
+        {
+            "onLeftClick", "onRightClick", "onDrop", "onSwap",
+            "onStackDrop", "onPickup", "onEquip", "onUnequip"
+        })
+            ctx.RegisterSkillTrigger(trigger);
         ctx.RegisterSkillDefinitions(Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
         IShardSkillEngine skills = ctx.GetRequiredService<IShardSkillEngine>();
         ctx.RegisterService<IShardItemRegistry>(catalog);

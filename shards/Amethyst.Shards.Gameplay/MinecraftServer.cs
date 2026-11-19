@@ -451,6 +451,24 @@ public sealed class MinecraftServer : IShardItemDropSink
         return dx * dx + dy * dy + dz * dz <= 36; // Creative interaction range
     }
 
+    /// <summary>Dispatch an item skill by the canonical identity of the
+    /// authoritative stack. Never use a client-provided item ID as the owner.
+    /// Coordinates come from the server player pose unless an event specifies
+    /// the actual world-item position.</summary>
+    private Task DispatchItemSkillAsync(ConnectedPlayer player, int itemId,
+        string trigger, CancellationToken ct, int count = 1,
+        double? x = null, double? y = null, double? z = null)
+    {
+        if (_skills is null || _items is null || !player.Ready ||
+            itemId <= 0 || count <= 0 ||
+            !_items.TryGetById(itemId, out ShardItemDefinition definition))
+            return Task.CompletedTask;
+        PlayerPose pose = player.Pose;
+        return _skills.DispatchAsync(new ShardSkillEvent(definition.Identifier,
+            trigger, x ?? pose.X, y ?? pose.Y, z ?? pose.Z,
+            ActorUuid: player.PlayerUuid, ItemId: itemId, Count: count), ct);
+    }
+
     internal async Task HandleBlockActionAsync(ConnectedPlayer player,
         PlayerBlockAction action, CancellationToken ct)
     {
@@ -475,6 +493,9 @@ public sealed class MinecraftServer : IShardItemDropSink
         bool valid = action.Face is >= 0 and <= 5 &&
             CanEditAt(player, action.X, action.Y, action.Z);
         ushort state = valid ? _blocks!.GetBlockState(action.X, action.Y, action.Z) : (ushort)0;
+        if (valid && state != 0 && action.Status == BlockInteractionProtocol.StartDestroyBlock)
+            await DispatchItemSkillAsync(player, player.Inventory.Held().ItemId,
+                "onLeftClick", ct);
         bool changed = false;
         bool survival = player.GameMode == PlayerGameMode.Survival;
         string outcome = valid ? "no change" : "invalid target / range / mode / not ready";
@@ -780,6 +801,7 @@ public sealed class MinecraftServer : IShardItemDropSink
         if (dx * dx + dy * dy + dz * dz > 25) return;
         ItemStack held = player.Inventory.Held();
         if (held.Count < 1) return;
+        await DispatchItemSkillAsync(player, held.ItemId, "onRightClick", ct);
         string? trigger = null;
         if (_items.TryGetByIdentifier("minecraft:bucket", out var bucket) &&
             _items.TryGetByIdentifier("minecraft:milk_bucket", out var milk) &&
@@ -812,6 +834,10 @@ public sealed class MinecraftServer : IShardItemDropSink
     internal async Task HandleBlockUseAsync(ConnectedPlayer player,
         BlockUseOn hit, CancellationToken ct)
     {
+        if (hit.Hand == 0 && hit.ValidHit &&
+            CanEditAt(player, hit.X, hit.Y, hit.Z))
+            await DispatchItemSkillAsync(player, player.Inventory.Held().ItemId,
+                "onRightClick", ct);
         if (hit.ValidHit && hit.Hand == 0 &&
             CanEditAt(player, hit.X, hit.Y, hit.Z) &&
             WorkstationManager.FromBlockState(
@@ -1077,6 +1103,8 @@ public sealed class MinecraftServer : IShardItemDropSink
                 }
                 catch (IOException) { }
                 catch (ObjectDisposedException) { }
+                await DispatchItemSkillAsync(collector, item.ItemId, "onPickup", ct,
+                    count, item.X, item.Y, item.Z);
                 if (remaining.Count == 0) break;
             }
         }

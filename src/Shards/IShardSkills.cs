@@ -11,7 +11,8 @@ public sealed record ShardSkillInstruction(
 /// FallbackOwnerId is consulted only when OwnerId has no skill list.</summary>
 public sealed record ShardSkillEvent(
     string OwnerId, string Trigger, double X = 0, double Y = 0, double Z = 0,
-    int EntityId = 0, string? FallbackOwnerId = null, Random? Random = null)
+    int EntityId = 0, string? FallbackOwnerId = null, Random? Random = null,
+    Guid? ActorUuid = null, int ItemId = 0, int Count = 0)
 {
     public Random Rng => Random ?? System.Random.Shared;
 }
