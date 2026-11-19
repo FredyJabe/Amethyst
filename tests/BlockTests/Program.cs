@@ -106,17 +106,17 @@ try
     string legacyPath = Path.Combine(wearRoot, "inventories",
         legacyId.ToString("N") + ".bin");
     using (var stream = File.Create(legacyPath))
-    using (var writer = new BinaryWriter(stream))
+    using (var legacyWriter = new BinaryWriter(stream))
     {
-        writer.Write("AMINV002"u8.ToArray());
-        writer.Write(46);
-        for (int slot = 0; slot < 46; slot++)
+        legacyWriter.Write("AMINV002"u8.ToArray());
+        legacyWriter.Write(46);
+        for (int legacySlot = 0; legacySlot < 46; legacySlot++)
         {
-            writer.Write(slot == 36 ? woodenTool.ProtocolId : 0);
-            writer.Write(slot == 36 ? 1 : 0);
+            legacyWriter.Write(legacySlot == 36 ? woodenTool.ProtocolId : 0);
+            legacyWriter.Write(legacySlot == 36 ? 1 : 0);
         }
-        writer.Write(0);
-        writer.Write(0);
+        legacyWriter.Write(0);
+        legacyWriter.Write(0);
     }
     var migrated = new PlayerInventory(wearRoot, legacyId, itemsCatalog);
     Check(migrated.Held() == new ItemStack(woodenTool.ProtocolId, 1) &&
@@ -130,10 +130,10 @@ try
     slots[9] = new ItemStack(woodenTool.ProtocolId, 1) { Damage = 59 };
     Check(!migrated.TryCommitWindow(validRevision, slots, cursor),
         "Over-damaged or broken stacks cannot be committed into inventory");
-    var writer = new PacketWriter();
-    InventoryProtocol.WriteStack(writer,
+    var componentWriter = new PacketWriter();
+    InventoryProtocol.WriteStack(componentWriter,
         new ItemStack(woodenTool.ProtocolId, 1) { Damage = 7 });
-    var encoded = new PacketReader(writer.ToArray());
+    var encoded = new PacketReader(componentWriter.ToArray());
     Check(encoded.ReadVarInt() == 1 &&
         encoded.ReadVarInt() == woodenTool.ProtocolId &&
         encoded.ReadVarInt() == 1 && encoded.ReadVarInt() == 0 &&
