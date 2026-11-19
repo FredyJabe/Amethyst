@@ -18,11 +18,13 @@ public sealed class MinecraftServer
     private readonly PlayerRegistry _players;
     private readonly OperatorStore _operators;
     private readonly GroundItemStore? _groundItems;
+    private readonly ExperienceOrbStore? _experienceOrbs;
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
+    private readonly Dictionary<Guid, Dictionary<int, ExperienceOrb>> _experienceViews = new();
     private CancellationTokenSource? _clockLifetime;
     private Task? _clockSync;
     private Task? _itemsSync;
@@ -46,14 +48,20 @@ public sealed class MinecraftServer
         _stations = new WorkstationManager(inventoryDirectory, options.WorldPath, world,
             items, recipes ?? throw new ArgumentNullException(nameof(recipes)));
         if (_blocks is not null)
+        {
             _groundItems = new GroundItemStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId, items);
+            _experienceOrbs = new ExperienceOrbStore(inventoryDirectory,
+                options.WorldPath, _players.AllocateEntityId);
+        }
     }
 
     public ShardPlayerSummary[] OnlinePlayers => _players.Snapshot()
         .Select(p => new ShardPlayerSummary(p.Username, p.PlayerUuid)).ToArray();
 
     internal GroundItem[] GroundItemsForTests => _groundItems?.Snapshot() ?? [];
+    internal ExperienceOrb[] ExperienceOrbsForTests =>
+        _experienceOrbs?.Snapshot() ?? [];
     internal WorkstationManager StationsForTests => _stations;
     internal ConnectedPlayer? GetPlayerForTests(Guid id) =>
         _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == id);
@@ -90,7 +98,9 @@ public sealed class MinecraftServer
                 try { await _stationSync; } catch (OperationCanceledException) { }
             _stations.Save();
             _groundItems?.Save();
+            _experienceOrbs?.Save();
             _itemViews.Clear();
+            _experienceViews.Clear();
             _itemsSync = null;
             _positionSync = null;
             _stationSync = null;
@@ -135,6 +145,8 @@ public sealed class MinecraftServer
             ?? throw new InvalidOperationException("Player admission was not completed.");
         await SpawnPackets.SendAsync(player, _world, _options, _clock, ct);
         await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+        await ExperienceProtocol.SendExperienceAsync(player.Connection,
+            player.Experience, ct);
         int actualOpLevel = _options.OnlineMode ? _operators.Level(player.PlayerUuid) : 0;
         await GameModeProtocol.SendClientPermissionsAsync(player.Connection, player.EntityId, actualOpLevel, ct);
         await CommandTree.SendAsync(player.Connection, actualOpLevel, ct);
@@ -547,6 +559,17 @@ public sealed class MinecraftServer
                 int wear = MiningRules.DurabilityCostForBlock(state, miningTool, _items);
                 toolWearChanged = wear > 0 &&
                     player.Inventory.DamageHeld(miningTool, wear);
+                // XP is a physical orb, not an instant mining reward.
+                // Only correctly harvested ore can spawn experience.
+                if (MiningRules.IsHarvestable(info, miningTool) &&
+                    _experienceOrbs is not null)
+                {
+                    int xp = OreExperience.Roll(state);
+                    if (xp > 0)
+                        _experienceOrbs.TrySpawn(xp,
+                            action.X + 0.5, action.Y + 0.35,
+                            action.Z + 0.5, out _);
+                }
             }
         }
         else if (valid && action.Status == BlockInteractionProtocol.StopDestroyBlock)
@@ -880,6 +903,7 @@ public sealed class MinecraftServer
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
         while (await ticker.WaitForNextTickAsync(ct))
             await TickGroundItemsAsync(ct);
+            await TickExperienceOrbsAsync(ct);
     }
 
     /// <summary>One authoritative 20Hz tick for loose items. Exposed internally
