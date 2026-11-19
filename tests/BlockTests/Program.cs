@@ -1369,11 +1369,11 @@ try
     var lootTypes = new EntityCatalog(Path.Combine(solutionRoot.FullName,
         "shards", "Amethyst.Shards.Entities", "entities-26.3.yml"));
     var lootWorld = new EntityManager(lootTypes);
-    var lootTables = new LootCatalog(itemsCatalog, Path.Combine(solutionRoot.FullName,
-        "shards", "Amethyst.Shards.Items", "loot-26.3.yml"));
+    var deathSkills = new SkillCatalog(itemsCatalog, Path.Combine(solutionRoot.FullName,
+        "shards", "Amethyst.Shards.Items", "skills-26.3.yml"));
     var lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
         Path.Combine(stationsRoot, "loot-gameplay"), itemsCatalog, recipesCatalog,
-        lootWorld, lootTables, lootTypes);
+        lootWorld, deathSkills, lootTypes);
     Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var testCow) &&
         lootWorld.TryKill(testCow.EntityId, out _),
         "Prepare an entity death for the Gameplay loot pipeline");
@@ -1382,7 +1382,7 @@ try
     Check(itemsCatalog.TryGetByIdentifier("beef", out var beefLoot) &&
         spawnedDrops.Any(d => d.ItemId == beefLoot.ProtocolId && d.Count is >= 1 and <= 3) &&
         spawnedDrops.All(d => d.X == 11 && d.Z == 12),
-        "Entity death uses Items YAML to spawn real world-ground item stacks");
+        "~onDeath dispatches Items dropItem skills into physical world items");
     await lootGame.TickEntitiesAsync(CancellationToken.None);
     Check(lootGame.GroundItemsForTests.Length == spawnedDrops.Length &&
         lootWorld.DrainDeaths().Length == 0,

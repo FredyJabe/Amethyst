@@ -70,72 +70,101 @@ try
         entities.DrainDeaths() is { Length: 1 } &&
         !entities.TryKill(toKill.EntityId, out _),
         "Explicit kill reports death exactly once");
-    string lootVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
-        "loot-26.3.yml");
+    string skillVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
+        "skills-26.3.yml");
     string itemVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
         "items-26.3.yml");
-    var itemCatalog = new ItemCatalog(itemVanilla);
-    var vanillaLoot = new LootCatalog(itemCatalog, lootVanilla);
-    Check(vanillaLoot.TableCount >= 10 &&
-        vanillaLoot.TryRollEntity("minecraft:cow", out var cowLoot, new Random(123)) &&
-        cowLoot.Length > 0 &&
-        itemCatalog.TryGetByIdentifier("beef", out var beef) &&
-        cowLoot.Any(d => d.ItemId == beef.ProtocolId && d.Count is >= 1 and <= 3),
-        "Bundled entity loot is resolved through the Items Shard");
+    var items = new ItemCatalog(itemVanilla);
+    var starterSkills = new SkillCatalog(items, skillVanilla);
+    Check(starterSkills.OwnerCount >= 10 &&
+        starterSkills.TryGetSkills("minecraft:cow", out var cowSkills) &&
+        cowSkills.Count == 2 &&
+        cowSkills.All(s => s.Trigger == ShardSkillTrigger.OnDeath &&
+            s.Action == ShardSkillAction.DropItem) &&
+        starterSkills.TryExecute("minecraft:cow", ShardSkillTrigger.OnDeath,
+            out var cowDrops, new Random(123)) &&
+        cowDrops.Length > 0 &&
+        items.TryGetByIdentifier("beef", out var beef) &&
+        cowDrops.Any(d => d.ItemId == beef.ProtocolId && d.Count is >= 1 and <= 3),
+        "Items Shard provides bundled Mythic-style dropItem death skills");
 
-    string lootRoot = Path.Combine(temp, "loot");
-    Directory.CreateDirectory(lootRoot);
-    string lootFile = Path.Combine(lootRoot, "custom.yml");
-    File.WriteAllText(lootFile, """
+    string skillsDir = Path.Combine(temp, "skills");
+    Directory.CreateDirectory(skillsDir);
+    string skillsFile = Path.Combine(skillsDir, "custom.yml");
+    File.WriteAllText(skillsFile, """
         cow:
-          Drops: []
+          Skills: []
         guardian_cow:
-          Drops:
-            - { Item: minecraft:diamond_sword, Min: 3, Max: 3, Chance: 1 }
-            - { Item: minecraft:beef, Min: 1, Max: 1, Chance: 0 }
+          Skills:
+            - 'dropItem{i=minecraft:diamond_sword;a=3;c=1} @self ~onDeath'
+            - 'dropItem{item=minecraft:beef;amount=1;chance=0} ~onDeath'
         """);
-    var customLoot = new LootCatalog(itemCatalog, lootVanilla, lootRoot);
-    Check(customLoot.TryRollEntity("minecraft:cow", out var emptyLoot) &&
-        emptyLoot.Length == 0 &&
-        customLoot.TryRollEntity("amethyst:guardian_cow", out var aliasLoot, new Random(42)) &&
-        aliasLoot.Length == 3 && aliasLoot.All(d => d.Count == 1) &&
-        itemCatalog.TryGetByIdentifier("diamond_sword", out var sword) &&
-        aliasLoot.All(d => d.ItemId == sword.ProtocolId),
-        "Custom YAML overrides/aliases support empty tables, chances and splitting stacks");
+    var customSkills = new SkillCatalog(items, skillVanilla, skillsDir);
+    Check(customSkills.TryExecute("minecraft:cow", ShardSkillTrigger.OnDeath,
+        out var emptyDrops) && emptyDrops.Length == 0 &&
+        customSkills.TryGetSkills("cow", out var disabledSkills) &&
+        disabledSkills.Count == 0 &&
+        customSkills.TryExecute("amethyst:guardian_cow", ShardSkillTrigger.OnDeath,
+            out var aliasDrops, new Random(42)) &&
+        aliasDrops.Length == 3 && aliasDrops.All(d => d.Count == 1) &&
+        items.TryGetByIdentifier("diamond_sword", out var sword) &&
+        aliasDrops.All(d => d.ItemId == sword.ProtocolId) &&
+        !customSkills.TryExecute("unknown_mob", ShardSkillTrigger.OnDeath, out _),
+        "Custom skills override defaults, accept aliases, honor chances and stack limits");
 
-    void RejectLoot(string yaml, string label)
+    void RejectSkill(string yaml, string label)
     {
-        File.WriteAllText(lootFile, yaml);
+        File.WriteAllText(skillsFile, yaml);
         bool rejected = false;
-        try { _ = new LootCatalog(itemCatalog, lootVanilla, lootRoot); }
+        try { _ = new SkillCatalog(items, skillVanilla, skillsDir); }
         catch (InvalidDataException) { rejected = true; }
         Check(rejected, label);
     }
-    RejectLoot("""
+    RejectSkill("""
         cow:
-          Drops:
-            - { Item: minecraft:not_an_item, Min: 1, Max: 1 }
-        """, "Loot rejects unknown item IDs");
-    RejectLoot("""
+          Skills:
+            - 'dropItem{item=minecraft:not_an_item;amount=1} ~onDeath'
+        """, "Reject unknown item IDs in dropItem");
+    RejectSkill("""
         cow:
-          Drops:
-            - { Item: minecraft:beef, Min: 5, Max: 2 }
-        """, "Loot rejects inverted counts");
-    RejectLoot("""
+          Skills:
+            - 'dropItem{item=minecraft:beef;amount=5-2} ~onDeath'
+        """, "Reject invalid item quantity ranges");
+    RejectSkill("""
         cow:
-          Drops:
-            - { Item: minecraft:beef, Chance: 2 }
-        """, "Loot rejects probability above 1");
-    RejectLoot("""
+          Skills:
+            - 'dropItem{item=minecraft:beef;chance=2} ~onDeath'
+        """, "Reject probabilities outside [0, 1]");
+    RejectSkill("""
+        cow:
+          Skills:
+            - 'dropItem{item=minecraft:beef} ~onSpawn'
+        """, "Reject unimplemented event triggers instead of ignoring them");
+    RejectSkill("""
+        cow:
+          Skills:
+            - 'teleport{to=spawn} ~onDeath'
+        """, "Reject unsupported mechanics instead of ignoring them");
+    RejectSkill("""
+        cow:
+          Skills:
+            - 'dropItem{item=minecraft:beef;i=minecraft:diamond} ~onDeath'
+        """, "Reject duplicate aliased parameters");
+    RejectSkill("""
+        cow:
+          Skills: []
+        cow:
+          Skills: []
+        """, "Reject duplicate entity skill roots");
+    RejectSkill("""
         cow:
           Drops: []
+        """, "Reject the old Drops property; require Skills");
+    RejectSkill("""
         cow:
-          Drops: []
-        """, "Loot rejects duplicate roots");
-    RejectLoot("""
-        cow:
-          ExoticEffect: true
-        """, "Loot rejects unsupported properties");
+          Skills:
+            - 'dropItem{item=minecraft:beef;amount=1} @target ~onDeath'
+        """, "Reject unsupported skill target selectors");
 
     File.WriteAllText(path, """
         cow:

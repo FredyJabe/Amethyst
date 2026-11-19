@@ -44,12 +44,12 @@ try
           Ingredients: [dirt]
           Result: { Id: iron_shovel, Amount: 1 }
         """);
-    string lootDir = Path.Combine(temp, "shards", "items", "loot");
-    Directory.CreateDirectory(lootDir);
-    File.WriteAllText(Path.Combine(lootDir, "custom.yml"), """
+    string skillDir = Path.Combine(temp, "shards", "items", "skills");
+    Directory.CreateDirectory(skillDir);
+    File.WriteAllText(Path.Combine(skillDir, "custom.yml"), """
         cow:
-          Drops:
-            - { Item: minecraft:diamond, Min: 1, Max: 1, Chance: 1 }
+          Skills:
+            - 'dropItem{item=minecraft:diamond;amount=1} ~onDeath'
         """);
     string entityDir = Path.Combine(temp, "shards", "entities", "definitions");
     Directory.CreateDirectory(entityDir);
@@ -152,15 +152,16 @@ try
     await host.LoadAsync();
     Check(host.GetService<IShardWorld>() is not null, "default overworld provider enabled");
     Check(host.GetService<IShardGameplay>() is not null, "gameplay enabled with world provider");
-    IShardLootRegistry lootTables = host.GetService<IShardLootRegistry>() ??
-        throw new Exception("FAIL: Items Shard loot registry not registered");
-    Check(lootTables.TableCount >= 10 &&
-        lootTables.TryRollEntity("minecraft:cow", out var diamondLoot, new Random(9)) &&
-        diamondLoot.Length == 1 &&
-        itemsRegistryLookup() == diamondLoot[0].ItemId &&
-        host.RegisteredConsoleCommands.Contains("lootinfo") &&
-        await host.TryExecuteConsoleAsync("lootinfo cow", CancellationToken.None),
-        "Items Shard registers editable YAML loot tables and console lookup");
+    IShardSkillRegistry skillRegistry = host.GetService<IShardSkillRegistry>() ??
+        throw new Exception("FAIL: Items Shard skill registry not registered");
+    Check(skillRegistry.OwnerCount >= 10 &&
+        skillRegistry.TryExecute("minecraft:cow", ShardSkillTrigger.OnDeath,
+            out var diamondDrops, new Random(9)) &&
+        diamondDrops.Length == 1 &&
+        itemsRegistryLookup() == diamondDrops[0].ItemId &&
+        host.RegisteredConsoleCommands.Contains("skillinfo") &&
+        await host.TryExecuteConsoleAsync("skillinfo cow", CancellationToken.None),
+        "Items Shard registers Mythic-style triggered death skills");
     int itemsRegistryLookup() => host.GetService<IShardItemRegistry>()!
         .TryGetByIdentifier("diamond", out var item) ? item.ProtocolId : -1;
     IShardEntityRegistry entityTypes = host.GetService<IShardEntityRegistry>() ??
@@ -320,8 +321,8 @@ try
     await host.DisableAsync("items");
     Check(host.GetService<IShardItemRegistry>() is null &&
         host.GetService<IShardRecipeRegistry>() is null &&
-        host.GetService<IShardLootRegistry>() is null &&
-        !host.RegisteredConsoleCommands.Contains("lootinfo") &&
+        host.GetService<IShardSkillRegistry>() is null &&
+        !host.RegisteredConsoleCommands.Contains("skillinfo") &&
         !host.RegisteredConsoleCommands.Contains("recipes") &&
         !host.RegisteredConsoleCommands.Contains("iteminfo"),
         "Disabling Items Shard unregisters its definitions and iteminfo command");
@@ -338,7 +339,7 @@ try
         host.GetService<IShardGameplay>() is not null &&
         host.GetService<IShardItemRegistry>() is not null &&
         host.GetService<IShardRecipeRegistry>() is not null &&
-        host.GetService<IShardLootRegistry>() is not null &&
+        host.GetService<IShardSkillRegistry>() is not null &&
         host.GetService<IShardEntityManager>() is not null &&
         host.GetService<IShardEntityRegistry>() is not null,
         "Enabling Gameplay automatically enables World, Items, Recipe and Entity providers");
