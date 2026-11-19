@@ -24,6 +24,7 @@ public sealed class MinecraftServer : IShardItemDropSink
     private readonly IShardEntityManager? _entities;
     private readonly IShardSkillEngine? _skills;
     private readonly IShardEntityRegistry? _entityTypes;
+    private readonly IShardEntityInteractions? _interactions;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private readonly Dictionary<Guid, Dictionary<int, ShardEntityInstance>> _entityViews = new();
@@ -38,7 +39,8 @@ public sealed class MinecraftServer : IShardItemDropSink
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
         IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
         IShardEntityManager? entities = null, IShardSkillEngine? skills = null,
-        IShardEntityRegistry? entityTypes = null)
+        IShardEntityRegistry? entityTypes = null,
+        IShardEntityInteractions? interactions = null)
     {
         _options = options;
         _world = world;
@@ -48,6 +50,7 @@ public sealed class MinecraftServer : IShardItemDropSink
         _entities = entities;
         _skills = skills;
         _entityTypes = entityTypes;
+        _interactions = interactions;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers, entities is null ? null : entities.AllocateEntityId);
         _operators = new OperatorStore(options.OperatorsFile);
@@ -372,6 +375,13 @@ public sealed class MinecraftServer : IShardItemDropSink
                         await HandleBlockActionAsync(player, action, lifetime.Token);
                         break;
                     }
+                    case EntityInteractionProtocol.ServerboundInteract:
+                    {
+                        EntityInteraction hit = EntityInteractionProtocol.Read(packet.Value);
+                        if (player.Ready)
+                            await HandleEntityInteractionAsync(player, hit, lifetime.Token);
+                        break;
+                    }
                     case BlockInteractionProtocol.ServerboundUseItemOn:
                     {
                         BlockUseOn hit = BlockInteractionProtocol.ReadUseOn(packet.Value);
@@ -392,7 +402,7 @@ public sealed class MinecraftServer : IShardItemDropSink
                         break;
                     }
                     default:
-                        // Other inventory, entity interactions and abilities are not yet implemented.
+                        // Unimplemented inventory, combat, and abilities packets.
                         break;
                 }
                 if (teleportConfirmed && playerLoaded && !player.Ready)
@@ -742,6 +752,65 @@ public sealed class MinecraftServer : IShardItemDropSink
                 }
             }
         }
+    }
+
+    /// <summary>Handle Java 26.3 entity right-clicks. The client-supplied EID
+    /// is checked against the authoritative Entities manager, reach distance,
+    /// and the held stack. Entities owns species and sheared state; Gameplay
+    /// owns inventory transactions and physical drops; Core dispatches events.</summary>
+    internal async Task HandleEntityInteractionAsync(ConnectedPlayer player,
+        EntityInteraction hit, CancellationToken ct)
+    {
+        if (!player.Ready || _entities is null || _interactions is null ||
+            _items is null || _skills is null || hit.Hand != 0)
+            return; // Offhand items are not represented by PlayerInventory yet.
+        ShardEntityInstance entity = default;
+        bool found = false;
+        foreach (ShardEntityInstance next in _entities.Snapshot())
+            if (next.EntityId == hit.EntityId)
+            {
+                entity = next;
+                found = true;
+                break;
+            }
+        if (!found) return;
+        PlayerPose pose = player.Pose;
+        double dx = entity.X - pose.X, dz = entity.Z - pose.Z;
+        double dy = entity.Y + 0.8 - (pose.Y + 1.62);
+        if (dx * dx + dy * dy + dz * dz > 25) return;
+        ItemStack held = player.Inventory.Held();
+        if (held.Count < 1) return;
+        string? trigger = null;
+        if (_items.TryGetByIdentifier("minecraft:bucket", out var bucket) &&
+            _items.TryGetByIdentifier("minecraft:milk_bucket", out var milk) &&
+            held.ItemId == bucket.ProtocolId &&
+            _interactions.TryMilk(hit.EntityId, out var milked) &&
+            player.Inventory.TryConvertHeld(bucket.ProtocolId, milk.ProtocolId))
+        {
+            entity = milked;
+            trigger = "onMilk";
+        }
+        else if (_groundItems is not null &&
+            _items.TryGetByIdentifier("minecraft:shears", out var shears) &&
+            _items.TryGetByIdentifier("minecraft:white_wool", out var wool) &&
+            held.ItemId == shears.ProtocolId &&
+            _interactions.TryShear(hit.EntityId, out var sheared))
+        {
+            entity = sheared;
+            // Basic sheep wool support until entity colour metadata and
+            // grazing/regrowth are implemented. One roll per real shearing.
+            if (!_groundItems.TrySpawn(wool.ProtocolId, Random.Shared.Next(1, 4),
+                entity.X, entity.Y + 0.2, entity.Z, out _))
+                Console.WriteLine($"[entities] Could not spawn sheared wool for #{entity.EntityId}");
+            trigger = "onShear";
+        }
+        if (trigger is null) return;
+        await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+        string? fallback = _entityTypes is not null &&
+            _entityTypes.TryGetById(entity.ProtocolId, out var vanilla)
+            ? vanilla.Identifier : null;
+        await _skills.DispatchAsync(new ShardSkillEvent(entity.DefinitionId,
+            trigger, entity.X, entity.Y, entity.Z, entity.EntityId, fallback), ct);
     }
 
     internal async Task HandleBlockUseAsync(ConnectedPlayer player,

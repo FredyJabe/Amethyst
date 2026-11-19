@@ -7,7 +7,7 @@ provides:
   - gameplay
 requires:
   - world
+  - entities
   - items
   - recipes
-  - entities
 dependsOn: []
