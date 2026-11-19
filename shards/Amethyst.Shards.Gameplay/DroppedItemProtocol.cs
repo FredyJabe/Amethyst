@@ -1,3 +1,5 @@
+using Amethyst.Shards;
+
 namespace Amethyst;
 
 /// <summary>Java Edition 26.3 / protocol 777 dropped item entity packets.
@@ -15,7 +17,8 @@ public static class DroppedItemProtocol
     public const int TeleportEntity = 0x80;
 
     public static async Task SendSpawnAsync(PacketChannel channel,
-        GroundItem item, CancellationToken ct)
+        GroundItem item, CancellationToken ct,
+        IShardItemRegistry? items = null)
     {
         await channel.SendAsync(AddEntity, writer =>
         {
@@ -31,17 +34,18 @@ public static class DroppedItemProtocol
             writer.WriteByte(0); // head yaw
             writer.WriteVarInt(0); // entity-specific data
         }, ct);
-        await SendStackAsync(channel, item, ct);
+        await SendStackAsync(channel, item, ct, items);
     }
 
     public static Task SendStackAsync(PacketChannel channel,
-        GroundItem item, CancellationToken ct) =>
+        GroundItem item, CancellationToken ct,
+        IShardItemRegistry? items = null) =>
         channel.SendAsync(SetEntityData, writer =>
         {
             writer.WriteVarInt(item.EntityId);
             writer.WriteByte(StackMetadataIndex);
             writer.WriteVarInt(StackMetadataSerializer);
-            InventoryProtocol.WriteStack(writer, item.ResolvedStack);
+            InventoryProtocol.WriteStack(writer, item.ResolvedStack, items);
             writer.WriteByte(0xFF); // end of metadata list
         }, ct);
 
