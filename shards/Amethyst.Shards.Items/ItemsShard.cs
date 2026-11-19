@@ -414,7 +414,7 @@ public sealed class ItemsShard : IShard
             bool Report(ShardItemDefinition item)
             {
                 ctx.Log($"{item.Identifier} | protocol ID {item.ProtocolId} | " +
-                    $"max stack {item.MaxStackSize} | block item: {item.IsBlockItem}" +
+                    $"max stack {item.MaxStackSize} | max durability: {item.MaxDurability} | block item: {item.IsBlockItem}" +
                     (item.Display is null ? "" : $" | display: {item.Display}"));
                 return true;
             }
