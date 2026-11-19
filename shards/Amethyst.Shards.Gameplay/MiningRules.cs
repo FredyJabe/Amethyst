@@ -1358,13 +1358,18 @@ public static class MiningRules
     public static int DurabilityCostForBlock(ushort state, int heldItem,
         Amethyst.Shards.IShardItemRegistry? items)
     {
-        if (ForState(state).Hardness <= 0 || items is null ||
-            !items.TryGetById(heldItem, out var item) ||
-            item.MaxDurability <= 0)
+        if (items is null || !items.TryGetById(heldItem, out var item) ||
+            item.MaxDurability <= 0 || state == 0)
             return 0;
+        BlockInfo block = ForState(state);
+        if (block.Hardness < 0) return 0;
+        // Unlike ordinary tools, vanilla shears also wear on instant-hand
+        // blocks. Fire and soul fire are the exceptions.
+        if (item.Identifier == "minecraft:shears")
+            return state is >= 4931 and <= 5443 ? 0 : 1;
+        if (block.Hardness == 0) return 0;
         if (Tools.ContainsKey(heldItem)) return 1;
         if (item.Identifier.EndsWith("_sword", StringComparison.Ordinal)) return 2;
-        if (item.Identifier == "minecraft:shears") return 1;
         return 0;
     }
 
