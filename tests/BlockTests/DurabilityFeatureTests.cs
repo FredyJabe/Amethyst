@@ -65,7 +65,8 @@ internal static class DurabilityFeatureTests
             Check(inventory.TryCreativeSet(36, wood.ProtocolId, 1, true) &&
                 inventory.ConfigureHeld(3, mending: true, unbreakable: false),
                 "Enchantments can be authored only by the authoritative server");
-            Check(!inventory.DamageHeld(wood.ProtocolId, 8) &&
+            Check(!inventory.DamageSlot(36, wood.ProtocolId, 8,
+                    random: new FixedRandom(true)) &&
                 inventory.Held().Damage == 0 &&
                 inventory.Held().Unbreaking == 3,
                 "Server applies Unbreaking to mining wear");
