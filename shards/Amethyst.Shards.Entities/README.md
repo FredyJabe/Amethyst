@@ -80,8 +80,8 @@ does not implement its required item, projectile or display metadata.
 
 ## Event-driven item drops
 
-The **Items Shard**, not Entities, owns `IShardSkillRegistry` and the
-`dropItem` skill action. User definitions live in
+The **Core** owns `IShardSkillEngine`, YAML parsing, registration and
+trigger dispatch. The **Items Shard** registers the `dropItem` action. User definitions live in
 `shards/data/items/skills/*.yml`; they use entity root keys and a
 MythicMobs-like skill line with a `~onDeath` trigger:
 
@@ -91,8 +91,9 @@ guardian_cow:
     - 'dropItem{item=minecraft:diamond;amount=1-2;chance=1} ~onDeath'
 ```
 
-The Entities Shard emits a death event from `entitykill` or lethal
-`TryDamage`. Gameplay executes the Items Shard's death skills and
+The Entities Shard reports deaths from `entitykill` or lethal
+`TryDamage`. Gameplay dispatches Core's `onDeath` trigger, executing
+the Items Shard's registered `dropItem` mechanic and
 spawns physical ground items, respecting the Items registry's stack
 limits. `entityremove` never triggers death skills. Alias-specific
 skills take precedence, with fallback to the vanilla type when an

@@ -7,7 +7,7 @@ inventories, dropped-item entities and crafting/furnace menus.
 
 ## Event skills (`dropItem` and `~onDeath`)
 
-**All item-drop skills belong to the Items Shard.** The bundled starter
+**Item-drop definitions and the `dropItem` mechanic belong to the Items Shard; the generic skill engine lives in Amethyst Core.** The bundled starter
 definitions live in `shards/Amethyst.Shards.Items/skills-26.3.yml`.
 Administrators can override entity event skills with `*.yml` or
 `*.yaml` files under `shards/data/items/skills/`, including subfolders.
@@ -46,17 +46,19 @@ respect the configured item stack limit.
 `Skills: []` or `Enabled: false` explicitly means no drops.
 A custom entity alias such as `amethyst:guardian_cow` can have its
 own skills, but otherwise inherits the vanilla entity type's
-death skills. Overriding a root in user YAML replaces all of its
-bundled skills; duplicate user roots and malformed expressions
+death skills. Overriding a root in user YAML replaces the Items
+Shard's bundled skills for that root; independent skill packs
+registered by other Shards combine through Core; duplicate user roots and malformed expressions
 cause a startup error. Run `skillinfo cow` in the server console
 to inspect its configured event skills.
 
 The Entities Shard emits a one-time death event on `TryKill` or
 lethal `TryDamage`. Gameplay dispatches `~onDeath` via
-`IShardSkillRegistry` and spawns physical, pickable items.
+Core's shared `IShardSkillEngine`; the Items-owned `dropItem` mechanic
+calls Gameplay's `IShardItemDropSink` to spawn physical, pickable items.
 `entityremove` does not trigger skills. This is a starter
 event/skill engine, **not** a complete MythicMobs implementation:
-other event triggers, target selectors, AI, Minecraft loot conditions,
+other registered game-specific triggers and mechanics, target selectors, AI, Minecraft loot conditions,
 Looting enchantments, cooking by fire, XP and rare-drop functions
 are not yet supported.
 

@@ -6,14 +6,14 @@ Amethyst is now organized into a **network kernel** and independently compiled *
 
 | Project | Responsibility |
 | --- | --- |
-| `src/Amethyst.csproj` | TCP listener, status/ping, protocol framing, Mojang authentication, encryption, login/configuration, connection lifetime, Shard loader, operator console host |
+| `src/Amethyst.csproj` | Network kernel, login/configuration, Shard loader, operator console, **global skill parser/registry/dispatcher**, and Shard extension contracts |
 | `shards/Amethyst.Shards.Overworld` | Terrain/biomes, chunks, lighting, save files, chunk preparation and streaming |
 | `shards/Amethyst.Shards.Items` | YAML-based item definitions, recipes, and triggered item skills (`dropItem` on `~onDeath`) for Java 26.3 |
 | `shards/Amethyst.Shards.Entities` | YAML-configured registry of 161 vanilla Java 26.3 entity types and in-memory runtime for spawned entities |
-| `shards/Amethyst.Shards.Gameplay` | Play-state packets, players, movement, game modes, inventory, crafting stations, chat, day/night clock; consumes Items, Recipe, Entity and World services |
+| `shards/Amethyst.Shards.Gameplay` | Play-state packets, players, movement, game modes, inventory, crafting stations, chat, day/night clock; dispatches Core skills and provides world-item effect sink |
 | `shards/Amethyst.Shards.Hello` | Disabled-by-default example: a `hello` console command and a Play packet observer |
 
-Core deliberately does **not** reference either built-in Shard assembly. The protocol API (e.g., `PacketChannel`, `PacketReader`, `PacketWriter`) and Shard contracts (`Amethyst.Shards`) are available from the core project. Existing generator versions **1–7** and the `.mc26` chunk save format are unchanged.
+Core deliberately does **not** reference any built-in Shard assembly. The protocol API (e.g., `PacketChannel`, `PacketReader`, `PacketWriter`) and Shard contracts (`Amethyst.Shards`) are available from the core project. Existing generator versions **1–7** and the `.mc26` chunk save format are unchanged.
 
 ## Items Shard (item definition ownership)
 
@@ -27,7 +27,7 @@ item pickups, persisted stacks, and furnace/crafting slot transactions. For
 example, swords and pickaxes can no longer stack to 64; an ender pearl can
 stack to 16. The Items Shard also owns the **recipe definitions and matching**;
 Gameplay owns crafting windows, ingredient consumption, furnace ticks, block
-placement, mining and entity physics. Core still handles only networking.
+placement, mining and entity physics. Core additionally hosts the generic skill orchestration framework, but item-specific effects remain in Shards.
 
 A Shard that consumes item definitions declares `requires: [items]`
 and resolves the service in `OnEnableAsync`:
@@ -148,13 +148,50 @@ and physics remain in Gameplay; spawned entity instances are transient.
 See [the Entities Shard guide](shards/Amethyst.Shards.Entities/README.md)
 for the exact YAML schema, C# service API, examples and limitations.
 
-## Event skills and death drops (Items Shard)
+## Core skill engine (shared by all Shards)
 
-`IShardSkillRegistry` is an **Items Shard** service. It loads
-MythicMobs-style YAML from bundled `skills-26.3.yml` and
-administrator overrides at `shards/data/items/skills/*.yml` or `*.yaml`.
-Entity roots contain `Skills` entries with mechanic parameters,
-an optional `@self` target, and a trigger:
+The global `Amethyst.Shards.SkillEngine` runs **inside Amethyst Core**.
+Every Shard gets the same `IShardSkillEngine` through
+`context.GetRequiredService<IShardSkillEngine>()`.
+Core owns skill YAML parsing, validation, registry merging, event
+dispatch and cleanup on Shard disable. It does **not** know how to
+spawn items, damage entities or perform other gameplay mechanics.
+
+Shards can contribute independent mechanics, event triggers and
+YAML packs through `IShardContext`:
+
+```csharp
+context.RegisterSkillTrigger("onInteract"); // once, by the event provider
+context.RegisterSkillMechanic("myAction", ValidateMyAction, ExecuteMyAction);
+context.RegisterSkillDefinitions(bundledYamlPath, customYamlDirectory);
+
+// Anywhere with access to the Core skill engine:
+IShardSkillEngine engine = context.GetRequiredService<IShardSkillEngine>();
+await engine.DispatchAsync(new ShardSkillEvent(
+    "minecraft:cow", "onInteract", 2, 70, 3), ct);
+```
+
+`ValidateMyAction(ShardSkillInstruction skill)` checks action
+parameters at load time; `ExecuteMyAction(ShardSkillInstruction skill,
+ShardSkillEvent evt, CancellationToken ct)` returns `ValueTask`.
+A Shard may register its own mechanic and can also use mechanics
+registered by other enabled Shards. Each Shard's user YAML overrides
+its bundled YAML; different Shards' skill lists for the same root
+**combine**, rather than overwrite one another. An explicit
+`Skills: []` suppresses vanilla fallback for a custom alias.
+Core manages registrations by Shard ID and removes the owning
+Shard's mechanics, triggers, and definitions during disable.
+
+`onDeath` is a built-in trigger in Core's initial trigger registry.
+Other triggers can be registered by Shards that emit them.
+Unregistered mechanics/triggers and invalid YAML fail validation.
+
+### Items `dropItem` mechanic on `~onDeath`
+
+The Items Shard contributes the `dropItem` action, validates item
+IDs/chances/counts, and owns starter definitions in
+`skills-26.3.yml` with overrides at
+`shards/data/items/skills/*.yml` / `*.yaml`:
 
 ```yaml
 cow:
@@ -163,25 +200,28 @@ cow:
     - 'dropItem{item=minecraft:leather;amount=0-2;chance=0.5} @self ~onDeath'
 ```
 
-`dropItem` supports `item` (vanilla item identifier), `amount`
-(an inclusive integer or `min-max`), and `chance` (0–1).
-The event engine currently supports `~onDeath` only;
-unsupported triggers or actions fail YAML validation. User skill
-lists replace bundled defaults by entity ID, and `Skills: []` disables
-drops. Named entity aliases can have separate skill lists or inherit
-their vanilla type's skills.
+`item` names an item from the Items registry; `amount` is an
+inclusive integer or `min-max` (0–64), and `chance` ranges 0–1.
+Short aliases `i`, `a`, and `c` are accepted. The Items mechanic
+uses `IShardItemDropSink` provided by Gameplay for physical spawning.
 
-On lethal `TryDamage` or `entitykill`, the Entities manager
-queues a one-time death. Gameplay calls `IShardSkillRegistry.TryExecute`
-and spawns real dropped items, using existing pickup, expiry and
-persistence code. `entityremove` is a silent despawn, so no death
-skills run. Inspect `skillinfo cow` from the server terminal.
+The Entities manager queues one-time death events after lethal
+`TryDamage` or `entitykill`. Gameplay dispatches `onDeath`
+through Core, passing an optional vanilla fallback for custom
+entities. Gameplay owns ground-item physics/pickup/persistence;
+`entityremove` never dispatches a death event. Use `skillinfo cow`
+to inspect the combined registered skills.
 
-Earlier experimental `items/loot/*.yml` files with active `Drops:`
-mappings must be manually migrated; startup rejects them with a
-clear error so old configurations cannot be silently ignored.
-See the [Items Shard skill guide](shards/Amethyst.Shards.Items/README.md)
-for examples and limitations.
+The initial implementation has `dropItem` and `~onDeath` only.
+Other mechanics and triggers can be added by enabled Shards;
+there is no full MythicMobs runtime or advanced Minecraft loot
+condition/enchantment support yet.
+
+Old experimental `items/loot/*.yml` files with active `Drops:`
+entries require manual migration to `Skills:` under
+`items/skills/`. The Items Shard fails startup with an explicit
+message rather than silently ignoring them. See the
+[Items Shard guide](shards/Amethyst.Shards.Items/README.md).
 
 ## Build / run
 
@@ -248,7 +288,7 @@ shard disable gameplay
 shard disable items
 shard disable entities
 shard disable overworld
-shard enable gameplay   # automatically enables world, items, recipes, skills and entities
+shard enable gameplay   # automatically enables world, items, recipes and entities
 skillinfo cow
 entitykill 1
 iteminfo minecraft:diamond_pickaxe
