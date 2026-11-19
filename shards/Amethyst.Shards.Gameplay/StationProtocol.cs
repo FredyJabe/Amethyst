@@ -11,6 +11,8 @@ public static class StationProtocol
     public const int FurnaceMenu = 14;
     public const int BlastFurnaceMenu = 10;
     public const int SmokerMenu = 22;
+    public const int AnvilMenu = 8;
+    public const int GrindstoneMenu = 15;
 
     public static Task OpenAsync(PacketChannel connection, int windowId,
         int menuType, string title, CancellationToken ct) =>
@@ -50,6 +52,8 @@ public static class StationProtocol
         StationKind.Furnace => FurnaceMenu,
         StationKind.BlastFurnace => BlastFurnaceMenu,
         StationKind.Smoker => SmokerMenu,
+        StationKind.Anvil => AnvilMenu,
+        StationKind.Grindstone => GrindstoneMenu,
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
@@ -59,6 +63,8 @@ public static class StationProtocol
         StationKind.Furnace => "Furnace",
         StationKind.BlastFurnace => "Blast Furnace",
         StationKind.Smoker => "Smoker",
+        StationKind.Anvil => "Anvil",
+        StationKind.Grindstone => "Grindstone",
         _ => "Station"
     };
 }
