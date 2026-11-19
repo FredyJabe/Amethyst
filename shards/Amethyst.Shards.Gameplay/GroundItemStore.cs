@@ -7,7 +7,15 @@ namespace Amethyst;
 /// Y is the bottom of the entity's 0.25-block bounding box.</summary>
 public readonly record struct GroundItem(
     int EntityId, Guid Uuid, int ItemId, int Count,
-    double X, double Y, double Z, double VelocityY, bool OnGround, long CreatedAtMs);
+    double X, double Y, double Z, double VelocityY, bool OnGround, long CreatedAtMs)
+{
+    /// <summary>Full authoritative stack. Null/default means an old
+    /// ID/count-only drop created before the durability milestone.</summary>
+    public ItemStack Data { get; init; }
+    public ItemStack ResolvedStack => Data.Count == 0
+        ? new ItemStack(ItemId, Count)
+        : Data with { Count = Count };
+}
 
 /// <summary>Owns loose item entities and atomically persists them, separately from
 /// player inventories. Packet visibility is managed by the Gameplay Shard.
@@ -15,7 +23,8 @@ public readonly record struct GroundItem(
 /// merging, partial collision shapes and hopper interaction are not included.</summary>
 public sealed class GroundItemStore
 {
-    private static readonly byte[] Magic = "AMDROP01"u8.ToArray();
+    private static readonly byte[] Magic = "AMDROP02"u8.ToArray();
+    private static readonly byte[] LegacyMagic = "AMDROP01"u8.ToArray();
     public const int MaximumEntities = 8192;
     public const long PickupDelayMilliseconds = 500;
     public const long DespawnMilliseconds = 300_000;
@@ -41,9 +50,23 @@ public sealed class GroundItemStore
         Load();
     }
 
-    private bool ValidStack(int itemId, int amount) =>
-        _items?.IsValidStack(itemId, amount) ??
-        (itemId is > 0 and <= 1657 && amount is >= 1 and <= 64);
+    private bool ValidStack(ItemStack stack)
+    {
+        if (stack.Count < 1 || stack.Damage < 0 ||
+            stack.Unbreaking is < 0 or > 3 ||
+            stack.RepairCost is < 0 or > 1_000_000) return false;
+        bool patched = stack.Damage > 0 || stack.Unbreaking > 0 ||
+            stack.Mending || stack.Unbreakable || stack.RepairCost > 0;
+        if (_items is null)
+            return !patched && stack.ItemId is > 0 and <= 1657 &&
+                stack.Count <= 64;
+        if (!_items.IsValidStack(stack.ItemId, stack.Count)) return false;
+        if (!patched) return true;
+        return stack.Count == 1 &&
+            _items.TryGetById(stack.ItemId, out var definition) &&
+            definition.MaxDurability > 0 &&
+            stack.Damage < definition.MaxDurability;
+    }
 
     public GroundItem[] Snapshot()
     {
@@ -51,18 +74,25 @@ public sealed class GroundItemStore
     }
 
     public bool TrySpawn(int itemId, int count, double x, double y, double z,
+        out GroundItem entity, long? nowMilliseconds = null) =>
+        TrySpawn(new ItemStack(itemId, count), x, y, z,
+            out entity, nowMilliseconds);
+
+    public bool TrySpawn(ItemStack stack, double x, double y, double z,
         out GroundItem entity, long? nowMilliseconds = null)
     {
         entity = default;
-        if (!ValidStack(itemId, count) ||
+        if (!ValidStack(stack) ||
             !double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z))
             return false;
         lock (_gate)
         {
             if (_entities.Count >= MaximumEntities) return false;
             int entityId = _allocateEntityId();
-            entity = new GroundItem(entityId, Guid.NewGuid(), itemId, count,
-                x, y, z, 0, false, nowMilliseconds ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            entity = new GroundItem(entityId, Guid.NewGuid(),
+                stack.ItemId, stack.Count, x, y, z, 0, false,
+                nowMilliseconds ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+            { Data = stack };
             _entities.Add(entityId, entity);
             try { Persist(); }
             catch { _entities.Remove(entityId); throw; }
@@ -133,9 +163,13 @@ public sealed class GroundItemStore
             if (!_entities.TryGetValue(entityId, out GroundItem entity) ||
                 now - entity.CreatedAtMs < PickupDelayMilliseconds)
                 return 0;
-            int taken = inventory.Give(entity.ItemId, entity.Count);
+            int taken = inventory.GiveStack(entity.ResolvedStack);
             if (taken == 0) return 0;
-            remaining = entity with { Count = entity.Count - taken };
+            remaining = entity with
+            {
+                Count = entity.Count - taken,
+                Data = entity.ResolvedStack with { Count = entity.Count - taken }
+            };
             if (remaining.Count == 0) _entities.Remove(entityId);
             else _entities[entityId] = remaining;
             Persist();
@@ -153,7 +187,9 @@ public sealed class GroundItemStore
         if (_path is null || !File.Exists(_path)) return;
         using var stream = File.OpenRead(_path);
         using var reader = new BinaryReader(stream, Encoding.UTF8);
-        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic))
+        byte[] header = reader.ReadBytes(Magic.Length);
+        bool legacy = header.SequenceEqual(LegacyMagic);
+        if (!legacy && !header.SequenceEqual(Magic))
             throw new InvalidDataException($"Invalid ground-items header in {_path}");
         int count = reader.ReadInt32();
         if (count is < 0 or > MaximumEntities)
@@ -163,18 +199,28 @@ public sealed class GroundItemStore
         {
             Guid uuid = new(reader.ReadBytes(16));
             int item = reader.ReadInt32(), amount = reader.ReadInt32();
+            int damage = legacy ? 0 : reader.ReadInt32();
+            int unbreaking = legacy ? 0 : reader.ReadByte();
+            bool mending = !legacy && reader.ReadBoolean();
+            bool unbreakable = !legacy && reader.ReadBoolean();
+            int repairCost = legacy ? 0 : reader.ReadInt32();
+            var stack = new ItemStack(item, amount)
+            {
+                Damage = damage, Unbreaking = unbreaking, Mending = mending,
+                Unbreakable = unbreakable, RepairCost = repairCost
+            };
             double x = reader.ReadDouble(), y = reader.ReadDouble(), z = reader.ReadDouble();
             double velocityY = reader.ReadDouble();
             bool onGround = reader.ReadBoolean();
             long created = reader.ReadInt64();
-            if (!ValidStack(item, amount) ||
+            if (!ValidStack(stack) ||
                 !double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z) ||
                 !double.IsFinite(velocityY))
                 throw new InvalidDataException($"Invalid ground item in {_path}");
             if (created <= now - DespawnMilliseconds) continue;
             int entityId = _allocateEntityId(); // collision-free after restart
             _entities.Add(entityId, new GroundItem(entityId, uuid, item, amount,
-                x, y, z, velocityY, onGround, created));
+                x, y, z, velocityY, onGround, created) { Data = stack });
         }
         if (stream.Position != stream.Length)
             throw new InvalidDataException($"Trailing ground item data in {_path}");
@@ -194,8 +240,14 @@ public sealed class GroundItemStore
                 foreach (GroundItem item in _entities.Values.OrderBy(x => x.EntityId))
                 {
                     writer.Write(item.Uuid.ToByteArray());
-                    writer.Write(item.ItemId);
-                    writer.Write(item.Count);
+                    ItemStack data = item.ResolvedStack;
+                    writer.Write(data.ItemId);
+                    writer.Write(data.Count);
+                    writer.Write(data.Damage);
+                    writer.Write((byte)data.Unbreaking);
+                    writer.Write(data.Mending);
+                    writer.Write(data.Unbreakable);
+                    writer.Write(data.RepairCost);
                     writer.Write(item.X);
                     writer.Write(item.Y);
                     writer.Write(item.Z);
