@@ -39,6 +39,33 @@ public sealed class PlayerUseState
     private readonly object _gate = new();
     private int _shieldHand = -1;
     private long _shieldDisabledUntil;
+    private (int Hand, int ItemId, long Started)? _charging;
+
+    public bool BeginCharge(int hand, int itemId, long now)
+    {
+        if (hand is < 0 or > 1 || itemId <= 0) return false;
+        lock (_gate)
+        {
+            _charging = (hand, itemId, now);
+            _shieldHand = -1;
+            return true;
+        }
+    }
+
+    public (int Hand, int ItemId, long Started)? StopCharge()
+    {
+        lock (_gate)
+        {
+            var old = _charging;
+            _charging = null;
+            return old;
+        }
+    }
+
+    public void CancelCharge()
+    {
+        lock (_gate) _charging = null;
+    }
 
     public int ShieldHand { get { lock (_gate) return _shieldHand; } }
 
