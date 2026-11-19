@@ -17,7 +17,8 @@ public sealed partial class PlayerInventory
                 _items is null || !_items.TryGetById(old.ItemId, out var item) ||
                 item.MaxDurability <= 0) return false;
             ItemStack next = DurabilityRules.ApplyWear(old, item.MaxDurability,
-                points, slot is >= 5 and <= 8, random);
+                points, slot is >= 5 and <= 8 &&
+                DurabilityRules.IsArmor(item.Identifier), random);
             if (next == old) return false;
             _slots[slot] = next;
             try { Persist(); _revision++; }
