@@ -161,6 +161,38 @@ public sealed class PacketWriter
     public void WriteByte(byte value) => _stream.WriteByte(value);
     public void WriteBool(bool value) => WriteByte(value ? (byte)1 : (byte)0);
     public void WriteBytes(ReadOnlySpan<byte> value) => _stream.Write(value);
+    /// <summary>Minecraft Java 26.3 LP_VEC3 compressed velocity encoding.
+    /// Encodes a zero vector as one byte, otherwise a 48-bit mixed-endian
+    /// packed vector with a scale and 15-bit signed-normalized coordinates.</summary>
+    public void WriteLpVec3(double x, double y, double z)
+    {
+        if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z))
+            throw new ArgumentOutOfRangeException(nameof(x),
+                "Non-finite entity velocity.");
+        double maximum = Math.Max(Math.Abs(x), Math.Max(Math.Abs(y), Math.Abs(z)));
+        if (maximum < 1.0 / 32766)
+        {
+            WriteByte(0);
+            return;
+        }
+        int scale = (int)Math.Clamp(Math.Ceiling(maximum), 1, 1023);
+        static ulong Quantize(double coordinate, int scale)
+        {
+            double normalized = Math.Clamp(coordinate / scale, -1, 1);
+            return (ulong)Math.Clamp(
+                (int)Math.Round((normalized + 1) * 16383), 0, 32766);
+        }
+        ulong packed = (Quantize(x, scale) << 3) |
+            (Quantize(y, scale) << 18) |
+            (Quantize(z, scale) << 33) |
+            (ulong)(scale & 3) |
+            (scale > 3 ? 4UL : 0UL);
+        WriteByte((byte)packed);
+        WriteByte((byte)(packed >> 8));
+        WriteInt32(unchecked((int)(packed >> 16)));
+        if (scale > 3) WriteVarInt(scale >> 2);
+    }
+
     public void WriteByteArray(ReadOnlySpan<byte> value)
     {
         WriteVarInt(value.Length);
