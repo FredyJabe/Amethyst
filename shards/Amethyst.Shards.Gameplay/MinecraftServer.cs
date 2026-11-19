@@ -57,6 +57,7 @@ public sealed partial class MinecraftServer
             _livingEntities = new LivingEntityStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId);
             _projectiles = new ProjectileWorld(_players.AllocateEntityId);
+            _fishing = new FishingWorld(_players.AllocateEntityId);
         }
     }
 
@@ -106,6 +107,7 @@ public sealed partial class MinecraftServer
             _livingEntities?.Save();
             _livingViews.Clear();
             _projectileViews.Clear();
+            _fishingViews.Clear();
             _itemViews.Clear();
             _experienceViews.Clear();
             _itemsSync = null;
@@ -170,6 +172,7 @@ public sealed partial class MinecraftServer
         // who completed login; rejected/half-loaded sessions must not overwrite
         // a valid previous save with the initial spawn placeholder.
         CloseStation(player);
+        _fishing?.Cancel(player.PlayerUuid);
         TrySavePosition(player);
         _players.Remove(player.ConnectionId);
         await NotifyDepartureAsync(player);
@@ -991,6 +994,7 @@ public sealed partial class MinecraftServer
             await TickExperienceOrbsAsync(ct);
             await TickLivingEntitiesAsync(ct);
             await TickProjectilesAsync(ct);
+            await TickFishingAsync(ct);
             await TickWoolRegrowthAsync(ct);
     }
 
