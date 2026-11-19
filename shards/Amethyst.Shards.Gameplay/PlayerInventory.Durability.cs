@@ -72,6 +72,66 @@ public sealed partial class PlayerInventory
         }
     }
 
+    /// <summary>Insert a complete item stack (e.g. returned crafting inputs
+    /// or a ground entity), keeping damage and enchantment components intact.
+    /// Never merge stacks with different component patches.</summary>
+    public int GiveStack(ItemStack incoming)
+    {
+        if (incoming.Count <= 0 || incoming.ItemId <= 0) return 0;
+        int maximum = MaxStack(incoming.ItemId);
+        if (maximum == 0) return 0;
+        bool extra = incoming.Damage > 0 || incoming.Unbreaking > 0 ||
+            incoming.Mending || incoming.Unbreakable ||
+            incoming.RepairCost > 0;
+        if (extra && (incoming.Count != 1 ||
+            !ValidStack(incoming))) return 0;
+        lock (_sync)
+        {
+            ItemStack[] previous = (ItemStack[])_slots.Clone();
+            int remaining = incoming.Count;
+            foreach (int i in Enumerable.Range(36, 9)
+                .Concat(Enumerable.Range(9, 27)))
+            {
+                ItemStack slot = _slots[i];
+                if (slot.Count == 0 || !SameItemData(slot, incoming) ||
+                    slot.Count >= maximum) continue;
+                int amount = Math.Min(maximum - slot.Count, remaining);
+                _slots[i] = slot with { Count = slot.Count + amount };
+                remaining -= amount;
+                if (remaining == 0) break;
+            }
+            foreach (int i in Enumerable.Range(36, 9)
+                .Concat(Enumerable.Range(9, 27)))
+            {
+                if (remaining == 0) break;
+                if (_slots[i].Count != 0) continue;
+                int amount = Math.Min(maximum, remaining);
+                _slots[i] = incoming with { Count = amount };
+                remaining -= amount;
+            }
+            if (remaining == incoming.Count) return 0;
+            try { Persist(); _revision++; }
+            catch { Array.Copy(previous, _slots, _slots.Length); throw; }
+            return incoming.Count - remaining;
+        }
+    }
+
+    /// <summary>Privileged full repair for server administration/tests;
+    /// survival repair is performed through item combining/Mending/anvils.</summary>
+    public bool RepairHeldCompletely()
+    {
+        lock (_sync)
+        {
+            int slot = 36 + _selected;
+            ItemStack current = _slots[slot];
+            if (current.Damage <= 0 || current.Count != 1) return false;
+            _slots[slot] = current with { Damage = 0 };
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = current; throw; }
+            return true;
+        }
+    }
+
     /// <summary>Authoritative server-side modifier for enchanted/Unbreakable
     /// items. Client-provided creative slot components are never trusted.</summary>
     public bool ConfigureHeld(int unbreaking, bool mending, bool unbreakable)
