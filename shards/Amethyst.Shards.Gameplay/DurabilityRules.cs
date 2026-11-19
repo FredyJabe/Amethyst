@@ -221,6 +221,19 @@ public static class DurabilityRules
         return false;
     }
 
+    /// <summary>Each successful Survival anvil output has a 12% chance
+    /// to advance from normal to chipped to damaged and finally break.
+    /// Preserve the facing block state across damage stages.</summary>
+    public static bool TryWearAnvil(ushort state, out ushort updated,
+        Random? random = null)
+    {
+        updated = state;
+        if (state is < 12962 or > 12973) return false;
+        if ((random ?? Random.Shared).NextDouble() >= 0.12) return false;
+        updated = state >= 12970 ? (ushort)0 : (ushort)(state + 4);
+        return true;
+    }
+
     /// <summary>Returned as true only if the operation should be considered
     /// physical armor wear (a real positive damage event).</summary>
     public static bool IsArmor(string itemIdentifier) =>
