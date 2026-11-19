@@ -177,7 +177,9 @@ durability enchantments in-game with:
 ```
 
 These commands use server-side inventory changes and resynchronize the
-held item. Creative packet contents are not trusted to author
+held item. In-game use requires operator level 2; the trusted server
+console also accepts `enchant <player> ...` (including offline-mode
+development servers). Creative packet contents are not trusted to author
 enchantments.
 
 #### Durability state and migration
