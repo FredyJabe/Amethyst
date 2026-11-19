@@ -84,6 +84,41 @@ public sealed class PlayerExperience
         }
     }
 
+    /// <summary>Reserve levels while committing one server-authoritative
+    /// transaction. A stale/failed inventory commit refunds the original XP.
+    /// The experience lock serializes pickups with anvil payments.</summary>
+    public bool TryPayLevels(int levels, Func<bool> commit)
+    {
+        ArgumentNullException.ThrowIfNull(commit);
+        if (levels < 0 || levels > 39) return false;
+        lock (_gate)
+        {
+            var (progress, level, _) = Snapshot();
+            if (level < levels) return false;
+            if (levels == 0) return commit();
+            int newLevel = level - levels;
+            long baseXp = RequiredTotalForLevel(newLevel);
+            long delta = RequiredTotalForLevel(newLevel + 1) - baseXp;
+            int old = _total;
+            _total = (int)Math.Clamp(baseXp + (long)(progress * delta),
+                0, MaximumExperience);
+            try
+            {
+                Persist();
+                if (commit()) return true;
+            }
+            catch
+            {
+                _total = old;
+                Persist();
+                throw;
+            }
+            _total = old;
+            Persist();
+            return false;
+        }
+    }
+
     private void Load()
     {
         if (_path is null || !File.Exists(_path)) return;
