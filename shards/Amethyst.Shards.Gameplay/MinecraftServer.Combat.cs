@@ -103,6 +103,9 @@ public sealed partial class MinecraftServer
     {
         if (!victim.Ready || victim.GameMode is PlayerGameMode.Creative or
             PlayerGameMode.Spectator || raw <= 0) return false;
+        if (attacker is not null &&
+            await TryBlockShieldAsync(victim, attacker, ct))
+            return true;
         PlayerPose origin = attacker?.Pose ?? victim.Pose;
         ItemStack[] gear = victim.Inventory.Snapshot().Slots;
         float armor = CombatRules.ArmorPoints(gear, _items);
