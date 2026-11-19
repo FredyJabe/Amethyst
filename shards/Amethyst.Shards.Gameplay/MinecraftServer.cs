@@ -229,6 +229,14 @@ public sealed partial class MinecraftServer
                             teleportConfirmed = true;
                         break;
                     }
+                    case FlightProtocol.ServerboundPlayerCommand:
+                    {
+                        PlayerCommandAction command =
+                            FlightProtocol.ReadPlayerCommand(packet.Value);
+                        await HandleFlightCommandAsync(player, command,
+                            lifetime.Token);
+                        break;
+                    }
                     case 0x2C: // Player Loaded
                         reader.RequireEnd();
                         playerLoaded = true;
@@ -312,8 +320,22 @@ public sealed partial class MinecraftServer
                                 _world.SpawnZPosition, lifetime.Token);
                             break;
                         }
-                        var current = new PlayerPose(x, y, z, yaw, pitch, (flags & 1) != 0);
+                        var current = new PlayerPose(x, y, z, yaw, pitch,
+                            (flags & 1) != 0);
+                        if (player.Flight.IsGliding &&
+                            !FlightRules.PlausibleMovement(old, current,
+                                player.Flight.IsBoosted(Environment.TickCount64)))
+                        {
+                            expectedTeleportId++;
+                            teleportConfirmed = false;
+                            await SpawnPackets.SendPositionAsync(player.Connection,
+                                expectedTeleportId, old.X, old.Y, old.Z,
+                                old.Yaw, old.Pitch, lifetime.Token);
+                            break;
+                        }
                         player.SetPose(current);
+                        await UpdateGlideMovementAsync(player, old, current,
+                            flags, lifetime.Token);
                         if (_stations.GetMenu(player.PlayerUuid) is StationMenu active)
                         {
                             double sx = active.Position.X + 0.5 - current.X;
@@ -996,6 +1018,7 @@ public sealed partial class MinecraftServer
             await TickProjectilesAsync(ct);
             await TickFishingAsync(ct);
             await TickWoolRegrowthAsync(ct);
+            await TickElytraAsync(ct);
     }
 
     /// <summary>One authoritative 20Hz tick for loose items. Exposed internally
