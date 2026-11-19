@@ -46,7 +46,8 @@ public sealed class StationState
 /// client state IDs and never trust client-supplied item contents.</summary>
 public sealed class WorkstationManager
 {
-    private static readonly byte[] Magic = "AMSTAT01"u8.ToArray();
+    private static readonly byte[] Magic = "AMSTAT02"u8.ToArray();
+    private static readonly byte[] LegacyMagic = "AMSTAT01"u8.ToArray();
     private readonly object _gate = new();
     private readonly Dictionary<StationPos, StationState> _stations = [];
     private readonly Dictionary<Guid, StationMenu> _menus = [];
@@ -551,7 +552,9 @@ public sealed class WorkstationManager
         if (_path is null || !File.Exists(_path)) return;
         using var stream = File.OpenRead(_path);
         using var reader = new BinaryReader(stream, Encoding.UTF8);
-        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic) ||
+        byte[] magic = reader.ReadBytes(Magic.Length);
+        bool legacy = magic.SequenceEqual(LegacyMagic);
+        if (!legacy && !magic.SequenceEqual(Magic) ||
             reader.ReadInt64() != _world.Seed || reader.ReadString() != _world.DimensionId)
             throw new InvalidDataException("Invalid station store header/world identity.");
         int count = reader.ReadInt32();
@@ -572,9 +575,11 @@ public sealed class WorkstationManager
             for (int slot = 0; slot < 3; slot++)
             {
                 int itemId = reader.ReadInt32(), amount = reader.ReadInt32();
-                if (!ValidStack(new ItemStack(itemId, amount)))
+                int damage = legacy ? 0 : reader.ReadInt32();
+                var item = new ItemStack(itemId, amount) { Damage = damage };
+                if (!ValidStack(item))
                     throw new InvalidDataException("Invalid persisted station inventory.");
-                state.Slots[slot] = new ItemStack(itemId, amount);
+                state.Slots[slot] = item;
             }
             if (state.BurnRemaining is < 0 or > 100000 || state.BurnTotal is < 0 or > 100000 ||
                 state.CookProgress is < 0 or > 10000 || state.CookTotal is < 0 or > 10000)
@@ -618,6 +623,7 @@ public sealed class WorkstationManager
                     {
                         writer.Write(stack.ItemId);
                         writer.Write(stack.Count);
+                        writer.Write(stack.Damage);
                     }
                 }
                 writer.Flush();
