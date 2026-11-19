@@ -15,6 +15,7 @@ public sealed partial class PlayerInventory
     private readonly ItemStack[] _slots = new ItemStack[46];
     private readonly string? _path;
     private readonly IShardItemRegistry? _items;
+    internal IShardItemRegistry? ItemRegistry => _items;
     private ItemStack _cursor;
     private int _selected;
     private int _revision;
