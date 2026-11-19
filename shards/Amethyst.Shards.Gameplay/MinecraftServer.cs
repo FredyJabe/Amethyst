@@ -684,7 +684,7 @@ public sealed partial class MinecraftServer
         var content = _stations.Content(player.PlayerUuid, player.Inventory);
         if (content is not { } menu) return;
         await StationProtocol.SendContentAsync(player.Connection, menu.WindowId,
-            menu.Revision, menu.Slots, menu.Cursor, ct);
+            menu.Revision, menu.Slots, menu.Cursor, ct, _items);
         StationKind? kind = _stations.GetMenu(player.PlayerUuid)?.Kind;
         if (kind == StationKind.Anvil)
         {
@@ -1057,11 +1057,11 @@ public sealed partial class MinecraftServer
                 try
                 {
                     if (!seen.TryGetValue(item.EntityId, out GroundItem last))
-                        await DroppedItemProtocol.SendSpawnAsync(viewer.Connection, item, ct);
+                        await DroppedItemProtocol.SendSpawnAsync(viewer.Connection, item, ct, _items);
                     else
                     {
                         if (last.Count != item.Count)
-                            await DroppedItemProtocol.SendStackAsync(viewer.Connection, item, ct);
+                            await DroppedItemProtocol.SendStackAsync(viewer.Connection, item, ct, _items);
                         if (last.X != item.X || last.Y != item.Y || last.Z != item.Z)
                             await DroppedItemProtocol.SendPositionAsync(viewer.Connection, item, ct);
                     }
@@ -1112,7 +1112,7 @@ public sealed partial class MinecraftServer
                         else
                         {
                             await DroppedItemProtocol.SendStackAsync(viewer.Connection,
-                                remaining, ct);
+                                remaining, ct, _items);
                             seen[item.EntityId] = remaining;
                         }
                     }
