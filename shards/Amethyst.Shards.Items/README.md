@@ -134,7 +134,8 @@ Each player inventory stack has an accumulated integer `Damage`.
 A successful **Survival** block break decreases durability for mining
 tools (pickaxes, axes, shovels and hoes), swords and shears.
 Normal mining tools and shears lose one durability point; swords lose
-two. Breaking blocks with zero hardness costs no durability. An
+two. Breaking blocks with zero hardness costs no durability for normal
+tools and swords; shears also wear on instant blocks (except fire). An
 item disappears when its damage reaches the maximum. Creative mining,
 rejected digs, aborted digs, and blocks that were already air cause
 no wear.
