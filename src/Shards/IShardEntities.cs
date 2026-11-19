@@ -43,4 +43,10 @@ public interface IShardEntityManager
     bool TryTeleport(int entityId, double x, double y, double z,
         float yaw, float pitch);
     bool TryDamage(int entityId, double amount, out ShardEntityInstance updated);
+    /// <summary>Kill one managed entity, honoring its invulnerability flag.
+    /// Unlike TryRemove, a kill creates a death event for loot processing.</summary>
+    bool TryKill(int entityId, out ShardEntityInstance killed);
+    /// <summary>Consume deaths once; Gameplay owns the drop generation.
+    /// Despawns (TryRemove) are never counted as deaths.</summary>
+    ShardEntityInstance[] DrainDeaths();
 }

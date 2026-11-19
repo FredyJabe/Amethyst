@@ -6,5 +6,6 @@ enabled: true
 provides:
   - items
   - recipes
+  - loot
 requires: []
 dependsOn: []

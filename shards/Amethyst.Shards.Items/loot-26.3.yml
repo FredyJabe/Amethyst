@@ -1,0 +1,47 @@
+# Starter entity loot tables for Java 26.3; not the complete vanilla loot system.
+# Items Shard owns item selection. Conditions (looting, fire, player-kill,
+# enchantments, entity equipment) are not implemented in this milestone.
+# Each entity root key maps to independent chance/amount rolls.
+cow:
+  Drops:
+    - { Item: minecraft:beef, Min: 1, Max: 3 }
+    - { Item: minecraft:leather, Min: 0, Max: 2 }
+pig:
+  Drops:
+    - { Item: minecraft:porkchop, Min: 1, Max: 3 }
+chicken:
+  Drops:
+    - { Item: minecraft:chicken, Min: 1, Max: 1 }
+    - { Item: minecraft:feather, Min: 0, Max: 2 }
+sheep:
+  Drops:
+    - { Item: minecraft:mutton, Min: 1, Max: 2 }
+    - { Item: minecraft:white_wool, Min: 1, Max: 1 }
+zombie:
+  Drops:
+    - { Item: minecraft:rotten_flesh, Min: 0, Max: 2 }
+skeleton:
+  Drops:
+    - { Item: minecraft:bone, Min: 0, Max: 2 }
+    - { Item: minecraft:arrow, Min: 0, Max: 2 }
+spider:
+  Drops:
+    - { Item: minecraft:string, Min: 0, Max: 2 }
+    - { Item: minecraft:spider_eye, Min: 1, Max: 1, Chance: 0.3333 }
+creeper:
+  Drops:
+    - { Item: minecraft:gunpowder, Min: 0, Max: 2 }
+enderman:
+  Drops:
+    - { Item: minecraft:ender_pearl, Min: 0, Max: 1 }
+blaze:
+  Drops:
+    - { Item: minecraft:blaze_rod, Min: 0, Max: 1 }
+slime:
+  Drops:
+    - { Item: minecraft:slime_ball, Min: 0, Max: 2 }
+rabbit:
+  Drops:
+    - { Item: minecraft:rabbit, Min: 0, Max: 1 }
+    - { Item: minecraft:rabbit_hide, Min: 0, Max: 1 }
+    - { Item: minecraft:rabbit_foot, Min: 1, Max: 1, Chance: 0.10 }

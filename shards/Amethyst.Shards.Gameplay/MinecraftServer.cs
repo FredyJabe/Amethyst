@@ -22,6 +22,8 @@ public sealed class MinecraftServer
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
     private readonly IShardEntityManager? _entities;
+    private readonly IShardLootRegistry? _loot;
+    private readonly IShardEntityRegistry? _entityTypes;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private readonly Dictionary<Guid, Dictionary<int, ShardEntityInstance>> _entityViews = new();
@@ -35,7 +37,8 @@ public sealed class MinecraftServer
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
         IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
-        IShardEntityManager? entities = null)
+        IShardEntityManager? entities = null, IShardLootRegistry? loot = null,
+        IShardEntityRegistry? entityTypes = null)
     {
         _options = options;
         _world = world;
@@ -43,6 +46,8 @@ public sealed class MinecraftServer
         _inventoryDirectory = inventoryDirectory;
         _items = items;
         _entities = entities;
+        _loot = loot;
+        _entityTypes = entityTypes;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers, entities is null ? null : entities.AllocateEntityId);
         _operators = new OperatorStore(options.OperatorsFile);
@@ -830,6 +835,27 @@ public sealed class MinecraftServer
     internal async Task TickEntitiesAsync(CancellationToken ct)
     {
         if (_entities is null) return;
+        // Death notifications are emitted by the Entities Shard. Items owns
+        // the loot rolls; Gameplay alone handles physical dropped-item entities.
+        // Drain before the snapshot so a death cannot be rendered after its drop.
+        if (_groundItems is not null && _loot is not null && _entityTypes is not null)
+        {
+            foreach (ShardEntityInstance dead in _entities.DrainDeaths())
+            {
+                string typeId = dead.DefinitionId;
+                if (!_loot.TryRollEntity(typeId, out ShardLootStack[] results))
+                {
+                    // Custom entity aliases inherit their vanilla base type's
+                    // table unless Items provides an explicit alias override.
+                    if (_entityTypes.TryGetById(dead.ProtocolId, out var vanilla))
+                        _loot.TryRollEntity(vanilla.Identifier, out results);
+                }
+                foreach (ShardLootStack drop in results)
+                    if (!_groundItems.TrySpawn(drop.ItemId, drop.Count,
+                        dead.X, dead.Y + 0.2, dead.Z, out _))
+                        Console.WriteLine($"[loot] Could not spawn item {drop.ItemId} x{drop.Count} for {typeId}");
+            }
+        }
         ShardEntityInstance[] instances = _entities.Snapshot();
         ConnectedPlayer[] viewers = _players.Snapshot().Where(p => p.Ready).ToArray();
         var online = viewers.Select(p => p.ConnectionId).ToHashSet();

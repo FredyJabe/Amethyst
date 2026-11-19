@@ -383,8 +383,28 @@ public sealed class ItemsShard : IShard
                 """ + Environment.NewLine);
         var recipes = new RecipeCatalog(catalog,
             Path.Combine(directory, "recipes-26.3.yml"), recipeDirectory);
+        string lootDirectory = Path.Combine(ctx.DataDirectory, "loot");
+        Directory.CreateDirectory(lootDirectory);
+        string lootExample = Path.Combine(lootDirectory, "example-loot.yml");
+        if (!File.Exists(lootExample))
+            File.WriteAllText(lootExample, """
+                # YAML entity loot tables; uncomment to configure.
+                # cow:
+                #   Drops:
+                #     - { Item: minecraft:beef, Min: 1, Max: 3 }
+                #     - { Item: minecraft:leather, Min: 0, Max: 2, Chance: 0.5 }
+                #
+                # guardian_cow:
+                #   Drops:
+                #     - { Item: minecraft:diamond, Min: 1, Max: 2 }
+                #
+                # To disable a bundled table, define Drops: [] or Enabled: false.
+                """ + Environment.NewLine);
+        var loot = new LootCatalog(catalog,
+            Path.Combine(directory, "loot-26.3.yml"), lootDirectory);
         ctx.RegisterService<IShardItemRegistry>(catalog);
         ctx.RegisterService<IShardRecipeRegistry>(recipes);
+        ctx.RegisterService<IShardLootRegistry>(loot);
         ctx.RegisterConsoleCommand("iteminfo", (args, token) =>
         {
             string query = args.Trim();
@@ -417,9 +437,27 @@ public sealed class ItemsShard : IShard
                 (ids.Length == 30 ? " … (showing first 30)" : ""));
             return Task.CompletedTask;
         });
+        ctx.RegisterConsoleCommand("lootinfo", (args, token) =>
+        {
+            string key = args.Trim();
+            bool exists = loot.TryRollEntity(key, out _, new Random(0));
+            ShardLootTable? rule = loot.Definitions.FirstOrDefault(t =>
+                string.Equals(t.EntityId, key, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(t.EntityId, key.StartsWith("minecraft:", StringComparison.OrdinalIgnoreCase)
+                    ? key["minecraft:".Length..] : key, StringComparison.OrdinalIgnoreCase));
+            if (!exists || rule is null)
+                ctx.Log("Usage: lootinfo <entity-id> (known configured loot table)");
+            else
+                ctx.Log($"Loot {rule.EntityId}: " +
+                    (rule.Drops.Count == 0 ? "(no drops)" :
+                        string.Join(", ", rule.Drops.Select(d =>
+                        $"{catalog.All[d.ItemId].Identifier} {d.Min}-{d.Max} @ {d.Chance:P0}"))));
+            return Task.CompletedTask;
+        });
         ctx.Log($"Registered {catalog.Count} vanilla Java {catalog.MinecraftVersion} " +
-            $"item definitions and {recipes.RecipeCount} YAML recipes; " +
-            $"item overrides: {definitions}; recipe overrides: {recipeDirectory}.");
+            $"item definitions, {recipes.RecipeCount} YAML recipes, " +
+            $"and {loot.TableCount} entity loot tables; " +
+            $"item overrides: {definitions}; recipe overrides: {recipeDirectory}; loot: {lootDirectory}.");
         return Task.CompletedTask;
     }
 

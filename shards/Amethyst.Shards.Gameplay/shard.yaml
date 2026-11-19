@@ -9,5 +9,6 @@ requires:
   - world
   - items
   - recipes
+  - loot
   - entities
 dependsOn: []

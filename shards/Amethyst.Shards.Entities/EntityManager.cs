@@ -10,6 +10,7 @@ public sealed class EntityManager : IShardEntityManager
     private const double MaximumCoordinate = 30_000_000;
     private readonly IShardEntityRegistry _definitions;
     private readonly Dictionary<int, ShardEntityInstance> _instances = new();
+    private readonly Queue<ShardEntityInstance> _deaths = new();
     private readonly object _gate = new();
     private int _nextEntityId;
 
@@ -76,10 +77,48 @@ public sealed class EntityManager : IShardEntityManager
                 definition.Invulnerable || entity.Health is not double health)
                 return false;
             updated = entity with { Health = Math.Max(0, health - amount) };
-            if (updated.Health <= 0) _instances.Remove(entityId);
+            if (updated.Health <= 0)
+            {
+                _instances.Remove(entityId);
+                EnqueueDeath(updated);
+            }
             else _instances[entityId] = updated;
             return true;
         }
+    }
+
+    public bool TryKill(int entityId, out ShardEntityInstance killed)
+    {
+        killed = default;
+        lock (_gate)
+        {
+            if (!_instances.TryGetValue(entityId, out var entity) ||
+                !_definitions.TryGetByIdentifier(entity.DefinitionId, out var definition) ||
+                definition.Invulnerable)
+                return false;
+            killed = entity with { Health = entity.Health.HasValue ? 0 : null };
+            _instances.Remove(entityId);
+            EnqueueDeath(killed);
+            return true;
+        }
+    }
+
+    public ShardEntityInstance[] DrainDeaths()
+    {
+        lock (_gate)
+        {
+            var deaths = _deaths.ToArray();
+            _deaths.Clear();
+            return deaths;
+        }
+    }
+
+    private void EnqueueDeath(ShardEntityInstance dead)
+    {
+        // Bound notification memory if gameplay is disabled while another
+        // Shard repeatedly creates and kills entities.
+        if (_deaths.Count >= MaximumEntities) _deaths.Dequeue();
+        _deaths.Enqueue(dead);
     }
 
     private static bool ValidPosition(double x, double y, double z) =>

@@ -75,6 +75,14 @@ public sealed class EntitiesShard : IShard
                 ctx.Log($"Spawned {spawned.DefinitionId} as entity #{spawned.EntityId} at {x:F1}, {y:F1}, {z:F1}");
             return Task.CompletedTask;
         });
+        ctx.RegisterConsoleCommand("entitykill", (args, token) =>
+        {
+            bool killed = int.TryParse(args.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture,
+                out int id) && manager.TryKill(id, out _);
+            ctx.Log(killed ? $"Killed entity #{id} (loot will be rolled by Gameplay)" :
+                "Usage: entitykill <active-entity-id> (non-invulnerable entity)");
+            return Task.CompletedTask;
+        });
         ctx.RegisterConsoleCommand("entityremove", (args, token) =>
         {
             bool removed = int.TryParse(args.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture,
