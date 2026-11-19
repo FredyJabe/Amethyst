@@ -77,8 +77,27 @@ public sealed class PlayerInventory
         }
     }
 
-    /// <returns>Number actually inserted; overflow is not represented as a
-    /// ground entity yet, until item entities are implemented.</returns>
+    /// <summary>Remove a precisely identified held stack after a physical
+    /// ground-item spawn has succeeded. Rejects stale hotbar changes and
+    /// never consumes more items than are currently held.</summary>
+    public bool TryTakeHeld(int expectedItemId, int count)
+    {
+        if (expectedItemId <= 0 || count <= 0) return false;
+        lock (_sync)
+        {
+            int slot = 36 + _selected;
+            ItemStack current = _slots[slot];
+            if (current.ItemId != expectedItemId || current.Count < count)
+                return false;
+            _slots[slot] = current.Count == count
+                ? ItemStack.Empty : current with { Count = current.Count - count };
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = current; throw; }
+            return true;
+        }
+    }
+
+    /// <returns>Number actually inserted; excess remains uncollected.</returns>
     public int Give(int itemId, int count)
     {
         int maximum = MaxStack(itemId);

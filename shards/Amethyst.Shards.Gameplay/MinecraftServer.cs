@@ -481,8 +481,38 @@ public sealed class MinecraftServer : IShardItemDropSink
         if (action.Status is BlockInteractionProtocol.DropAllItems
             or BlockInteractionProtocol.DropItem)
         {
-            // Drop actions have no item entities yet. Resynchronize instead of
-            // letting the client invent a dropped item or lose inventory.
+            if (player.Ready && _groundItems is not null)
+            {
+                ItemStack held = player.Inventory.Held();
+                int count = action.Status == BlockInteractionProtocol.DropAllItems
+                    ? held.Count : Math.Min(held.Count, 1);
+                if (held.ItemId > 0 && count > 0)
+                {
+                    PlayerPose pose = player.Pose;
+                    if (_groundItems.TrySpawn(held.ItemId, count,
+                        pose.X, pose.Y + 1.2, pose.Z, out GroundItem ground))
+                    {
+                        bool committed;
+                        try { committed = player.Inventory.TryTakeHeld(held.ItemId, count); }
+                        catch
+                        {
+                            _groundItems.TryRemove(ground.EntityId);
+                            throw;
+                        }
+                        if (committed)
+                        {
+                            await DispatchItemSkillAsync(player, held.ItemId,
+                                "onDrop", ct, count, ground.X, ground.Y, ground.Z);
+                            if (action.Status == BlockInteractionProtocol.DropAllItems)
+                                await DispatchItemSkillAsync(player, held.ItemId,
+                                    "onStackDrop", ct, count, ground.X, ground.Y, ground.Z);
+                        }
+                        else _groundItems.TryRemove(ground.EntityId);
+                    }
+                }
+            }
+            // Always reconcile the client, including empty slots, full ground
+            // item stores and creative inventories with modified hotbar items.
             await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
             return;
         }
