@@ -50,8 +50,7 @@ public static class CombatProtocol
         target.SendAsync(ClientboundSetMotion, p =>
         {
             p.WriteVarInt(entityId);
-            // Java 26.3 LP_VEC3, all doubles
-            p.WriteDouble(vx); p.WriteDouble(vy); p.WriteDouble(vz);
+            p.WriteLpVec3(vx, vy, vz); // 26.3 compressed LP_VEC3
         }, ct);
 
     public static Task SendRespawnAsync(ConnectedPlayer player,
