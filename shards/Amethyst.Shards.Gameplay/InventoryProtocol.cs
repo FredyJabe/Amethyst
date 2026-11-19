@@ -7,6 +7,14 @@ public readonly record struct ItemStack(int ItemId, int Count)
     /// <summary>Accumulated item damage. Zero is undamaged; valid nonzero
     /// damage must be strictly below the item definition's MaxDurability.</summary>
     public int Damage { get; init; }
+    /// <summary>Vanilla Unbreaking I–III and Mending I.
+    /// These are authoritative item enchantments, not client input.</summary>
+    public int Unbreaking { get; init; }
+    public bool Mending { get; init; }
+    /// <summary>Vanilla unbreakable component (prevents all item wear).</summary>
+    public bool Unbreakable { get; init; }
+    /// <summary>Anvil prior-work penalty; retained through item moves.</summary>
+    public int RepairCost { get; init; }
 }
 
 public readonly record struct InventoryClick(int Window, int Revision, int Slot,
@@ -26,15 +34,45 @@ public static class InventoryProtocol
         writer.WriteVarInt(stack.Count);
         if (stack.Count == 0) return;
         writer.WriteVarInt(stack.ItemId);
-        // Java 26.3 minecraft:data_component_type registry: damage = 3.
-        // The client's default item components supply max_damage. Only the
-        // damage override is needed to display the durability bar.
-        writer.WriteVarInt(stack.Damage > 0 ? 1 : 0);
+        // 26.3 data components: damage(3), unbreakable(4),
+        // enchantments(13), repair_cost(19). The item definition already
+        // provides max_damage, so no redundant max_damage patch is needed.
+        bool enchanted = stack.Unbreaking > 0 || stack.Mending;
+        int count = (stack.Damage > 0 ? 1 : 0) +
+            (stack.Unbreakable ? 1 : 0) +
+            (enchanted ? 1 : 0) +
+            (stack.RepairCost > 0 ? 1 : 0);
+        writer.WriteVarInt(count);
         writer.WriteVarInt(0); // removed data components
         if (stack.Damage > 0)
         {
-            writer.WriteVarInt(3); // minecraft:damage
+            writer.WriteVarInt(3);
             writer.WriteVarInt(stack.Damage);
+        }
+        if (stack.Unbreakable)
+            writer.WriteVarInt(4); // unit component, no payload
+        if (enchanted)
+        {
+            writer.WriteVarInt(13); // minecraft:enchantments
+            writer.WriteVarInt((stack.Unbreaking > 0 ? 1 : 0) +
+                (stack.Mending ? 1 : 0));
+            if (stack.Unbreaking > 0)
+            {
+                writer.WriteVarInt(VanillaRegistries.IndexOf(
+                    "minecraft:enchantment", "minecraft:unbreaking"));
+                writer.WriteVarInt(stack.Unbreaking);
+            }
+            if (stack.Mending)
+            {
+                writer.WriteVarInt(VanillaRegistries.IndexOf(
+                    "minecraft:enchantment", "minecraft:mending"));
+                writer.WriteVarInt(1);
+            }
+        }
+        if (stack.RepairCost > 0)
+        {
+            writer.WriteVarInt(19);
+            writer.WriteVarInt(stack.RepairCost);
         }
     }
 
