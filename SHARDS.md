@@ -8,7 +8,7 @@ Amethyst is now organized into a **network kernel** and independently compiled *
 | --- | --- |
 | `src/Amethyst.csproj` | TCP listener, status/ping, protocol framing, Mojang authentication, encryption, login/configuration, connection lifetime, Shard loader, operator console host |
 | `shards/Amethyst.Shards.Overworld` | Terrain/biomes, chunks, lighting, save files, chunk preparation and streaming |
-| `shards/Amethyst.Shards.Items` | Minecraft 26.3 vanilla item definitions: 1,658 IDs, canonical names, stack limits and block-item classification |
+| `shards/Amethyst.Shards.Items` | YAML-based item definitions and recipe registry: 1,658 vanilla item IDs, stacking rules, shaped/shapeless crafting and cooking recipes |
 | `shards/Amethyst.Shards.Gameplay` | Play-state packets, players, movement, game modes, inventory, crafting stations, chat, day/night clock; consumes Items and World services |
 | `shards/Amethyst.Shards.Hello` | Disabled-by-default example: a `hello` console command and a Play packet observer |
 
@@ -24,8 +24,9 @@ maximum stack sizes (1, 16, or 64), and block-item flags.
 Gameplay looks up these definitions to validate Creative inventory edits,
 item pickups, persisted stacks, and furnace/crafting slot transactions. For
 example, swords and pickaxes can no longer stack to 64; an ender pearl can
-stack to 16. The Item Shard owns *definitions*, not recipes, block
-placement, mining, entity physics, or packet framing.
+stack to 16. The Items Shard also owns the **recipe definitions and matching**;
+Gameplay owns crafting windows, ingredient consumption, furnace ticks, block
+placement, mining and entity physics. Core still handles only networking.
 
 A Shard that consumes item definitions declares `requires: [items]`
 and resolves the service in `OnEnableAsync`:
@@ -67,8 +68,34 @@ Alias roots can be looked up by name but are not distinct per-stack custom
 items until Gameplay supports item identity/components. Unknown YAML
 properties and illegal protocol ID changes are rejected at startup.
 
+The same Items Shard also provides the `recipes` capability as
+`IShardRecipeRegistry`. Recipes are defined using one top-level recipe ID per
+root YAML node. Bundled defaults live in `recipes-26.3.yml`; put custom
+crafting, smelting, smoking and blasting recipes in
+`shards/data/items/recipes/*.yml`. For example:
+
+```yaml
+quick_torches:
+  Type: Shapeless
+  Ingredients: [minecraft:coal, minecraft:stick]
+  Result: { Id: minecraft:torch, Amount: 8 }
+
+smelt_stone_faster:
+  Type: Furnace
+  Ingredient: minecraft:cobblestone
+  CookingTime: 100
+  Result: { Id: minecraft:stone, Amount: 1 }
+```
+
+Gameplay requires both `items` and `recipes`, so its workstations consume
+the provider's definitions rather than a hard-coded recipe table.
+Administrators can override an existing recipe by repeating its root ID,
+or disable it with `Enabled: false`; unsupported names and malformed
+recipes are rejected on startup. The server console `recipes` command
+lists recipe IDs. Recipe-book packet synchronization is not implemented yet.
+
 See `shards/Amethyst.Shards.Items/README.md` for complete YAML keys,
-precedence rules, version provenance and examples. Vanilla protocol IDs
+recipe formats, precedence rules, version provenance and examples. Vanilla protocol IDs
 cannot be replaced with arbitrary modded item IDs without client registry,
 asset and protocol support.
 
@@ -82,7 +109,7 @@ dotnet run --no-build --project src/Amethyst.csproj -- server.yaml
 
 On Linux, `./run.sh` does both steps automatically. **Do not run only `dotnet run --project src/Amethyst.csproj` on a fresh checkout**: it builds only the network kernel, not the Shard assemblies.
 
-`shards/installed/` and `shards/data/` are ignored by Git. Configure their paths through `shardsDirectory` and `shardsDataDirectory` in `server.yaml`. The build targets always copy Shard DLLs. Gameplay refreshes its manifest on each build so its new required capability is applied to existing installations. Items, Overworld and Hello preserve existing installed manifests; local `enabled` edits to those providers survive rebuilds. Shard-specific writable data belongs in `shards/data/<shard-id>/`; saves and operators remain at their existing paths.
+`shards/installed/` and `shards/data/` are ignored by Git. Configure their paths through `shardsDirectory` and `shardsDataDirectory` in `server.yaml`. The build targets always copy Shard DLLs. Gameplay and Items refresh their manifests on each build so new required/provided capabilities are available on existing installations. Overworld and Hello preserve existing installed manifests; local `enabled` edits to those providers survive rebuilds. The Items manifest's `enabled` setting is reset to its shipped default during builds and can be edited after building if needed. Shard-specific writable data belongs in `shards/data/<shard-id>/`; saves and operators remain at their existing paths.
 
 ## Shard manifest
 

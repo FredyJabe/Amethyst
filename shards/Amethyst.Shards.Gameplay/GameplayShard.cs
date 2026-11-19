@@ -18,9 +18,10 @@ public sealed class GameplayShard : IShard, IShardGameplay
         var context = _context ?? throw new InvalidOperationException("Shard not loaded.");
         IShardWorld world = context.GetRequiredService<IShardWorld>();
         IShardItemRegistry items = context.GetRequiredService<IShardItemRegistry>();
+        IShardRecipeRegistry recipes = context.GetRequiredService<IShardRecipeRegistry>();
         var game = new MinecraftServer(context.Options, world,
             context.GetRequiredService<IShardPacketBus>(), context.GetService<IShardBlockWorld>(),
-            context.DataDirectory, items);
+            context.DataDirectory, items, recipes);
         game.Start();
         _gameplay = game;
         context.RegisterService<IShardGameplay>(this);

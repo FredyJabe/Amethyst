@@ -8,4 +8,5 @@ provides:
 requires:
   - world
   - items
+  - recipes
 dependsOn: []

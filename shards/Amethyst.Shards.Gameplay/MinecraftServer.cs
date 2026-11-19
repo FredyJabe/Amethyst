@@ -31,7 +31,7 @@ public sealed class MinecraftServer
 
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
-        IShardItemRegistry? items = null)
+        IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null)
     {
         _options = options;
         _world = world;
@@ -43,7 +43,8 @@ public sealed class MinecraftServer
         _operators = new OperatorStore(options.OperatorsFile);
         _clock = new WorldClock(options);
         _positions = new PlayerPositionStore(inventoryDirectory, options.WorldPath, world);
-        _stations = new WorkstationManager(inventoryDirectory, options.WorldPath, world, items);
+        _stations = new WorkstationManager(inventoryDirectory, options.WorldPath, world,
+            items, recipes ?? throw new ArgumentNullException(nameof(recipes)));
         if (_blocks is not null)
             _groundItems = new GroundItemStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId, items);

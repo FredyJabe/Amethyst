@@ -52,15 +52,17 @@ public sealed class WorkstationManager
     private readonly Dictionary<Guid, StationMenu> _menus = [];
     private readonly IShardWorld _world;
     private readonly IShardItemRegistry? _items;
+    private readonly IShardRecipeRegistry _recipes;
     private readonly string? _path;
     private int _nextWindowId;
     private int _ticks;
 
     public WorkstationManager(string? directory, string worldPath, IShardWorld world,
-        IShardItemRegistry? items = null)
+        IShardItemRegistry? items, IShardRecipeRegistry recipes)
     {
         _world = world;
         _items = items;
+        _recipes = recipes ?? throw new ArgumentNullException(nameof(recipes));
         if (directory is null) return;
         string folder = Path.Combine(Path.GetFullPath(directory), "stations");
         Directory.CreateDirectory(folder);
@@ -68,6 +70,35 @@ public sealed class WorkstationManager
             Encoding.UTF8.GetBytes(Path.GetFullPath(worldPath)))).Substring(0, 20);
         _path = Path.Combine(folder, key + ".bin");
         Load();
+    }
+
+    private CraftingMatch? MatchCrafting(ItemStack[] grid)
+    {
+        ShardRecipeStack[] inputs = grid.Select(s =>
+            new ShardRecipeStack(s.ItemId, s.Count)).ToArray();
+        if (!_recipes.TryMatchCrafting(inputs, out var match)) return null;
+        return new CraftingMatch(new ItemStack(match.Result.ItemId, match.Result.Count),
+            match.ConsumedSlots);
+    }
+
+    private bool TryCook(StationKind kind, int ingredientId, out ItemStack result,
+        out int durationTicks)
+    {
+        result = ItemStack.Empty;
+        durationTicks = kind is StationKind.Furnace ? 200 : 100;
+        if (kind == StationKind.Crafting) return false;
+        ShardCookingStation station = kind switch
+        {
+            StationKind.Furnace => ShardCookingStation.Furnace,
+            StationKind.Smoker => ShardCookingStation.Smoker,
+            StationKind.BlastFurnace => ShardCookingStation.BlastFurnace,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
+        if (!_recipes.TryGetCookingRecipe(station, ingredientId, out var match))
+            return false;
+        result = new ItemStack(match.Result.ItemId, match.Result.Count);
+        durationTicks = match.CookingTicks;
+        return true;
     }
 
     private int MaxStack(int id)
@@ -157,7 +188,7 @@ public sealed class WorkstationManager
             var slots = new ItemStack[slotsStart + 36];
             if (menu.Kind == StationKind.Crafting)
             {
-                slots[0] = StationRecipes.MatchCrafting(menu.CraftingGrid)?.Output
+                slots[0] = MatchCrafting(menu.CraftingGrid)?.Output
                     ?? ItemStack.Empty;
                 Array.Copy(menu.CraftingGrid, 0, slots, 1, 9);
             }
@@ -240,7 +271,7 @@ public sealed class WorkstationManager
             ItemStack Get(int index) => index < count
                 ? (menu.Kind == StationKind.Crafting
                     ? index == 0
-                        ? StationRecipes.MatchCrafting(local)?.Output ?? ItemStack.Empty
+                        ? MatchCrafting(local)?.Output ?? ItemStack.Empty
                         : local[index - 1]
                     : local[index])
                 : playerSlots[pslot(index)];
@@ -248,7 +279,7 @@ public sealed class WorkstationManager
                 ValidStack(stack) &&
                 (index >= count || menu.Kind == StationKind.Crafting
                 || (index != 2 && (stack.Count == 0 ||
-                (index == 0 && StationRecipes.TryCook(menu.Kind, stack.ItemId,
+                (index == 0 && TryCook(menu.Kind, stack.ItemId,
                     out _, out _)) ||
                 (index == 1 && StationRecipes.FuelTicks(stack.ItemId) > 0))));
             void Put(int index, ItemStack stack)
@@ -283,7 +314,7 @@ public sealed class WorkstationManager
                 }
                 if (menu.Kind == StationKind.Crafting)
                 {
-                    var matched = StationRecipes.MatchCrafting(local);
+                    var matched = MatchCrafting(local);
                     if (matched is null || matched.Value.Output != available) return false;
                     foreach (int index in matched.Value.ConsumedSlots)
                         local[index] = Decrement(local[index], 1);
@@ -360,7 +391,7 @@ public sealed class WorkstationManager
                 else
                 {
                     if (menu.Kind == StationKind.Crafting) return false;
-                    int target = StationRecipes.TryCook(menu.Kind, here.ItemId,
+                    int target = TryCook(menu.Kind, here.ItemId,
                         out _, out _) ? 0 : StationRecipes.FuelTicks(here.ItemId) > 0 ? 1 : -1;
                     if (target < 0) return false;
                     ItemStack stationStack = local[target];
@@ -389,7 +420,13 @@ public sealed class WorkstationManager
                 Array.Copy(local, menu.CraftingGrid, 9);
             else
             {
-                Array.Copy(local, block!.Slots, 3);
+                // Recipe duration/output may differ between configured inputs.
+                // Never carry cooking progress across a different ingredient,
+                // which could otherwise produce a short recipe's result early.
+                int previousIngredient = block!.Slots[0].ItemId;
+                Array.Copy(local, block.Slots, 3);
+                if (block.Slots[0].ItemId != previousIngredient)
+                    block.CookProgress = 0;
                 Persist();
             }
             menu.Revision++;
@@ -448,7 +485,7 @@ public sealed class WorkstationManager
                 ItemStack result = ItemStack.Empty;
                 int duration = 200;
                 bool valid = state.Slots[0].Count > 0 &&
-                    StationRecipes.TryCook(state.Kind, state.Slots[0].ItemId,
+                    TryCook(state.Kind, state.Slots[0].ItemId,
                         out result, out duration) &&
                     (state.Slots[2].Count == 0 ||
                      state.Slots[2].ItemId == result.ItemId &&

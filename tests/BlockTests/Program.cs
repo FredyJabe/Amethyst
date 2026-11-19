@@ -1,5 +1,6 @@
 using Amethyst;
 using Amethyst.BuiltinShards;
+using Amethyst.Shards;
 
 DirectoryInfo? solutionRoot = new(AppContext.BaseDirectory);
 while (solutionRoot is not null &&
@@ -10,6 +11,9 @@ if (solutionRoot is null)
 string itemCatalogPath = Path.Combine(solutionRoot.FullName,
     "shards", "Amethyst.Shards.Items", "items-26.3.yml");
 var itemsCatalog = new ItemCatalog(itemCatalogPath);
+string recipesFilePath = Path.Combine(solutionRoot.FullName,
+    "shards", "Amethyst.Shards.Items", "recipes-26.3.yml");
+var recipesCatalog = new RecipeCatalog(itemsCatalog, recipesFilePath);
 
 static void Check(bool condition, string message)
 {
@@ -183,6 +187,185 @@ try
 finally
 {
     try { Directory.Delete(yamlTestRoot, recursive: true); }
+    catch (IOException) { }
+}
+
+// Server-side YAML recipes are supplied by the Items Shard, not Gameplay.
+// Verify matching/consumption, custom precedence, disabling, and validation.
+Check(recipesCatalog.RecipeCount >= 70 &&
+    recipesCatalog.RecipeIds.Contains("crafting_table") &&
+    recipesCatalog.RecipeIds.Contains("iron_ingot_from_raw_iron_smelting"),
+    "Items Shard loads its bundled 26.3 crafting and cooking recipe definitions");
+{
+    var grid = new ShardRecipeStack[9];
+    grid[8] = new ShardRecipeStack(163, 1); // oak_log
+    Check(recipesCatalog.TryMatchCrafting(grid, out var match) &&
+        match.RecipeId == "oak_planks_from_log" &&
+        match.Result == new ShardRecipeStack(63, 4) &&
+        match.ConsumedSlots.SequenceEqual([8]),
+        "Shapeless recipes accept ingredients in any slot and consume only matched slots");
+    grid[1] = new ShardRecipeStack(55, 1); // extra dirt
+    Check(!recipesCatalog.TryMatchCrafting(grid, out _),
+        "Extra ingredients cannot be ignored by the recipe matcher");
+    Check(recipesCatalog.TryGetCookingRecipe(ShardCookingStation.Furnace, 1017,
+            out var smelt) &&
+        smelt.Result == new ShardRecipeStack(1018, 1) &&
+        smelt.CookingTicks == 200,
+        "Default furnace recipe duration and output are data-driven");
+    Check(recipesCatalog.TryGetCookingRecipe(ShardCookingStation.BlastFurnace, 1017,
+            out var blast) && blast.CookingTicks == 100 &&
+        !recipesCatalog.TryGetCookingRecipe(ShardCookingStation.Smoker, 1017, out _),
+        "Smoker and blast furnace use their own YAML recipe categories");
+}
+
+string customRecipesRoot = Path.Combine(Path.GetTempPath(),
+    "amethyst-recipe-tests-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(customRecipesRoot);
+try
+{
+    var customRecipes = Path.Combine(customRecipesRoot, "recipes");
+    Directory.CreateDirectory(customRecipes);
+    File.WriteAllText(Path.Combine(customRecipes, "custom.yml"), """
+        oak_planks_from_log:
+          Enabled: false
+
+        sticks:
+          Type: Shaped
+          Pattern:
+            - "P"
+            - "P"
+          Key:
+            P: [oak_planks, spruce_planks]
+          Result: { Id: stick, Amount: 5 }
+
+        carefully_shaped:
+          Type: Shaped
+          Pattern:
+            - "SI"
+            - " S"
+          Key:
+            S: stone
+            I: iron_ingot
+          Result: { Id: torch, Amount: 3 }
+
+        competing_ingredients:
+          Type: Shapeless
+          Ingredients:
+            - [dirt, stick]
+            - dirt
+          Result: { Id: torch, Amount: 8 }
+
+        smelt_dirt:
+          Type: Furnace
+          Ingredient: dirt
+          Result: { Id: diamond, Amount: 1 }
+          CookingTime: 37
+        """);
+    var customRegistry = new RecipeCatalog(itemsCatalog, recipesFilePath, customRecipes);
+    Check(customRegistry.RecipeCount >= recipesCatalog.RecipeCount &&
+        !customRegistry.RecipeIds.Contains("oak_planks_from_log"),
+        "Admin recipe YAML overrides bundled recipes by ID and can disable a default");
+    var grid = new ShardRecipeStack[9];
+    grid[6] = new ShardRecipeStack(63, 1);
+    grid[3] = new ShardRecipeStack(64, 1);
+    Check(customRegistry.TryMatchCrafting(grid, out var overridden) &&
+        overridden.RecipeId == "sticks" &&
+        overridden.Result == new ShardRecipeStack(1060, 5) &&
+        overridden.ConsumedSlots.Order().SequenceEqual([3, 6]),
+        "Custom shaped recipe overrides the bundled output using alternative planks");
+    grid = new ShardRecipeStack[9];
+    grid[0] = new ShardRecipeStack(1018, 1); // I, mirrored
+    grid[1] = new ShardRecipeStack(1, 1); // S, mirrored
+    grid[3] = new ShardRecipeStack(1, 1); // S, mirrored
+    Check(customRegistry.TryMatchCrafting(grid, out var mirrored) &&
+        mirrored.RecipeId == "carefully_shaped" &&
+        mirrored.Result.Count == 3,
+        "Shaped YAML recipes match horizontally mirrored patterns");
+    grid = new ShardRecipeStack[9];
+    grid[0] = new ShardRecipeStack(55, 1);
+    grid[2] = new ShardRecipeStack(1060, 1);
+    Check(customRegistry.TryMatchCrafting(grid, out var overlapping) &&
+        overlapping.RecipeId == "competing_ingredients" &&
+        overlapping.Result == new ShardRecipeStack(395, 8) &&
+        overlapping.ConsumedSlots.Order().SequenceEqual([0, 2]),
+        "Shapeless matcher backtracks when ingredient alternatives overlap");
+    grid = new ShardRecipeStack[9];
+    grid[4] = new ShardRecipeStack(163, 1);
+    Check(!customRegistry.TryMatchCrafting(grid, out _),
+        "Disabled built-in log-to-planks recipe no longer crafts");
+    Check(itemsCatalog.TryGetByIdentifier("diamond", out var diamond) &&
+        customRegistry.TryGetCookingRecipe(ShardCookingStation.Furnace, 55,
+            out var customCook) &&
+        customCook.Result == new ShardRecipeStack(diamond.ProtocolId, 1) &&
+        customCook.CookingTicks == 37 &&
+        !customRegistry.TryGetCookingRecipe(ShardCookingStation.Smoker, 55, out _),
+        "Custom furnace YAML recipe changes input, output and processing time");
+
+    void RecipeShouldFail(string yaml, string message)
+    {
+        string folder = Path.Combine(customRecipesRoot,
+            "invalid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "bad.yml"), yaml);
+        bool invalid = false;
+        try { _ = new RecipeCatalog(itemsCatalog, recipesFilePath, folder); }
+        catch (InvalidDataException) { invalid = true; }
+        Check(invalid, message);
+    }
+    RecipeShouldFail("""
+        bad:
+          Type: Shapeless
+          Ingredients: [minecraft:does_not_exist]
+          Result: { Id: stone, Amount: 1 }
+        """, "Unknown ingredient names are rejected at startup");
+    RecipeShouldFail("""
+        bad:
+          Type: Shapeless
+          Ingredients: [stone]
+          Result: { Id: diamond_pickaxe, Amount: 2 }
+        """, "Recipe output cannot exceed the item's maximum stack size");
+    RecipeShouldFail("""
+        bad:
+          Type: Shaped
+          Pattern: ["AX"]
+          Key: { A: stone }
+          Result: { Id: stick, Amount: 1 }
+        """, "Shaped recipes reject missing pattern key symbols");
+    RecipeShouldFail("""
+        bad:
+          Type: Furnace
+          Ingredient: stone
+          Result: { Id: diamond, Amount: 1 }
+          CookingTime: 0
+        """, "Cooking recipes reject zero and invalid durations");
+    RecipeShouldFail("""
+        bad:
+          Type: Shapeless
+          Ingredients: [stone]
+          Result: { Id: air, Amount: 1 }
+        """, "Recipe outputs cannot be air or invalid stacks");
+    RecipeShouldFail("""
+        duplicate:
+          Enabled: false
+        duplicate:
+          Enabled: false
+        """, "Duplicate recipe root IDs in one YAML file are rejected");
+    RecipeShouldFail("""
+        no_such_recipe:
+          Enabled: false
+        """, "Disabling an unknown recipe ID is rejected instead of silently ignored");
+    string conflictDir = Path.Combine(customRecipesRoot, "duplicates");
+    Directory.CreateDirectory(conflictDir);
+    File.WriteAllText(Path.Combine(conflictDir, "a.yml"), "sticks:\n  Enabled: false\n");
+    File.WriteAllText(Path.Combine(conflictDir, "b.yaml"), "sticks:\n  Enabled: false\n");
+    bool conflict = false;
+    try { _ = new RecipeCatalog(itemsCatalog, recipesFilePath, conflictDir); }
+    catch (InvalidDataException) { conflict = true; }
+    Check(conflict, "Duplicate custom recipe IDs across files fail startup");
+}
+finally
+{
+    try { Directory.Delete(customRecipesRoot, recursive: true); }
     catch (IOException) { }
 }
 
@@ -438,7 +621,8 @@ try
         player.MarkReady();
         player.SetGameMode(PlayerGameMode.Survival);
         // The handler does not use the packet bus when invoked directly.
-        var game = new MinecraftServer(settings, world, null!, world, items: itemsCatalog);
+        var game = new MinecraftServer(settings, world, null!, world,
+            items: itemsCatalog, recipes: recipesCatalog);
 
         for (int x = 1; x <= 2; x++)
         {
@@ -817,7 +1001,8 @@ try
         using (var wire = new MemoryStream())
         using (var channel = new PacketChannel(wire))
         {
-            var game = new MinecraftServer(config, world, null!, world, dataRoot, itemsCatalog);
+            var game = new MinecraftServer(config, world, null!, world, dataRoot,
+                itemsCatalog, recipesCatalog);
             Check(game.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
                 "Reconnecting player can be admitted");
@@ -837,7 +1022,8 @@ try
 
             // Recreate Gameplay as if the process restarted: admission must
             // use the saved coordinates rather than a hard-coded spawn.
-            var restarted = new MinecraftServer(config, world, null!, world, dataRoot, itemsCatalog);
+            var restarted = new MinecraftServer(config, world, null!, world, dataRoot,
+                itemsCatalog, recipesCatalog);
             Check(restarted.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
                 "Reconnecting after gameplay restart succeeds");
@@ -900,7 +1086,8 @@ try
 
         using var fallbackWire = new MemoryStream();
         using var fallbackChannel = new PacketChannel(fallbackWire);
-        var fallbackGame = new MinecraftServer(config, world, null!, world, dataRoot, itemsCatalog);
+        var fallbackGame = new MinecraftServer(config, world, null!, world, dataRoot,
+                itemsCatalog, recipesCatalog);
         Check(fallbackGame.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), fallbackChannel, 0, out _),
             "Damaged save must not interrupt player login");
@@ -933,7 +1120,7 @@ try
         WorldPath = Path.Combine(stationsRoot, "world")
     };
     await using var stationWorld = new TerrainWorld(settings);
-    var stations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog);
+    var stations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog, recipesCatalog);
     var bag = new PlayerInventory(null, Guid.NewGuid(), itemsCatalog);
     Guid playerId = Guid.NewGuid();
     Check(StationProtocol.MenuType(StationKind.Crafting) == 12 &&
@@ -1008,7 +1195,7 @@ try
     Check(stations.Data(playerId).Burn > 0,
         "Furnace progress properties expose remaining burn time");
     stations.Save();
-    var restoredStations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog);
+    var restoredStations = new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog, recipesCatalog);
     Check(restoredStations.SnapshotStation(furnacePos).SequenceEqual(smelted),
         "Furnace contents survive a world restart");
     Check(!stations.Click(playerId, bag,
@@ -1024,14 +1211,62 @@ try
     Check(stations.Close(playerId).Length == 0,
         "Closing furnace leaves shared block inventory in place");
 
+    // A user-defined YAML cooking recipe must run through the real
+    // WorkstationManager, not only succeed in direct catalog lookup.
+    string furnaceRecipeOverrides = Path.Combine(stationsRoot, "recipe-definitions");
+    Directory.CreateDirectory(furnaceRecipeOverrides);
+    File.WriteAllText(Path.Combine(furnaceRecipeOverrides, "custom.yml"), """
+        smelt_dirt_to_diamond:
+          Type: Furnace
+          Ingredient: dirt
+          Result: { Id: diamond, Amount: 1 }
+          CookingTime: 37
+        """);
+    var stationRecipes = new RecipeCatalog(itemsCatalog, recipesFilePath,
+        furnaceRecipeOverrides);
+    var customFurnace = new WorkstationManager(null, settings.WorldPath,
+        stationWorld, itemsCatalog, stationRecipes);
+    var customPlayer = new PlayerInventory(null, Guid.NewGuid(), itemsCatalog);
+    var customMenu = customFurnace.Open(Guid.NewGuid(),
+        new StationPos(6, 81, 1), StationKind.Furnace);
+    Check(customPlayer.TryCreativeSet(36, 55, 1, true) &&
+        customPlayer.TryCreativeSet(37, 1010, 1, true),
+        "Prepare YAML-defined furnace recipe ingredients");
+    Check(customFurnace.Click(customMenu.PlayerId, customPlayer,
+        new InventoryClick(customMenu.WindowId, 0, 30, 0, 1)) &&
+        customFurnace.Click(customMenu.PlayerId, customPlayer,
+        new InventoryClick(customMenu.WindowId, 1, 31, 0, 1)),
+        "Furnace accepts custom YAML ingredient and conventional fuel");
+    for (int tick = 0; tick < 20; tick++) customFurnace.Tick();
+    Check(customFurnace.SnapshotState(customMenu.Position)?.CookProgress == 20,
+        "Custom cooking progresses using configured duration");
+    Check(customFurnace.Click(customMenu.PlayerId, customPlayer,
+        new InventoryClick(customMenu.WindowId, customMenu.Revision, 0, 0, 0)) &&
+        customFurnace.SnapshotState(customMenu.Position)?.CookProgress == 0,
+        "Removing a cooking ingredient resets progress rather than preserving elapsed ticks");
+    Check(customFurnace.Click(customMenu.PlayerId, customPlayer,
+        new InventoryClick(customMenu.WindowId, customMenu.Revision, 0, 0, 0)),
+        "The ingredient can be put back without minting items");
+    for (int tick = 0; tick < 36; tick++) customFurnace.Tick();
+    Check(customFurnace.SnapshotStation(customMenu.Position)[2].Count == 0,
+        "Restarted cooking cannot complete a custom recipe a tick too early");
+    customFurnace.Tick();
+    Check(itemsCatalog.TryGetByIdentifier("diamond", out var customDiamond) &&
+        customFurnace.SnapshotStation(customMenu.Position)[2] ==
+        new ItemStack(customDiamond.ProtocolId, 1),
+        "Gameplay furnace actually smelts configured dirt-to-diamond recipe in 37 ticks");
+
     foreach (var (kind, rawId, resultId, pos) in new[]
     {
         (StationKind.Smoker, 1260, 1261, new StationPos(3, 81, 1)),
         (StationKind.BlastFurnace, 1017, 1018, new StationPos(4, 81, 1))
     })
     {
-        Check(StationRecipes.TryCook(kind, rawId, out ItemStack result, out int duration) &&
-            result == new ItemStack(resultId, 1) && duration == 100,
+        Check(recipesCatalog.TryGetCookingRecipe(kind == StationKind.Smoker
+                ? ShardCookingStation.Smoker : ShardCookingStation.BlastFurnace,
+                rawId, out ShardCookingMatch cooked) &&
+            cooked.Result == new ShardRecipeStack(resultId, 1) &&
+            cooked.CookingTicks == 100,
             "Smoker and blast furnace enforce their accelerated recipe categories");
         var menu = stations.Open(playerId, pos, kind);
         // Direct block-state seeding for the persistent cooking simulation.
@@ -1048,8 +1283,8 @@ try
             "Fast cooking produces a real output stack in its workstation");
         stations.Close(playerId);
     }
-    Check(!StationRecipes.TryCook(StationKind.Smoker, 1017, out _, out _) &&
-        !StationRecipes.TryCook(StationKind.BlastFurnace, 1260, out _, out _),
+    Check(!recipesCatalog.TryGetCookingRecipe(ShardCookingStation.Smoker, 1017, out _) &&
+        !recipesCatalog.TryGetCookingRecipe(ShardCookingStation.BlastFurnace, 1260, out _),
         "Smoker rejects ore and blast furnace rejects food");
 
     var (released, _) = stations.Break(furnacePos);
@@ -1057,7 +1292,7 @@ try
         released.Sum(s => s.Count) == 1,
         "Breaking a furnace releases all remaining input/output instead of deleting it");
     stations.Save();
-    Check(new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog)
+    Check(new WorkstationManager(stationsRoot, settings.WorldPath, stationWorld, itemsCatalog, recipesCatalog)
         .SnapshotStation(furnacePos).Length == 0,
         "Destroyed furnace does not reappear in saved workstation storage");
 
@@ -1071,7 +1306,8 @@ try
             stationWorld, null, itemsCatalog);
         stationPlayer.MarkReady();
         var gameplay = new MinecraftServer(settings, stationWorld, null!,
-            stationWorld, Path.Combine(stationsRoot, "gameplay-integration"), itemsCatalog);
+            stationWorld, Path.Combine(stationsRoot, "gameplay-integration"),
+            itemsCatalog, recipesCatalog);
         int seq = 1;
         foreach (var (kind, mode, state, blockPosition) in new[]
         {
