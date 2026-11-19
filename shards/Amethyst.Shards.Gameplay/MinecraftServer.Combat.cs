@@ -1,0 +1,204 @@
+using Amethyst.Shards;
+
+namespace Amethyst;
+
+/// <summary>Combat and living-entity behavior lives in Gameplay rather than
+/// Amethyst's packet-only core. All damage comes from validated server actions.</summary>
+public sealed partial class MinecraftServer
+{
+    private readonly Dictionary<Guid, Dictionary<int, LivingEntity>> _livingViews = new();
+
+    internal LivingEntity[] LivingEntitiesForTests =>
+        _livingEntities?.Snapshot() ?? [];
+
+    internal async Task HandleAttackAsync(ConnectedPlayer attacker,
+        int targetEntityId, CancellationToken ct)
+    {
+        if (!attacker.Ready ||
+            attacker.GameMode is PlayerGameMode.Creative or PlayerGameMode.Spectator ||
+            targetEntityId == attacker.EntityId ||
+            targetEntityId <= 0 ||
+            attacker.Vitals.Snapshot().Health <= 0)
+            return;
+        long now = Environment.TickCount64;
+        // Do not let a client inflate its attack rate by spoofing tick packets.
+        if (!attacker.Vitals.TryAttack(now)) return;
+        ConnectedPlayer? victim = _players.Snapshot().FirstOrDefault(p =>
+            p.Ready && p.EntityId == targetEntityId &&
+            p.GameMode is PlayerGameMode.Survival or PlayerGameMode.Adventure);
+        LivingEntity mob = default;
+        bool sheep = victim is null &&
+            _livingEntities?.TryGet(targetEntityId, out mob) == true;
+        if (victim is null && !sheep) return;
+        PlayerPose source = attacker.Pose;
+        PlayerPose destination = victim?.Pose ??
+            new PlayerPose(mob.X, mob.Y, mob.Z, 0, 0, true);
+        if (!CombatRules.InReach(source, destination)) return;
+        ItemStack weapon = attacker.Inventory.Held();
+        string identifier = _items is not null &&
+            _items.TryGetById(weapon.ItemId, out ShardItemDefinition definition)
+            ? definition.Identifier : "";
+        float raw = CombatRules.MeleeDamage(identifier);
+        bool hit = false;
+        if (victim is not null)
+        {
+            hit = await DamagePlayerAsync(victim, raw, attacker, ct);
+        }
+        else if (_livingEntities is not null &&
+            _livingEntities.TryDamage(targetEntityId, raw,
+                out LivingEntity updated, out bool killed))
+        {
+            hit = true;
+            if (killed)
+            {
+                // Server-generated mob drops, never client-authoritative.
+                if (_groundItems is not null && _items is not null)
+                {
+                    if (_items.TryGetByIdentifier("minecraft:mutton", out var meat))
+                        _groundItems.TrySpawn(meat.ProtocolId, 1,
+                            mob.X, mob.Y + 0.25, mob.Z, out _);
+                    if (!mob.Sheared &&
+                        _items.TryGetByIdentifier("minecraft:white_wool",
+                            out var wool))
+                        _groundItems.TrySpawn(wool.ProtocolId, 1,
+                            mob.X, mob.Y + 0.25, mob.Z, out _);
+                }
+                foreach (ConnectedPlayer viewer in _players.Snapshot()
+                    .Where(x => x.Ready))
+                {
+                    await LivingEntityProtocol.SendRemoveAsync(
+                        viewer.Connection, mob.EntityId, ct);
+                    if (_livingViews.TryGetValue(viewer.ConnectionId,
+                        out var seen)) seen.Remove(mob.EntityId);
+                }
+            }
+            else
+            {
+                foreach (ConnectedPlayer viewer in _players.Snapshot()
+                    .Where(x => x.Ready))
+                {
+                    if (_livingViews.TryGetValue(viewer.ConnectionId,
+                        out var seen) && seen.ContainsKey(updated.EntityId))
+                    {
+                        await LivingEntityProtocol.SendMetadataAsync(
+                            viewer.Connection, updated, ct);
+                        await CombatProtocol.SendHurtAsync(viewer.Connection,
+                            updated.EntityId, ct);
+                    }
+                }
+            }
+        }
+        if (!hit) return;
+        if (attacker.Inventory.DamageHeld(weapon.ItemId, 1))
+            await InventoryProtocol.SendSlotAsync(attacker.Connection,
+                attacker.Inventory, attacker.Inventory.SelectedSlot, ct);
+    }
+
+    /// <summary>Damage a player from a verified physical source. Armor
+    /// mitigates health damage; armor durability suffers the impact.
+    /// Shields can intercept this call before health loss.</summary>
+    internal async Task<bool> DamagePlayerAsync(ConnectedPlayer victim,
+        float raw, ConnectedPlayer? attacker, CancellationToken ct,
+        bool projectile = false)
+    {
+        if (!victim.Ready || victim.GameMode is PlayerGameMode.Creative or
+            PlayerGameMode.Spectator || raw <= 0) return false;
+        PlayerPose origin = attacker?.Pose ?? victim.Pose;
+        ItemStack[] gear = victim.Inventory.Snapshot().Slots;
+        float armor = CombatRules.ArmorPoints(gear, _items);
+        float damage = CombatRules.Mitigate(raw, armor);
+        if (!victim.Vitals.TryDamage(damage, Environment.TickCount64,
+            out bool killed)) return false;
+        int durability = Math.Max(1, (int)Math.Ceiling(raw / 4));
+        if (victim.Inventory.DamageArmor(durability) > 0)
+            await InventoryProtocol.SendContentAsync(victim.Connection,
+                victim.Inventory, ct);
+        await CombatProtocol.SendHealthAsync(victim, ct);
+        foreach (ConnectedPlayer observer in _players.Snapshot().Where(p =>
+            p.Ready && p.ConnectionId != victim.ConnectionId))
+            await CombatProtocol.SendHurtAsync(observer.Connection,
+                victim.EntityId, ct);
+        await CombatProtocol.SendHurtAsync(victim.Connection,
+            victim.EntityId, ct);
+        if (attacker is not null && !killed)
+        {
+            var (vx, vz) = CombatRules.Knockback(origin, victim.Pose);
+            await CombatProtocol.SendMotionAsync(victim.Connection,
+                victim.EntityId, vx, 0.26, vz, ct);
+        }
+        if (killed)
+            await CombatProtocol.SendDeathAsync(victim.Connection,
+                victim.EntityId, ct);
+        return true;
+    }
+
+    internal async Task RespawnPlayerAsync(ConnectedPlayer player, int teleportId,
+        CancellationToken ct)
+    {
+        if (player.Vitals.Snapshot().Health > 0) return;
+        player.Vitals.Respawn();
+        player.SetPose(new PlayerPose(_world.SpawnXPosition,
+            _world.SpawnYPosition, _world.SpawnZPosition, 0, 0, true));
+        await CombatProtocol.SendRespawnAsync(player, _world, ct);
+        await GameModeProtocol.SendAbilitiesAsync(
+            player.Connection, player.GameMode, ct);
+        await CombatProtocol.SendHealthAsync(player, ct);
+        await SpawnPackets.SendPositionAsync(player.Connection, teleportId,
+            _world.SpawnXPosition, _world.SpawnYPosition,
+            _world.SpawnZPosition, ct);
+        await player.View.UpdateAsync(player.Connection, player.Pose, ct);
+    }
+
+    internal async Task TickLivingEntitiesAsync(CancellationToken ct)
+    {
+        if (_livingEntities is null) return;
+        LivingEntity[] entities = _livingEntities.Snapshot();
+        ConnectedPlayer[] players = _players.Snapshot().Where(p => p.Ready).ToArray();
+        var online = players.Select(p => p.ConnectionId).ToHashSet();
+        foreach (Guid key in _livingViews.Keys.ToArray())
+            if (!online.Contains(key)) _livingViews.Remove(key);
+
+        // Only transmit mobs in the same nearby, loaded chunks as the viewer.
+        foreach (ConnectedPlayer viewer in players)
+        {
+            if (!_livingViews.TryGetValue(viewer.ConnectionId, out var seen))
+                _livingViews[viewer.ConnectionId] = seen = new();
+            HashSet<int> visible = [];
+            foreach (LivingEntity mob in entities)
+            {
+                PlayerPose pos = viewer.Pose;
+                double dx = mob.X - pos.X, dz = mob.Z - pos.Z;
+                if (dx * dx + dz * dz > 48 * 48 || Math.Abs(mob.Y - pos.Y) > 48)
+                    continue;
+                int chunkX = (int)Math.Floor(mob.X / 16),
+                    chunkZ = (int)Math.Floor(mob.Z / 16);
+                if (viewer.View is IShardChunkSubscriptions chunks &&
+                    !await chunks.HasLoadedChunkAsync(chunkX, chunkZ, ct))
+                    continue;
+                visible.Add(mob.EntityId);
+                if (!seen.TryGetValue(mob.EntityId, out var prior))
+                    await LivingEntityProtocol.SendSpawnAsync(viewer.Connection,
+                        mob, ct);
+                else if (prior.Sheared != mob.Sheared ||
+                    prior.Color != mob.Color || prior.Health != mob.Health)
+                    await LivingEntityProtocol.SendMetadataAsync(
+                        viewer.Connection, mob, ct);
+                seen[mob.EntityId] = mob;
+            }
+            foreach (int id in seen.Keys.ToArray())
+            {
+                if (visible.Contains(id)) continue;
+                await LivingEntityProtocol.SendRemoveAsync(
+                    viewer.Connection, id, ct);
+                seen.Remove(id);
+            }
+        }
+    }
+
+    internal bool SummonSheepAt(ConnectedPlayer player)
+    {
+        PlayerPose pose = player.Pose;
+        return _livingEntities?.TrySpawnSheep(pose.X + 2, pose.Y,
+            pose.Z + 1, out _) == true;
+    }
+}
