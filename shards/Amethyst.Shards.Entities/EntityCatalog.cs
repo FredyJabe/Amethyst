@@ -245,9 +245,12 @@ public sealed class EntityCatalog : IShardEntityRegistry
                     case "options":
                         if (property.Value is not YamlMappingNode options)
                             throw new InvalidDataException($"Options for '{key}' must be a mapping.");
+                        var seenOptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var option in options.Children)
                         {
                             string optionName = Scalar(option.Key, file);
+                            if (!seenOptions.Add(optionName))
+                                throw new InvalidDataException($"Duplicate Options.{optionName} for '{key}' in {file}.");
                             switch (optionName.ToLowerInvariant())
                             {
                                 case "health":

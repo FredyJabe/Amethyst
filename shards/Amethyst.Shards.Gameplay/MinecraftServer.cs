@@ -44,7 +44,7 @@ public sealed class MinecraftServer
         _items = items;
         _entities = entities;
         _packetBus = packetBus;
-        _players = new PlayerRegistry(options.MaxPlayers, entities?.AllocateEntityId);
+        _players = new PlayerRegistry(options.MaxPlayers, entities is null ? null : entities.AllocateEntityId);
         _operators = new OperatorStore(options.OperatorsFile);
         _clock = new WorldClock(options);
         _positions = new PlayerPositionStore(inventoryDirectory, options.WorldPath, world);
