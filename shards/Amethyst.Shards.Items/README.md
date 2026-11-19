@@ -83,20 +83,83 @@ The new identifier is accessible to other Shards as
 `amethyst:legendarypickaxe`, and can also be queried with
 `LegendaryPickaxe`. Its base `ProtocolId` is the vanilla pickaxe ID.
 
-**Important: aliases are metadata, not independent item stacks yet.**
-Amethyst's current `ItemStack` stores only a numeric vanilla protocol ID,
-count, and durability damage. These values do not distinguish custom aliases. Therefore the client cannot distinguish a legendary pickaxe
-from an ordinary one, and custom alias display/lore cannot be applied
-on individual inventory stacks until per-stack components/identity are
-implemented. Aliases cannot override `MaxStackSize` or
-`Options.BlockItem` to values different from the underlying item.
+**Important: aliases are not independent item stacks yet.**
+The wire identity remains the vanilla protocol ID. Canonical vanilla
+overrides now emit their item components to the client, but an alias
+with the same base material still cannot be distinguished from its base
+item in a player's inventory. Alias-specific component patches are
+available through `ShardItemDefinition.Components`, but **they are not
+applied to arbitrary stacks of that base material**. Aliases cannot
+change the base material's physical capacity, durability, or block nature.
 
-Similarly, `Display`, `ItemName`, `Lore` and
-`CustomModelData` are currently **loaded, validated and exposed
-through the API** but **are not serialized to Java item data
-components yet**. They will not visually change the item in game in
-this first migration. Never mistake metadata parsing for working
-client rendering or new custom textures.
+### Item components (Java 26.3 / protocol 777)
+
+**Mythic-style top-level fields** and the explicit `Components` map
+can be used in your item definition YAML:
+
+```yaml
+diamond_pickaxe:
+  Id: minecraft:diamond_pickaxe
+  Display: "<aqua>Miner's Pickaxe</aqua>"
+  ItemName: "Masterwork Pickaxe"
+  ItemModel: amethyst:miners_pickaxe
+  Lore:
+    - "A tool forged in amethyst"
+  Rarity: epic
+  Glint: true
+  Components:
+    minecraft:custom_model_data:
+      floats: [42.0]
+      flags: [true]
+      strings: [miners_pickaxe]
+      colors: [16711935]
+    minecraft:tooltip_display:
+      hide_tooltip: false
+      hidden_components: [minecraft:enchantments]
+```
+
+`ItemModel` and `item_model` are accepted as top-level aliases of
+`minecraft:item_model`. Specify a resource location like
+`amethyst:miners_pickaxe`. A **matching client resource pack is
+required** for a custom texture or model; configuring the component
+does not install the asset.
+
+For canonical vanilla definitions, configured component patches are
+serialized into player-inventory, workstation, and dropped-item packets.
+They are combined with instance durability, enchantments, and repair
+cost; stack-specific properties take precedence. The existing
+`CustomModelData: 123` shorthand maps to the modern
+`custom_model_data.floats: [123]` format.
+
+Accepted `Components` entries (the `minecraft:` prefix is optional):
+
+| Java component | YAML value |
+| --- | --- |
+| `item_model`, `tooltip_style` | Resource location string |
+| `custom_name`, `item_name` | Text string |
+| `lore` | List of text strings, up to 64 |
+| `rarity` | `common`, `uncommon`, `rare`, `epic` |
+| `enchantment_glint_override` | Boolean |
+| `unbreakable` | Boolean; true prevents server durability wear for this vanilla item |
+| `max_stack_size` | Integer 1–64, not exceeding the vanilla item capacity |
+| `repair_cost` | Integer 0–32767 |
+| `custom_model_data` | Nonnegative integer, or map of `floats`, `flags`, `strings`, `colors` arrays |
+| `tooltip_display` | `hide_tooltip` boolean and `hidden_components` list of component names |
+
+Top-level shorthands also include `TooltipStyle`, `Rarity`,
+`Unbreakable`, and `Glint`. Do not define the same component in a
+shorthand and the `Components` map; duplicates are rejected.
+
+Complex components (attributes, equippable, food, custom effects,
+enchantment lists, etc.) require individual codec and gameplay support
+before they can be configured; unsupported types fail at startup. The
+public `ShardItemComponentIds` resolves all 122 protocol-777 component
+IDs, but that does not imply wire serialization for all of them.
+
+Simple `<aqua>Text</aqua>` or `<gold>Text</gold>` names are translated
+into Minecraft text components. Full MiniMessage (nested tags,
+gradients, events) is not yet supported. Restart the server after
+editing YAML.
 
 ### Supported keys
 
@@ -107,11 +170,14 @@ client rendering or new custom textures.
 | `ProtocolId` | integer | Version-specific vanilla wire ID; cannot be reassigned |
 | `MaxStackSize` | integer | Server-side max stack, 1 through vanilla max |
 | `MaxDurability` | integer | Pinned vanilla maximum damage; user overrides may repeat, but cannot change the original value |
-| `Display` | string | Optional display metadata (not yet rendered) |
-| `ItemName` | string | Optional item-name metadata (not yet rendered) |
-| `Lore` | string list | Optional lore metadata (not yet rendered) |
-| `CustomModelData` | nonnegative integer | Optional model metadata (not yet rendered) |
-| `Hidden` | boolean | Optional metadata |
+| `Display` | string | Client-visible custom name |
+| `ItemName` | string | Client-visible item name |
+| `Lore` | string list | Client-visible lore text |
+| `CustomModelData` | nonnegative integer | Modern custom-model-data float shorthand |
+| `Hidden` | boolean | Definition metadata, not `tooltip_display` |
+| `ItemModel` / `item_model` | resource location | Client-visible model selector |
+| `Rarity`, `Glint`, `Unbreakable`, `TooltipStyle` | mixed | Component shorthands |
+| `Components` | mapping | Validated client-visible data-component patch |
 | `Options.StackSize` | integer | MythicMobs-style synonym for `MaxStackSize` |
 | `Options.BlockItem` | boolean | Block-item metadata, not placement logic |
 | `Options.Hidden` | boolean | Same as top-level `Hidden` |
@@ -486,6 +552,14 @@ if (items.TryGetByIdentifier("diamond_pickaxe", out var item))
 
 if (items.TryGetByIdentifier("LegendaryPickaxe", out var custom))
     context.Log(custom.Display ?? custom.Identifier);
+
+if (items.TryGetByIdentifier("diamond_pickaxe", out var configured))
+{
+    context.Log(configured.ItemModel ?? "vanilla model");
+    if (configured.Components is not null)
+        foreach (var (name, json) in configured.Components)
+            context.Log($"{name} = {json}");
+}
 ```
 
 Declare `requires: [items]` in the consuming Shard manifest.
