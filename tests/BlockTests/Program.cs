@@ -1400,6 +1400,14 @@ try
     Check(lootGame.GroundItemsForTests.Length == spawnedDrops.Length,
         "An ordinary entity despawn does not generate loot");
 
+    string bonusMilkFile = Path.Combine(stationsRoot, "bonus-milk-skills.yml");
+    File.WriteAllText(bonusMilkFile, """
+        cow:
+          Skills:
+            - 'dropItem{item=minecraft:diamond;amount=1} ~onMilk'
+        """);
+    deathSkills.RegisterDefinitions("interaction-tests", bonusMilkFile);
+
     // Validate the 26.3 packet codec: EID, main hand, compressed zero
     // hit-vector and secondary-action flag. Reject impossible hands and
     // malformed trailing fields before reaching gameplay handlers.
@@ -1444,6 +1452,10 @@ try
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Held() == new ItemStack(fullBucket.ProtocolId, 1),
             "Right-clicking a cow turns an empty bucket into a milk bucket");
+        Check(itemsCatalog.TryGetByIdentifier("diamond", out var milkReward) &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == milkReward.ProtocolId &&
+                d.X == milkTarget.X && d.Z == milkTarget.Z),
+            "Successful milking dispatches custom cross-Shard ~onMilk skills");
         Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 2, true),
             "Set up a stacked-bucket milking transaction");
         await lootGame.HandleEntityInteractionAsync(farmer,
@@ -1458,6 +1470,27 @@ try
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(beforeFar),
             "Server enforces interaction reach to prevent remote item duplication");
+
+        // A stacked bucket must not be consumed if a full inventory cannot
+        // receive the resulting filled milk bucket.
+        farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
+        Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 2, true),
+            "Prepare stacked buckets for a full-inventory check");
+        Check(itemsCatalog.TryGetByIdentifier("stone", out var stone),
+            "Load the stackable test item");
+        foreach (int slot in Enumerable.Range(9, 36))
+        {
+            if (slot == 36) continue;
+            Check(farmer.Inventory.TryCreativeSet(slot, stone.ProtocolId, 64, true),
+                "Fill inventory slot to block milk output");
+        }
+        var lockedInventory = farmer.Inventory.Snapshot().Slots;
+        int milkRewardsBefore = lootGame.GroundItemsForTests.Length;
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
+        Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(lockedInventory) &&
+            lootGame.GroundItemsForTests.Length == milkRewardsBefore,
+            "Full inventory refuses stacked-bucket conversion and emits no onMilk reward");
 
         farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
         Check(itemsCatalog.TryGetByIdentifier("shears", out shears) &&
