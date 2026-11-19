@@ -9,6 +9,7 @@ public sealed partial class MinecraftServer
     {
         if (!player.Ready) return;
         if (await HandleShieldUseAsync(player, action, ct)) return;
+        if (await HandleProjectileUseAsync(player, action, ct)) return;
         await BlockInteractionProtocol.SendAckAsync(player.Connection,
             action.Sequence, ct);
     }
@@ -31,6 +32,7 @@ public sealed partial class MinecraftServer
     internal async Task ReleaseUsingItemAsync(ConnectedPlayer player,
         CancellationToken ct)
     {
+        await ReleaseProjectileChargeAsync(player, ct);
         if (player.UseState.ShieldHand >= 0)
         {
             player.UseState.StopShield();
