@@ -152,6 +152,39 @@ internal static class DurabilityFeatureTests
                 .Snapshot().Any(x => x.Value == 3 && x.Uuid == remaining.Uuid),
                 "Uncollected XP orbs survive world restart");
 
+            // Item entities must not erase enchanted item components on the
+            // ground, through persistence, or when collected.
+            int groundId = 2000;
+            var ground = new GroundItemStore(root, worldPath, () => ++groundId, items);
+            var droppedTool = new ItemStack(wood.ProtocolId, 1)
+            {
+                Damage = 14, Unbreaking = 2, Mending = true, RepairCost = 3
+            };
+            Check(ground.TrySpawn(droppedTool, 3.5, 81.5, 3.5,
+                out var enchantedDrop, now) &&
+                enchantedDrop.ResolvedStack == droppedTool,
+                "Ground item entities carry complete durability metadata");
+            var reloadedGround = new GroundItemStore(root, worldPath,
+                () => ++groundId, items);
+            GroundItem persistedDrop = reloadedGround.Snapshot().Single(
+                e => e.Uuid == enchantedDrop.Uuid);
+            var receiver = new PlayerInventory(null, Guid.NewGuid(), items);
+            Check(persistedDrop.ResolvedStack == droppedTool &&
+                reloadedGround.TryCollect(persistedDrop.EntityId, receiver,
+                    out _, now + 600) == 1 &&
+                receiver.Snapshot().Slots.Any(item => item == droppedTool),
+                "Enchanted tools persist as drops and retain data on pickup");
+
+            Check(DurabilityRules.TryWearAnvil(12962, out ushort chipped,
+                    new FixedRandom(false)) && chipped == 12966 &&
+                DurabilityRules.TryWearAnvil(12966, out ushort damaged,
+                    new FixedRandom(false)) && damaged == 12970 &&
+                DurabilityRules.TryWearAnvil(12970, out ushort broken,
+                    new FixedRandom(false)) && broken == 0 &&
+                !DurabilityRules.TryWearAnvil(12962, out ushort unchanged,
+                    new FixedRandom(true)) && unchanged == 12962,
+                "Anvil has a 12% degradation roll that keeps facing and breaks in final stage");
+
             Check(ToolUseRules.TryUse("minecraft:diamond_axe", 139, 1, false,
                     false, out var stripped) && stripped.NewState == 198 &&
                 ToolUseRules.TryUse("minecraft:diamond_hoe", 10, 1, true,
