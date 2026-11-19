@@ -37,9 +37,10 @@ internal static class ShieldFeatureTests
             packet.Yaw == 25 && packet.Pitch == -10,
             "Java 26.3 use-item packet decodes offhand and sequence");
 
+        Amethyst.Shards.ShardItemDefinition axe = default, sword = default;
         Check(items.TryGetByIdentifier("shield", out var shield) &&
-            items.TryGetByIdentifier("iron_axe", out var axe) &&
-            items.TryGetByIdentifier("diamond_sword", out var sword),
+            items.TryGetByIdentifier("iron_axe", out axe) &&
+            items.TryGetByIdentifier("diamond_sword", out sword),
             "Shield, axe, and sword use version-pinned item IDs");
         string root = Path.Combine(Path.GetTempPath(),
             "amethyst-shield-" + Guid.NewGuid().ToString("N"));
