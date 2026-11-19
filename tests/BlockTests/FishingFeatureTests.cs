@@ -37,8 +37,9 @@ internal static class FishingFeatureTests
             var fishing = new FishingWorld(() => Random.Shared.Next(20000, 30000));
             Guid player = Guid.NewGuid();
             var pose = new PlayerPose(0.5, 80, 0.5, 0, 0, true);
+            FishingBobber first = default;
             Check(world.TrySetBlockState(0, 81, 1, 89, out _) &&
-                fishing.TryCast(player, 120, pose, out FishingBobber first) &&
+                fishing.TryCast(player, 120, pose, out first) &&
                 !fishing.TryCast(player, 120, pose, out _),
                 "Fishing casts one physical bobber per player");
             long now = 100_000;
