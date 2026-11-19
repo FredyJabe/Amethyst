@@ -41,7 +41,7 @@ public static class DroppedItemProtocol
             writer.WriteVarInt(item.EntityId);
             writer.WriteByte(StackMetadataIndex);
             writer.WriteVarInt(StackMetadataSerializer);
-            InventoryProtocol.WriteStack(writer, new ItemStack(item.ItemId, item.Count));
+            InventoryProtocol.WriteStack(writer, item.ResolvedStack);
             writer.WriteByte(0xFF); // end of metadata list
         }, ct);
 
