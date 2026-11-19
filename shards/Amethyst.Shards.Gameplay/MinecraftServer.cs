@@ -751,6 +751,7 @@ public sealed class MinecraftServer
             await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
             return;
         }
+        if (await TryHandleToolUseAsync(player, hit, ct)) return;
         var (x, y, z) = BlockInteractionProtocol.Adjacent(hit.X, hit.Y, hit.Z, hit.Face);
         ushort selected = 0;
         bool allowed = hit.ValidHit && hit.Hand == 0 &&
@@ -792,6 +793,63 @@ public sealed class MinecraftServer
                     x, y, z, _blocks!.GetBlockState(x, y, z), ct);
         }
         await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
+    }
+
+    /// <summary>Server-authoritative right-click tool use. Never spends
+    /// durability on invalid interactions or rejected block-state writes.</summary>
+    private async Task<bool> TryHandleToolUseAsync(ConnectedPlayer player,
+        BlockUseOn hit, CancellationToken ct)
+    {
+        if (!hit.ValidHit || hit.Hand != 0 || _blocks is null ||
+            _items is null || !CanEditAt(player, hit.X, hit.Y, hit.Z))
+            return false;
+        ItemStack held = player.Inventory.Held();
+        if (held.Count != 1 ||
+            !_items.TryGetById(held.ItemId, out var definition) ||
+            definition.MaxDurability <= 0) return false;
+        ushort block = _blocks.GetBlockState(hit.X, hit.Y, hit.Z);
+        if (block == 0) return false;
+        var (ax, ay, az) = BlockInteractionProtocol.Adjacent(
+            hit.X, hit.Y, hit.Z, hit.Face);
+        bool adjacentAir = CanEditAt(player, ax, ay, az) &&
+            _blocks.GetBlockState(ax, ay, az) == 0;
+        bool aboveAir = hit.Y < 319 &&
+            _blocks.GetBlockState(hit.X, hit.Y + 1, hit.Z) == 0;
+        if (!ToolUseRules.TryUse(definition.Identifier, block, hit.Face,
+            aboveAir, adjacentAir, out var action)) return false;
+
+        int bx = action.Adjacent ? ax : hit.X;
+        int by = action.Adjacent ? ay : hit.Y;
+        int bz = action.Adjacent ? az : hit.Z;
+        if (!CanEditAt(player, bx, by, bz) ||
+            !player.TryConsumeEditBudget())
+        {
+            await BlockInteractionProtocol.SendAckAsync(player.Connection,
+                hit.Sequence, ct);
+            return true;
+        }
+        bool changed = _blocks.TrySetBlockState(bx, by, bz,
+            action.NewState, out _);
+        if (changed)
+        {
+            await BroadcastBlockChangeAsync(player, bx, by, bz,
+                action.NewState, ct);
+            if (action.Seeds > 0 && _groundItems is not null &&
+                _items.TryGetByIdentifier("minecraft:pumpkin_seeds",
+                    out var seed))
+                _groundItems.TrySpawn(seed.ProtocolId, action.Seeds,
+                    hit.X + 0.5, hit.Y + 0.4, hit.Z + 0.5, out _);
+        }
+        else await BlockInteractionProtocol.SendBlockUpdateAsync(
+            player.Connection, bx, by, bz,
+            _blocks.GetBlockState(bx, by, bz), ct);
+        await BlockInteractionProtocol.SendAckAsync(player.Connection,
+            hit.Sequence, ct);
+        if (changed && player.GameMode == PlayerGameMode.Survival &&
+            player.Inventory.DamageHeld(held.ItemId, 1))
+            await InventoryProtocol.SendSlotAsync(player.Connection,
+                player.Inventory, player.Inventory.SelectedSlot, ct);
+        return true;
     }
 
     private async Task BroadcastBlockChangeAsync(ConnectedPlayer actor,
