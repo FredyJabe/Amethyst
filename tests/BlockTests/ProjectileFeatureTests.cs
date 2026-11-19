@@ -11,10 +11,12 @@ internal static class ProjectileFeatureTests
 
     public static async Task RunAsync(ItemCatalog items, RecipeCatalog recipes)
     {
+        Amethyst.Shards.ShardItemDefinition arrow = default, trident = default,
+            snowball = default;
         Check(items.TryGetByIdentifier("bow", out var bow) &&
-            items.TryGetByIdentifier("arrow", out var arrow) &&
-            items.TryGetByIdentifier("trident", out var trident) &&
-            items.TryGetByIdentifier("snowball", out var snowball),
+            items.TryGetByIdentifier("arrow", out arrow) &&
+            items.TryGetByIdentifier("trident", out trident) &&
+            items.TryGetByIdentifier("snowball", out snowball),
             "Version-pinned projectile item and ammo definitions available");
         string root = Path.Combine(Path.GetTempPath(),
             "amethyst-projectile-" + Guid.NewGuid().ToString("N"));
