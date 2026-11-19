@@ -56,6 +56,7 @@ public sealed partial class MinecraftServer
                 options.WorldPath, _players.AllocateEntityId);
             _livingEntities = new LivingEntityStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId);
+            _projectiles = new ProjectileWorld(_players.AllocateEntityId);
         }
     }
 
@@ -104,6 +105,7 @@ public sealed partial class MinecraftServer
             _experienceOrbs?.Save();
             _livingEntities?.Save();
             _livingViews.Clear();
+            _projectileViews.Clear();
             _itemViews.Clear();
             _experienceViews.Clear();
             _itemsSync = null;
@@ -348,6 +350,7 @@ public sealed partial class MinecraftServer
                         ChatProtocol.ParseSessionUpdate(packet.Value);
                         break;
                     case BlockInteractionProtocol.ServerboundSetHeldItem:
+                        player.UseState.CancelCharge();
                         player.SelectHotbar(BlockInteractionProtocol.ReadHeldItem(packet.Value));
                         await ReleaseUsingItemAsync(player, lifetime.Token);
                         break;
@@ -979,6 +982,7 @@ public sealed partial class MinecraftServer
             await TickGroundItemsAsync(ct);
             await TickExperienceOrbsAsync(ct);
             await TickLivingEntitiesAsync(ct);
+            await TickProjectilesAsync(ct);
     }
 
     /// <summary>One authoritative 20Hz tick for loose items. Exposed internally
