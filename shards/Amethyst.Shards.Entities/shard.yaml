@@ -1,0 +1,9 @@
+id: entities
+apiVersion: 1
+assembly: Amethyst.Shards.Entities.dll
+entryType: Amethyst.BuiltinShards.EntitiesShard
+enabled: true
+provides:
+  - entities
+requires: []
+dependsOn: []

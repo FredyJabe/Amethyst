@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Amethyst.csproj" />
+    <None Include="entities-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="InstallShard" AfterTargets="Build">
+    <MakeDir Directories="$(MSBuildProjectDirectory)/../../shards/installed/entities" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/entities" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/shard.yaml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/entities" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/entities-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/entities" />
+  </Target>
+</Project>
