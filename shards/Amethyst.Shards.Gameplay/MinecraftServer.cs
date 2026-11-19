@@ -1016,6 +1016,114 @@ public sealed class MinecraftServer
         }
     }
 
+    /// <summary>One authoritative orb simulation and pickup pass. Orbs
+    /// become visible only in loaded chunks, and Mending is applied only
+    /// when the player actually collides with an orb.</summary>
+    internal async Task TickExperienceOrbsAsync(CancellationToken ct)
+    {
+        if (_experienceOrbs is null || _blocks is null) return;
+        _experienceOrbs.Simulate(_blocks);
+        ExperienceOrb[] orbs = _experienceOrbs.Snapshot();
+        ConnectedPlayer[] viewers = _players.Snapshot()
+            .Where(p => p.Ready).ToArray();
+        HashSet<Guid> online = viewers.Select(x => x.ConnectionId).ToHashSet();
+        foreach (Guid id in _experienceViews.Keys.ToArray())
+            if (!online.Contains(id)) _experienceViews.Remove(id);
+
+        foreach (ConnectedPlayer viewer in viewers)
+        {
+            if (!_experienceViews.TryGetValue(viewer.ConnectionId,
+                out Dictionary<int, ExperienceOrb>? seen))
+            {
+                seen = new Dictionary<int, ExperienceOrb>();
+                _experienceViews.Add(viewer.ConnectionId, seen);
+            }
+            var visible = new HashSet<int>();
+            foreach (ExperienceOrb orb in orbs)
+            {
+                PlayerPose pose = viewer.Pose;
+                double dx = orb.X - pose.X, dz = orb.Z - pose.Z;
+                if (dx * dx + dz * dz > 48 * 48 ||
+                    Math.Abs(orb.Y - pose.Y) > 48) continue;
+                int cx = (int)Math.Floor(orb.X / 16),
+                    cz = (int)Math.Floor(orb.Z / 16);
+                if (viewer.View is IShardChunkSubscriptions chunks &&
+                    !await chunks.HasLoadedChunkAsync(cx, cz, ct)) continue;
+                visible.Add(orb.EntityId);
+                try
+                {
+                    if (!seen.TryGetValue(orb.EntityId, out var previous))
+                        await ExperienceProtocol.SendOrbAsync(
+                            viewer.Connection, orb, ct);
+                    else if (previous.X != orb.X || previous.Y != orb.Y ||
+                             previous.Z != orb.Z)
+                        await ExperienceProtocol.SendPositionAsync(
+                            viewer.Connection, orb, ct);
+                    seen[orb.EntityId] = orb;
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+            }
+            foreach (int id in seen.Keys.ToArray())
+            {
+                if (visible.Contains(id)) continue;
+                try
+                {
+                    await DroppedItemProtocol.SendRemoveAsync(
+                        viewer.Connection, id, ct);
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+                seen.Remove(id);
+            }
+        }
+
+        foreach (ExperienceOrb orb in orbs)
+        {
+            foreach (ConnectedPlayer collector in viewers)
+            {
+                PlayerPose pose = collector.Pose;
+                double dx = orb.X - pose.X, dz = orb.Z - pose.Z;
+                if (dx * dx + dz * dz > 1.5 * 1.5 ||
+                    Math.Abs(orb.Y - (pose.Y + 0.35)) > 1.6) continue;
+                if (!_experienceViews.TryGetValue(collector.ConnectionId,
+                    out var visible) || !visible.ContainsKey(orb.EntityId))
+                    continue;
+                int xp = _experienceOrbs.TryCollect(orb.EntityId);
+                if (xp == 0) continue;
+                var (remaining, repairedSlot) =
+                    collector.Inventory.RepairFromExperience(xp);
+                if (remaining > 0) collector.Experience.Award(remaining);
+                foreach (ConnectedPlayer viewer in viewers)
+                {
+                    if (!_experienceViews.TryGetValue(viewer.ConnectionId,
+                        out var seen) || !seen.Remove(orb.EntityId)) continue;
+                    try
+                    {
+                        await ExperienceProtocol.SendPickupAsync(
+                            viewer.Connection, orb, collector, ct);
+                        await DroppedItemProtocol.SendRemoveAsync(
+                            viewer.Connection, orb.EntityId, ct);
+                    }
+                    catch (IOException) { }
+                    catch (ObjectDisposedException) { }
+                }
+                try
+                {
+                    if (repairedSlot >= 0)
+                        await InventoryProtocol.SendSlotAsync(
+                            collector.Connection, collector.Inventory,
+                            repairedSlot, ct);
+                    await ExperienceProtocol.SendExperienceAsync(
+                        collector.Connection, collector.Experience, ct);
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+                break;
+            }
+        }
+    }
+
     private static void ApplyClientInformation(ConnectedPlayer player, Packet packet)
     {
         PacketReader reader = packet.Reader();
