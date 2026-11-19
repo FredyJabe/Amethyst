@@ -50,6 +50,16 @@ try
         cow:
           Skills:
             - 'dropItem{item=minecraft:diamond;amount=1} ~onDeath'
+        diamond_pickaxe:
+          Skills:
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onLeftClick'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onRightClick'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onDrop'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onStackDrop'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onSwap'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onPickup'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onEquip'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onUnequip'
         """);
     string entityDir = Path.Combine(temp, "shards", "entities", "definitions");
     Directory.CreateDirectory(entityDir);
@@ -163,6 +173,17 @@ try
         host.RegisteredConsoleCommands.Contains("skillinfo") &&
         await host.TryExecuteConsoleAsync("skillinfo cow", CancellationToken.None),
         "Core skill engine is shared and Items registers its dropItem mechanic");
+    string[] itemEvents = [
+        "onLeftClick", "onRightClick", "onDrop", "onStackDrop",
+        "onSwap", "onPickup", "onEquip", "onUnequip"
+    ];
+    Check(skillEngine.TryGetSkills("minecraft:diamond_pickaxe", out var itemSkills) &&
+        itemSkills.Count == itemEvents.Length &&
+        itemEvents.All(evt => itemSkills.Any(skill =>
+            string.Equals(skill.Trigger, evt, StringComparison.OrdinalIgnoreCase))) &&
+        itemEvents.All(evt => skillEngine.DispatchAsync(
+            new ShardSkillEvent("minecraft:diamond_pickaxe", evt)).GetAwaiter().GetResult()),
+        "Items Shard registers all eight configurable event triggers through Core");
     IShardEntityRegistry entityTypes = host.GetService<IShardEntityRegistry>() ??
         throw new Exception("FAIL: Entities Shard service not registered");
     IShardEntityManager entityWorld = host.GetService<IShardEntityManager>() ??
@@ -350,6 +371,8 @@ try
         host.GetService<IShardSkillEngine>() == skillEngine &&
         host.GetService<IShardItemDropSink>() is not null &&
         skillEngine.OwnerCount >= 10 &&
+        skillEngine.TryGetSkills("diamond_pickaxe", out var reloadedItemSkills) &&
+        reloadedItemSkills.Count == 8 &&
         host.GetService<IShardEntityManager>() is not null &&
         host.GetService<IShardEntityRegistry>() is not null &&
         host.GetService<IShardEntityInteractions>() is not null,

@@ -1375,6 +1375,12 @@ try
     deathSkills.RegisterMechanic("items", "dropItem", dropItem.Validate, dropItem.ExecuteAsync);
     deathSkills.RegisterTrigger("entities", "onMilk");
     deathSkills.RegisterTrigger("entities", "onShear");
+    foreach (string trigger in new[]
+    {
+        "onLeftClick", "onRightClick", "onDrop", "onStackDrop",
+        "onSwap", "onPickup", "onEquip", "onUnequip"
+    })
+        deathSkills.RegisterTrigger("items", trigger);
     deathSkills.RegisterDefinitions("items", Path.Combine(solutionRoot.FullName,
         "shards", "Amethyst.Shards.Items", "skills-26.3.yml"));
     lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
@@ -1405,6 +1411,14 @@ try
         cow:
           Skills:
             - 'dropItem{item=minecraft:diamond;amount=1} ~onMilk'
+        bucket:
+          Skills:
+            - 'dropItem{item=minecraft:emerald;amount=1} ~onRightClick'
+            - 'dropItem{item=minecraft:iron_ingot;amount=1} ~onDrop'
+            - 'dropItem{item=minecraft:gold_ingot;amount=1} ~onStackDrop'
+        shears:
+          Skills:
+            - 'dropItem{item=minecraft:lapis_lazuli;amount=1} ~onLeftClick'
         """);
     deathSkills.RegisterDefinitions("interaction-tests", bonusMilkFile);
 
@@ -1452,6 +1466,9 @@ try
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Held() == new ItemStack(fullBucket.ProtocolId, 1),
             "Right-clicking a cow turns an empty bucket into a milk bucket");
+        Check(itemsCatalog.TryGetByIdentifier("emerald", out var clickReward) &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == clickReward.ProtocolId),
+            "Right-click dispatches an item-owned skill independently of onMilk");
         Check(itemsCatalog.TryGetByIdentifier("diamond", out var milkReward) &&
             lootGame.GroundItemsForTests.Any(d => d.ItemId == milkReward.ProtocolId &&
                 d.X == milkTarget.X && d.Z == milkTarget.Z),
@@ -1510,6 +1527,46 @@ try
             new EntityInteraction(shearTarget.EntityId, 0, false), CancellationToken.None);
         Check(lootGame.GroundItemsForTests.Length == shearedWool.Length,
             "Repeated shearing cannot duplicate wool rewards");
+
+        // Click triggers are item-owner skills, separate from entity events.
+        Check(stationWorld.TrySetBlockState(11, 80, 12, 9, out _),
+            "Prepare a nearby block for item left-click");
+        int beforeLeft = lootGame.GroundItemsForTests.Length;
+        await lootGame.HandleBlockActionAsync(farmer, new PlayerBlockAction(
+            BlockInteractionProtocol.StartDestroyBlock, 11, 80, 12, 1, 88),
+            CancellationToken.None);
+        Check(itemsCatalog.TryGetByIdentifier("lapis_lazuli", out var leftReward) &&
+            lootGame.GroundItemsForTests.Length > beforeLeft &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == leftReward.ProtocolId),
+            "Left-clicking a valid block dispatches the held item's skill");
+
+        // Q drops a single item; Ctrl+Q drops the remainder of the stack.
+        // Both emit onDrop, but only Ctrl+Q additionally emits onStackDrop.
+        Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 3, true),
+            "Prepare a stack of buckets for real dropped-item actions");
+        int beforeSingle = lootGame.GroundItemsForTests.Length;
+        await lootGame.HandleBlockActionAsync(farmer, new PlayerBlockAction(
+            BlockInteractionProtocol.DropItem, 0, 0, 0, 0, 89),
+            CancellationToken.None);
+        Check(farmer.Inventory.Held() == new ItemStack(bucket.ProtocolId, 2) &&
+            itemsCatalog.TryGetByIdentifier("iron_ingot", out var droppedReward) &&
+            lootGame.GroundItemsForTests.Length == beforeSingle + 2 &&
+            lootGame.GroundItemsForTests.Any(d =>
+                d.ItemId == bucket.ProtocolId && d.Count == 1) &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == droppedReward.ProtocolId),
+            "Q drops exactly one held item and fires onDrop after inventory commit");
+
+        int beforeStack = lootGame.GroundItemsForTests.Length;
+        await lootGame.HandleBlockActionAsync(farmer, new PlayerBlockAction(
+            BlockInteractionProtocol.DropAllItems, 0, 0, 0, 0, 90),
+            CancellationToken.None);
+        Check(farmer.Inventory.Held() == ItemStack.Empty &&
+            itemsCatalog.TryGetByIdentifier("gold_ingot", out var stackReward) &&
+            lootGame.GroundItemsForTests.Length == beforeStack + 3 &&
+            lootGame.GroundItemsForTests.Any(d =>
+                d.ItemId == bucket.ProtocolId && d.Count == 2) &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == stackReward.ProtocolId),
+            "Ctrl+Q drops the remaining stack, triggering onDrop and onStackDrop");
     }
 
     using (var stream = new MemoryStream())
