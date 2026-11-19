@@ -6,6 +6,7 @@ public sealed partial class MinecraftServer
 {
     private readonly Dictionary<Guid, Dictionary<int, ProjectileEntity>>
         _projectileViews = new();
+    private readonly ProjectileWorld? _projectiles;
 
     internal ProjectileEntity[] ProjectilesForTests =>
         _projectiles?.Snapshot() ?? [];
