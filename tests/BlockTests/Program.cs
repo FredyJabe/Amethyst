@@ -51,10 +51,11 @@ Check(!itemsCatalog.IsValidStack(99999, 1) &&
     "Unknown IDs and non-empty air stacks are never valid");
 
 // Java 26.3 durability comes from the Items Shard's pinned definitions.
+ShardItemDefinition shearsTool = default;
 Check(itemsCatalog.TryGetByIdentifier("wooden_pickaxe", out var woodenTool) &&
     woodenTool.MaxDurability == 59 &&
     diamondPickaxe.MaxDurability == 1561 &&
-    itemsCatalog.TryGetByIdentifier("shears", out var shearsTool) &&
+    itemsCatalog.TryGetByIdentifier("shears", out shearsTool) &&
     shearsTool.MaxDurability == 238 &&
     itemsCatalog.TryGetByIdentifier("stone", out var notTool) &&
     notTool.MaxDurability == 0,
