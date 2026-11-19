@@ -699,8 +699,8 @@ public sealed class MinecraftServer
         var (contents, viewers) = _stations.Break(pos);
         foreach (ItemStack item in contents)
         {
-            if (_groundItems is null || !_groundItems.TrySpawn(item.ItemId,
-                item.Count, x + 0.5, y + 0.4, z + 0.5, out _))
+            if (_groundItems is null || !_groundItems.TrySpawn(item,
+                x + 0.5, y + 0.4, z + 0.5, out _))
                 Console.WriteLine($"[station] Unable to drop station contents {item.ItemId}");
         }
         foreach (Guid id in viewers)
