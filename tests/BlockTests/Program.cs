@@ -152,6 +152,7 @@ finally
 
 await DurabilityFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await CombatFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await ShieldFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 
 // Mythic-style YAML: each root ID overrides one vanilla item or names a
 // custom alias backed by a vanilla protocol item. Never mint new IDs.
