@@ -59,14 +59,14 @@ public sealed partial class RecipeCatalog
                  "Ingredient", "Result", "Group"],
             RecipeKind.SmithingTransform or RecipeKind.SmithingTrim =>
                 ["Type", "Enabled", "Priority", "ShowNotification", "show_notification",
-                 "Template", "Base", "Addition", "Result"],
+                 "Template", "Base", "Addition", "Result", "Pattern"],
             RecipeKind.Brewing =>
                 ["Type", "Enabled", "Priority", "Input", "Reagent", "Output", "Result"],
             RecipeKind.CraftingTransmute =>
                 ["Type", "Enabled", "Priority", "ShowNotification", "show_notification",
                  "Input", "Material", "Result", "Category", "Group",
-                 "MaterialCount", "material_count", "AddMaterialCountToResult",
-                 "add_material_count_to_result"],
+                 "MaterialCount", "material_count", "MinMaterialCount", "MaxMaterialCount",
+                 "KeepInput", "AddMaterialCountToResult", "add_material_count_to_result"],
             RecipeKind.CraftingDye =>
                 ["Type", "Enabled", "Priority", "ShowNotification", "show_notification",
                  "Target", "Dye", "Result", "Category", "Group"],
@@ -152,7 +152,12 @@ public sealed partial class RecipeCatalog
                 RequiredIngredient(props, "Input", file, id),
                 RequiredIngredient(props, "Material", file, id)
             ];
-            output = RequiredOutput(props, "Result", file, id);
+            bool keepInput = props.TryGetValue("KeepInput", out var keepNode) &&
+                Boolean(keepNode, file, id);
+            if (!keepInput)
+                output = RequiredOutput(props, "Result", file, id);
+            else if (props.TryGetValue("Result", out var fallback))
+                output = ReadOutput(fallback, file, id);
             // Transmutation must carry arbitrary input components into the
             // result. Component-free station stacks cannot yet do this.
         }

@@ -218,6 +218,31 @@ Check(recipesCatalog.RecipeCount >= 70 &&
         "Smoker and blast furnace use their own YAML recipe categories");
 }
 
+// Load the full generated 26.3 YAML as an administrator override over the
+// bundled starter set. This catches malformed YAML, unresolved tags/IDs,
+// duplicates, and recipes unsupported by the catalog during startup.
+string vanillaRecipesDirectory = Path.Combine(solutionRoot.FullName,
+    "shards", "data", "items", "recipes");
+var fullVanillaRecipes = new RecipeCatalog(
+    itemsCatalog, recipesFilePath, vanillaRecipesDirectory);
+Check(fullVanillaRecipes.RecipeCount >= 2042 &&
+    fullVanillaRecipes.RecipeIds.Contains("brewing/potion_water_nether_wart") &&
+    fullVanillaRecipes.RecipeIds.Contains("map_cloning") &&
+    fullVanillaRecipes.RecipeIds.Contains("firework_star") &&
+    fullVanillaRecipes.RecipeIds.Contains("netherite_pickaxe_smithing") &&
+    fullVanillaRecipes.RecipeIds.Contains("andesite_stairs_from_andesite_stonecutting"),
+    "All 2,042 canonical Java 26.3 vanilla recipes load through the Items Shard");
+Check(fullVanillaRecipes.Definitions.Any(d => d.Id == "map_cloning" &&
+        d.Type == ShardRecipeType.CraftingTransmute && !d.IsExecutable &&
+        d.Parameters is not null && d.Parameters.ContainsKey("KeepInput")) &&
+    fullVanillaRecipes.Definitions.Any(d => d.Id == "firework_star" &&
+        d.Type == ShardRecipeType.SpecialFireworkStar && !d.IsExecutable),
+    "Dynamic vanilla transmutation and special recipes retain metadata safely");
+Check(itemsCatalog.TryGetByIdentifier("stone", out var vanillaStone) &&
+    fullVanillaRecipes.GetStonecuttingRecipes(vanillaStone.ProtocolId).Any(d =>
+        d.RecipeId == "stone_bricks_from_stone_stonecutting"),
+    "Vanilla stonecutting choices resolve from the imported catalog");
+
 string customRecipesRoot = Path.Combine(Path.GetTempPath(),
     "amethyst-recipe-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(customRecipesRoot);

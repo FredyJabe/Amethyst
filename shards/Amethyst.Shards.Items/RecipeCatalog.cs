@@ -215,6 +215,7 @@ public sealed partial class RecipeCatalog : IShardRecipeRegistry
             "Banner", "Back", "Left", "Right", "Front", "Shell", "Fuel", "Star",
             "Trail", "Twinkle", "Shapes", "Map", "AllowedGenerations",
             "allowed_generations", "MaterialCount", "material_count",
+            "MinMaterialCount", "MaxMaterialCount", "KeepInput",
             "AddMaterialCountToResult", "add_material_count_to_result");
         if (props.TryGetValue("Enabled", out var enableNode) &&
             !Boolean(enableNode, file, id)) return null;
