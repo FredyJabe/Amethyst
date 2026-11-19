@@ -21,25 +21,30 @@ public sealed class MinecraftServer
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
+    private readonly IShardEntityManager? _entities;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
+    private readonly Dictionary<Guid, Dictionary<int, ShardEntityInstance>> _entityViews = new();
     private CancellationTokenSource? _clockLifetime;
     private Task? _clockSync;
     private Task? _itemsSync;
+    private Task? _entitiesSync;
     private Task? _positionSync;
     private Task? _stationSync;
 
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
-        IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null)
+        IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
+        IShardEntityManager? entities = null)
     {
         _options = options;
         _world = world;
         _blocks = blocks;
         _inventoryDirectory = inventoryDirectory;
         _items = items;
+        _entities = entities;
         _packetBus = packetBus;
-        _players = new PlayerRegistry(options.MaxPlayers);
+        _players = new PlayerRegistry(options.MaxPlayers, entities?.AllocateEntityId);
         _operators = new OperatorStore(options.OperatorsFile);
         _clock = new WorldClock(options);
         _positions = new PlayerPositionStore(inventoryDirectory, options.WorldPath, world);
@@ -65,6 +70,8 @@ public sealed class MinecraftServer
         _clockSync = BroadcastWorldTimeAsync(_clockLifetime.Token);
         if (_groundItems is not null)
             _itemsSync = RunGroundItemsAsync(_clockLifetime.Token);
+        if (_entities is not null)
+            _entitiesSync = RunEntitiesAsync(_clockLifetime.Token);
         if (_positions.Enabled)
             _positionSync = SavePositionsPeriodicallyAsync(_clockLifetime.Token);
         if (_blocks is not null)
@@ -84,6 +91,8 @@ public sealed class MinecraftServer
                 try { await _clockSync; } catch (OperationCanceledException) { }
             if (_itemsSync is not null)
                 try { await _itemsSync; } catch (OperationCanceledException) { }
+            if (_entitiesSync is not null)
+                try { await _entitiesSync; } catch (OperationCanceledException) { }
             if (_positionSync is not null)
                 try { await _positionSync; } catch (OperationCanceledException) { }
             if (_stationSync is not null)
@@ -91,7 +100,9 @@ public sealed class MinecraftServer
             _stations.Save();
             _groundItems?.Save();
             _itemViews.Clear();
+            _entityViews.Clear();
             _itemsSync = null;
+            _entitiesSync = null;
             _positionSync = null;
             _stationSync = null;
             _clockLifetime.Dispose();
@@ -804,6 +815,68 @@ public sealed class MinecraftServer
             }
             catch (IOException) { /* disconnected viewer */ }
             catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task RunEntitiesAsync(CancellationToken ct)
+    {
+        using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
+        while (await ticker.WaitForNextTickAsync(ct))
+            await TickEntitiesAsync(ct);
+    }
+
+    /// <summary>Replicate Entities Shard instances to loaded, nearby players.
+    /// The manager is authoritative; this loop owns only per-viewer state.</summary>
+    internal async Task TickEntitiesAsync(CancellationToken ct)
+    {
+        if (_entities is null) return;
+        ShardEntityInstance[] instances = _entities.Snapshot();
+        ConnectedPlayer[] viewers = _players.Snapshot().Where(p => p.Ready).ToArray();
+        var online = viewers.Select(p => p.ConnectionId).ToHashSet();
+        foreach (Guid id in _entityViews.Keys.ToArray())
+            if (!online.Contains(id)) _entityViews.Remove(id);
+
+        foreach (ConnectedPlayer viewer in viewers)
+        {
+            if (!_entityViews.TryGetValue(viewer.ConnectionId,
+                out Dictionary<int, ShardEntityInstance>? seen))
+            {
+                seen = new Dictionary<int, ShardEntityInstance>();
+                _entityViews.Add(viewer.ConnectionId, seen);
+            }
+            var visible = new HashSet<int>();
+            PlayerPose pose = viewer.Pose;
+            foreach (ShardEntityInstance entity in instances)
+            {
+                double dx = entity.X - pose.X, dz = entity.Z - pose.Z;
+                if (dx * dx + dz * dz > 48 * 48 || Math.Abs(entity.Y - pose.Y) > 48)
+                    continue;
+                int cx = (int)Math.Floor(entity.X / 16.0);
+                int cz = (int)Math.Floor(entity.Z / 16.0);
+                if (viewer.View is IShardChunkSubscriptions chunks &&
+                    !await chunks.HasLoadedChunkAsync(cx, cz, ct)) continue;
+                visible.Add(entity.EntityId);
+                try
+                {
+                    if (!seen.TryGetValue(entity.EntityId, out ShardEntityInstance previous))
+                        await EntityProtocol.SendSpawnAsync(viewer.Connection, entity, ct);
+                    else if (previous.X != entity.X || previous.Y != entity.Y ||
+                             previous.Z != entity.Z || previous.Yaw != entity.Yaw ||
+                             previous.Pitch != entity.Pitch)
+                        await EntityProtocol.SendTeleportAsync(viewer.Connection, entity, ct);
+                    seen[entity.EntityId] = entity;
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+            }
+            foreach (int entityId in seen.Keys.ToArray())
+            {
+                if (visible.Contains(entityId)) continue;
+                try { await EntityProtocol.SendRemoveAsync(viewer.Connection, entityId, ct); }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+                seen.Remove(entityId);
+            }
         }
     }
 
