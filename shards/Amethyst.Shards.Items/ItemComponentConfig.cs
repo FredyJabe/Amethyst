@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Amethyst.Shards;
 using YamlDotNet.RepresentationModel;
 
 namespace Amethyst.BuiltinShards;
@@ -131,7 +132,7 @@ internal static class ItemComponentConfig
                     components = Sequence(pair.Value, context, (n, c) =>
                     {
                         string id = Key(Scalar(n, c));
-                        if (!SupportedHidden.ContainsKey(id))
+                        if (!ShardItemComponentIds.TryGetId(id, out _))
                             throw new InvalidDataException(
                                 $"Unknown hidden component '{id}' in {c}.");
                         return id;
@@ -145,23 +146,6 @@ internal static class ItemComponentConfig
         return JsonSerializer.Serialize(new { hide_tooltip = hide,
             hidden_components = components });
     }
-
-    // Minecraft 26.3 protocol 777 registry IDs, never inferred from a previous
-    // protocol version. More IDs can be added when their codecs are implemented.
-    public static readonly IReadOnlyDictionary<string, int> SupportedHidden =
-        new ReadOnlyDictionary<string, int>(new Dictionary<string, int>
-        {
-            ["minecraft:max_stack_size"] = 1,
-            ["minecraft:max_damage"] = 2, ["minecraft:damage"] = 3,
-            ["minecraft:unbreakable"] = 4, ["minecraft:custom_name"] = 6,
-            ["minecraft:item_name"] = 9, ["minecraft:item_model"] = 10,
-            ["minecraft:lore"] = 11, ["minecraft:rarity"] = 12,
-            ["minecraft:enchantments"] = 13, ["minecraft:custom_model_data"] = 17,
-            ["minecraft:tooltip_display"] = 18, ["minecraft:repair_cost"] = 19,
-            ["minecraft:enchantment_glint_override"] = 21,
-            ["minecraft:stored_enchantments"] = 45,
-            ["minecraft:tooltip_style"] = 35
-        });
 
     private static string Scalar(YamlNode node, string context) =>
         node is YamlScalarNode { Value: { } value } ? value :
