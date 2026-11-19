@@ -96,7 +96,7 @@ public sealed class LivingEntityStore
         {
             if (!_entities.TryGetValue(id, out var old) || old.Sheared ||
                 !old.Alive || old.Kind != "minecraft:sheep") return false;
-            changed = old with { Sheared = true, LastGrazeAt = Environment.TickCount64 };
+            changed = old with { Sheared = true, LastGrazeAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
             _entities[id] = changed;
             try { Persist(); }
             catch { _entities[id] = old; throw; }
