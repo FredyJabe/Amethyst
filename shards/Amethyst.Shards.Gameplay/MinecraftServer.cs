@@ -5,7 +5,7 @@ namespace Amethyst;
 
 /// <summary>Gameplay runtime supplied by the gameplay Shard. Network listener,
 /// login authentication and configuration are handled by AmethystNetworkServer.</summary>
-public sealed class MinecraftServer
+public sealed partial class MinecraftServer
 {
     private static readonly bool TraceMining =
         Environment.GetEnvironmentVariable("AMETHYST_TRACE_MINING") == "1";
@@ -19,6 +19,7 @@ public sealed class MinecraftServer
     private readonly OperatorStore _operators;
     private readonly GroundItemStore? _groundItems;
     private readonly ExperienceOrbStore? _experienceOrbs;
+    private readonly LivingEntityStore? _livingEntities;
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
@@ -52,6 +53,8 @@ public sealed class MinecraftServer
             _groundItems = new GroundItemStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId, items);
             _experienceOrbs = new ExperienceOrbStore(inventoryDirectory,
+                options.WorldPath, _players.AllocateEntityId);
+            _livingEntities = new LivingEntityStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId);
         }
     }
@@ -99,6 +102,8 @@ public sealed class MinecraftServer
             _stations.Save();
             _groundItems?.Save();
             _experienceOrbs?.Save();
+            _livingEntities?.Save();
+            _livingViews.Clear();
             _itemViews.Clear();
             _experienceViews.Clear();
             _itemsSync = null;
@@ -147,6 +152,7 @@ public sealed class MinecraftServer
         await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
         await ExperienceProtocol.SendExperienceAsync(player.Connection,
             player.Experience, ct);
+        await CombatProtocol.SendHealthAsync(player, ct);
         int actualOpLevel = _options.OnlineMode ? _operators.Level(player.PlayerUuid) : 0;
         await GameModeProtocol.SendClientPermissionsAsync(player.Connection, player.EntityId, actualOpLevel, ct);
         await CommandTree.SendAsync(player.Connection, actualOpLevel, ct);
@@ -228,6 +234,25 @@ public sealed class MinecraftServer
                         reader.RequireEnd();
                         player.AdvanceClientTick();
                         break;
+                    case 0x0C: // Respawn request (Java 26.3)
+                    {
+                        int command = reader.ReadVarInt();
+                        reader.RequireEnd();
+                        if (command == 0 && player.Vitals.Snapshot().Health <= 0)
+                        {
+                            expectedTeleportId++;
+                            teleportConfirmed = false;
+                            await RespawnPlayerAsync(player, expectedTeleportId,
+                                lifetime.Token);
+                        }
+                        break;
+                    }
+                    case CombatProtocol.ServerboundAttack:
+                    {
+                        int entityId = CombatProtocol.ReadAttack(packet.Value);
+                        await HandleAttackAsync(player, entityId, lifetime.Token);
+                        break;
+                    }
                     case 0x1C: // KeepAlive reply
                         _ = reader.ReadInt64(); reader.RequireEnd();
                         break;
@@ -939,6 +964,7 @@ public sealed class MinecraftServer
         while (await ticker.WaitForNextTickAsync(ct))
             await TickGroundItemsAsync(ct);
             await TickExperienceOrbsAsync(ct);
+            await TickLivingEntitiesAsync(ct);
     }
 
     /// <summary>One authoritative 20Hz tick for loose items. Exposed internally
@@ -1231,7 +1257,7 @@ public sealed class MinecraftServer
         int minimum = verb switch
         {
             "gamemode" => GameModeProtocol.RequiredOpLevel,
-            "say" or "kick" or "oplist" or "enchant" => 2,
+            "say" or "kick" or "oplist" or "enchant" or "summon" => 2,
             "op" or "deop" => 4,
             _ => 0
         };
@@ -1245,7 +1271,7 @@ public sealed class MinecraftServer
             case "help":
                 await ReplyAsync(player, "Commands: /help /list /whoami /msg /me" +
                     (level >= 1 ? " /gamemode" : "") +
-                    (level >= 2 ? " /say /kick /oplist /enchant" : "") +
+                    (level >= 2 ? " /say /kick /oplist /enchant /summon" : "") +
                     (level >= 4 ? " /op /deop" : ""), ct);
                 break;
             case "list":
@@ -1285,6 +1311,12 @@ public sealed class MinecraftServer
             }
             case "enchant":
                 await ReplyAsync(player, await EnchantHeldAsync(argument, ct), ct);
+                break;
+            case "summon":
+                await ReplyAsync(player,
+                    argument == "sheep" && SummonSheepAt(player)
+                        ? "Summoned a persistent sheep near you."
+                        : "Usage: /summon sheep (maximum 512 per world).", ct);
                 break;
             case "msg":
             case "tell":
@@ -1492,6 +1524,20 @@ public sealed class MinecraftServer
                 Console.WriteLine("[enchant] " +
                     await EnchantHeldAsync(argument, stop));
                 break;
+            case "summon":
+            {
+                string[] words = argument.Split(' ',
+                    StringSplitOptions.RemoveEmptyEntries);
+                ConnectedPlayer? target = words.Length == 2 ?
+                    FindOnline(words[1]) : _players.Snapshot()
+                    .FirstOrDefault(p => p.Ready);
+                Console.WriteLine(words.Length is >= 1 and <= 2 &&
+                    words[0] == "sheep" && target is not null &&
+                    SummonSheepAt(target)
+                        ? "[entities] Summoned a sheep near " + target.Username
+                        : "Usage: summon sheep [online player]");
+                break;
+            }
             case "say":
                 if (ChatProtocol.IsSafeMessage(argument, _options.ChatMaxLength))
                 {
