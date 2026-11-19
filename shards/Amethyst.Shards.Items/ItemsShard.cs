@@ -111,7 +111,13 @@ public sealed class ItemCatalog : IShardItemRegistry
                 changedDurability != original.MaxDurability)
                 throw new InvalidDataException(
                     $"'{root}' in {file} cannot change vanilla MaxDurability.");
-            int max = fields.MaxStackSize ?? original.MaxStackSize;
+            int? componentMax = fields.Components is not null &&
+                fields.Components.TryGetValue("minecraft:max_stack_size", out string? encodedMax)
+                ? System.Text.Json.JsonSerializer.Deserialize<int>(encodedMax) : null;
+            if (componentMax.HasValue && fields.MaxStackSize.HasValue)
+                throw new InvalidDataException(
+                    $"'{root}' cannot specify both MaxStackSize and Components.max_stack_size.");
+            int max = componentMax ?? fields.MaxStackSize ?? original.MaxStackSize;
             if (max < 1 || max > VanillaMax(original.ProtocolId))
                 throw new InvalidDataException(
                     $"'{root}' in {file} has MaxStackSize outside vanilla capacity.");
@@ -138,7 +144,10 @@ public sealed class ItemCatalog : IShardItemRegistry
         if (fields.ProtocolId is int requested && requested != material.ProtocolId)
             throw new InvalidDataException(
                 $"Custom item '{root}' cannot assign a new protocol ID.");
-        if (fields.MaxStackSize is int aliasMax && aliasMax != material.MaxStackSize ||
+        if (fields.Components is not null &&
+                fields.Components.TryGetValue("minecraft:max_stack_size", out string? aliasJson) &&
+                System.Text.Json.JsonSerializer.Deserialize<int>(aliasJson) != material.MaxStackSize ||
+            fields.MaxStackSize is int aliasMax && aliasMax != material.MaxStackSize ||
             fields.MaxDurability is int aliasDurability &&
                 aliasDurability != material.MaxDurability ||
             fields.BlockItem is bool block && block != material.IsBlockItem)
@@ -168,15 +177,68 @@ public sealed class ItemCatalog : IShardItemRegistry
         return TryGetByIdentifier(key, out item);
     }
 
-    private static ShardItemDefinition ApplyMetadata(ShardItemDefinition item, ItemFields fields) =>
-        item with
+    private static ShardItemDefinition ApplyMetadata(ShardItemDefinition item, ItemFields fields)
+    {
+        // Merge the immutable definition patch rather than replacing unrelated
+        // components when one YAML override sets only a single property.
+        var patch = new Dictionary<string, string>(
+            item.Components ?? new Dictionary<string, string>(),
+            StringComparer.Ordinal);
+        if (fields.Components is not null)
+            foreach (var (key, value) in fields.Components)
+                patch[key] = value;
+
+        void Shorthand(string key, object value)
+        {
+            if (fields.Components?.ContainsKey(key) == true)
+                throw new InvalidDataException(
+                    $"Component '{key}' cannot appear in both top-level fields and Components.");
+            patch[key] = System.Text.Json.JsonSerializer.Serialize(value);
+        }
+
+        if (fields.Display is not null)
+            Shorthand("minecraft:custom_name", fields.Display);
+        if (fields.ItemName is not null)
+            Shorthand("minecraft:item_name", fields.ItemName);
+        if (fields.Lore is not null)
+            Shorthand("minecraft:lore", fields.Lore);
+        if (fields.ItemModel is not null)
+            Shorthand("minecraft:item_model", fields.ItemModel);
+        if (fields.Rarity is not null)
+            Shorthand("minecraft:rarity", fields.Rarity);
+        if (fields.TooltipStyle is not null)
+            Shorthand("minecraft:tooltip_style", fields.TooltipStyle);
+        if (fields.Glint is bool glint)
+            Shorthand("minecraft:enchantment_glint_override", glint);
+        if (fields.Unbreakable is bool unbreakable)
+            Shorthand("minecraft:unbreakable", unbreakable);
+        if (fields.CustomModelData is int customModel)
+        {
+            if (fields.Components?.ContainsKey("minecraft:custom_model_data") == true)
+                throw new InvalidDataException("CustomModelData was specified twice.");
+            patch["minecraft:custom_model_data"] =
+                ItemComponentConfig.Encode("minecraft:custom_model_data",
+                    new YamlScalarNode(customModel.ToString(CultureInfo.InvariantCulture)),
+                    item.Identifier);
+        }
+        if (fields.MaxStackSize is int configuredStack)
+            Shorthand("minecraft:max_stack_size", configuredStack);
+
+        string? model = fields.ItemModel ?? item.ItemModel;
+        if (fields.Components is not null &&
+            fields.Components.TryGetValue("minecraft:item_model", out string? encodedModel))
+            model = System.Text.Json.JsonSerializer.Deserialize<string>(encodedModel);
+        return item with
         {
             Display = fields.Display ?? item.Display,
             ItemName = fields.ItemName ?? item.ItemName,
+            ItemModel = model,
             Lore = fields.Lore is null ? item.Lore : Array.AsReadOnly(fields.Lore),
             CustomModelData = fields.CustomModelData ?? item.CustomModelData,
-            Hidden = fields.Hidden ?? item.Hidden
+            Hidden = fields.Hidden ?? item.Hidden,
+            Components = new ReadOnlyDictionary<string, string>(patch)
         };
+    }
 
     public bool TryGetById(int protocolId, out ShardItemDefinition definition)
     {
@@ -214,6 +276,12 @@ public sealed class ItemCatalog : IShardItemRegistry
         public string[]? Lore;
         public int? CustomModelData;
         public bool? Hidden;
+        public string? ItemModel;
+        public string? Rarity;
+        public string? TooltipStyle;
+        public bool? Glint;
+        public bool? Unbreakable;
+        public IReadOnlyDictionary<string, string>? Components;
     }
 
     private static IEnumerable<(string Key, ItemFields Fields)> ReadEntries(string path)
@@ -261,6 +329,26 @@ public sealed class ItemCatalog : IShardItemRegistry
                         break;
                     case "display": fields.Display = LimitedString(field.Value, path, key); break;
                     case "itemname": fields.ItemName = LimitedString(field.Value, path, key); break;
+                    case "itemmodel":
+                    case "item_model":
+                        fields.ItemModel = ItemComponentConfig.Identifier(field.Value, key);
+                        break;
+                    case "rarity":
+                        fields.Rarity = System.Text.Json.JsonSerializer.Deserialize<string>(
+                            ItemComponentConfig.Encode("minecraft:rarity", field.Value, key));
+                        break;
+                    case "tooltipstyle":
+                        fields.TooltipStyle = ItemComponentConfig.Identifier(field.Value, key);
+                        break;
+                    case "glint":
+                        fields.Glint = Boolean(field.Value, path, key);
+                        break;
+                    case "unbreakable":
+                        fields.Unbreakable = Boolean(field.Value, path, key);
+                        break;
+                    case "components":
+                        fields.Components = ItemComponentConfig.Parse(field.Value, key);
+                        break;
                     case "custommodeldata":
                         fields.CustomModelData = Integer(field.Value, path, key);
                         if (fields.CustomModelData < 0)
@@ -355,10 +443,20 @@ public sealed class ItemsShard : IShard
             File.WriteAllText(example, """
                 # MythicMobs-style item overrides. Uncomment examples to enable.
                 # Each root key is an item ID; Id is the base vanilla material.
-                # Display/Lore are metadata only until item-component packets are supported.
+                # Components are Java 26.3 item-stack patches sent to clients.
+                # Client-side models require a matching resource pack.
                 # diamond_pickaxe:
                 #   Id: minecraft:diamond_pickaxe
                 #   Display: "<aqua>Miner's Pickaxe</aqua>"
+                #   ItemModel: amethyst:miners_pickaxe
+                #   Components:
+                #     minecraft:rarity: rare
+                #     minecraft:enchantment_glint_override: true
+                #     minecraft:custom_model_data:
+                #       floats: [3.0]
+                #       flags: []
+                #       strings: [amethyst:miners_pickaxe]
+                #       colors: []
                 #   Lore:
                 #     - "Configured in the Items Shard"
                 #   Options:
@@ -415,7 +513,9 @@ public sealed class ItemsShard : IShard
             {
                 ctx.Log($"{item.Identifier} | protocol ID {item.ProtocolId} | " +
                     $"max stack {item.MaxStackSize} | max durability: {item.MaxDurability} | block item: {item.IsBlockItem}" +
-                    (item.Display is null ? "" : $" | display: {item.Display}"));
+                    (item.Display is null ? "" : $" | display: {item.Display}") +
+                    (item.ItemModel is null ? "" : $" | model: {item.ItemModel}") +
+                    $" | components: {item.Components?.Count ?? 0}");
                 return true;
             }
         });
