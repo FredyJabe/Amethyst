@@ -45,6 +45,31 @@ try
         "YAML overrides and aliases apply without changing the protocol IDs");
 
     var entities = new EntityManager(catalog);
+    Check(entities is IShardEntityInteractions,
+        "Entities manager provides the shared interaction API");
+    Check(entities.TrySpawn("cow", 1, 80, 1, out var milkCow) &&
+        entities.TryMilk(milkCow.EntityId, out _) &&
+        entities.TryMilk(milkCow.EntityId, out _) &&
+        !entities.TryShear(milkCow.EntityId, out _) &&
+        entities.TryRemove(milkCow.EntityId) &&
+        !entities.TryMilk(milkCow.EntityId, out _),
+        "Cows may be milked repeatedly, but cannot be sheared or milked after despawn");
+    Check(entities.TrySpawn("goat", 1, 80, 1, out var goat) &&
+        entities.TryMilk(goat.EntityId, out _) &&
+        entities.TryRemove(goat.EntityId) &&
+        entities.TrySpawn("mooshroom", 1, 80, 1, out var mooshroom) &&
+        entities.TryMilk(mooshroom.EntityId, out _) &&
+        entities.TryRemove(mooshroom.EntityId),
+        "Goats and mooshrooms provide milk interactions");
+    Check(entities.TrySpawn("sheep", 1, 80, 1, out var sheep) &&
+        !entities.IsSheared(sheep.EntityId) &&
+        !entities.TryMilk(sheep.EntityId, out _) &&
+        entities.TryShear(sheep.EntityId, out _) &&
+        entities.IsSheared(sheep.EntityId) &&
+        !entities.TryShear(sheep.EntityId, out _) &&
+        entities.TryRemove(sheep.EntityId) &&
+        !entities.IsSheared(sheep.EntityId),
+        "Sheep can be sheared once; the sheared state is cleared after despawn");
     ShardEntityInstance two = default;
     Check(entities.TrySpawn("unbreakable_cow", 1, 80, 1, out var one) &&
         entities.TrySpawn("cow", 2, 80, 2, out two) &&
@@ -85,8 +110,12 @@ try
     }
 
     var starterSkills = CreateEngine();
+    starterSkills.RegisterTrigger("entities", "onMilk");
+    starterSkills.RegisterTrigger("entities", "onShear");
     starterSkills.RegisterDefinitions("items", skillVanilla);
-    Check(starterSkills.OwnerCount >= 10 &&
+    Check(starterSkills.TryGetSkills("sheep", out var shearing) &&
+        shearing.Any(s => s.Trigger.Equals("onShear", StringComparison.OrdinalIgnoreCase)) &&
+        starterSkills.OwnerCount >= 10 &&
         starterSkills.TryGetSkills("minecraft:cow", out var cowSkills) &&
         cowSkills.Count == 2 &&
         cowSkills.All(s => s.Trigger.Equals("onDeath", StringComparison.OrdinalIgnoreCase) &&
@@ -112,6 +141,8 @@ try
             - 'dropItem{item=minecraft:beef;amount=1;chance=0} ~onDeath'
         """);
     var configured = CreateEngine();
+    configured.RegisterTrigger("entities", "onMilk");
+    configured.RegisterTrigger("entities", "onShear");
     configured.RegisterDefinitions("items", skillVanilla, skillsDir);
     drops.Items.Clear();
     Check(configured.TryGetSkills("minecraft:cow", out var disabledSkills) &&
@@ -178,6 +209,8 @@ try
         try
         {
             var checker = CreateEngine();
+            checker.RegisterTrigger("entities", "onMilk");
+            checker.RegisterTrigger("entities", "onShear");
             checker.RegisterDefinitions("items", skillVanilla, skillsDir);
         }
         catch (InvalidDataException) { rejected = true; }

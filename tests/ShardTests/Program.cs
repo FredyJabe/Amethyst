@@ -167,6 +167,12 @@ try
         throw new Exception("FAIL: Entities Shard service not registered");
     IShardEntityManager entityWorld = host.GetService<IShardEntityManager>() ??
         throw new Exception("FAIL: Entities runtime service not registered");
+    IShardEntityInteractions entityActions = host.GetService<IShardEntityInteractions>() ??
+        throw new Exception("FAIL: Entities interaction service not registered");
+    Check(entityActions is not null &&
+        skillEngine.TryGetSkills("sheep", out var shearSkills) &&
+        shearSkills.Any(s => s.Trigger.Equals("onShear", StringComparison.OrdinalIgnoreCase)),
+        "Entities registers ~onMilk/~onShear before Items loads sheep skills");
     ShardEntityDefinition cowType = default;
     ShardEntityInstance spawned = default, guardian = default;
     Check(entityTypes.MinecraftVersion == "26.3" && entityTypes.Count == 161 &&
@@ -330,6 +336,7 @@ try
     await host.DisableAsync("entities");
     Check(host.GetService<IShardEntityManager>() is null &&
         host.GetService<IShardEntityRegistry>() is null &&
+        host.GetService<IShardEntityInteractions>() is null &&
         !host.RegisteredConsoleCommands.Contains("entityspawn"),
         "Disabling Entities Shard unregisters its services and commands");
     await host.DisableAsync("overworld");
@@ -344,7 +351,8 @@ try
         host.GetService<IShardItemDropSink>() is not null &&
         skillEngine.OwnerCount >= 10 &&
         host.GetService<IShardEntityManager>() is not null &&
-        host.GetService<IShardEntityRegistry>() is not null,
+        host.GetService<IShardEntityRegistry>() is not null &&
+        host.GetService<IShardEntityInteractions>() is not null,
         "Enabling Gameplay automatically enables World, Items, Recipe and Entity providers");
 }
 finally

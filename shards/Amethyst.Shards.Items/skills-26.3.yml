@@ -16,7 +16,7 @@ chicken:
 sheep:
   Skills:
     - 'dropItem{item=minecraft:mutton;amount=1-2} ~onDeath'
-    - 'dropItem{item=minecraft:white_wool;amount=1-1} ~onDeath'
+    - 'dropItem{item=minecraft:white_wool;amount=1-3} ~onShear'
 zombie:
   Skills:
     - 'dropItem{item=minecraft:rotten_flesh;amount=0-2} ~onDeath'

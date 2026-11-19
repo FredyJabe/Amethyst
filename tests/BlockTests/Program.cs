@@ -1373,11 +1373,13 @@ try
     MinecraftServer? lootGame = null;
     var dropItem = new DropItemSkillMechanic(itemsCatalog, () => lootGame);
     deathSkills.RegisterMechanic("items", "dropItem", dropItem.Validate, dropItem.ExecuteAsync);
+    deathSkills.RegisterTrigger("entities", "onMilk");
+    deathSkills.RegisterTrigger("entities", "onShear");
     deathSkills.RegisterDefinitions("items", Path.Combine(solutionRoot.FullName,
         "shards", "Amethyst.Shards.Items", "skills-26.3.yml"));
     lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
         Path.Combine(stationsRoot, "loot-gameplay"), itemsCatalog, recipesCatalog,
-        lootWorld, deathSkills, lootTypes);
+        lootWorld, deathSkills, lootTypes, lootWorld);
     Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var testCow) &&
         lootWorld.TryKill(testCow.EntityId, out _),
         "Prepare an entity death for the Gameplay loot pipeline");
@@ -1397,6 +1399,82 @@ try
     await lootGame.TickEntitiesAsync(CancellationToken.None);
     Check(lootGame.GroundItemsForTests.Length == spawnedDrops.Length,
         "An ordinary entity despawn does not generate loot");
+
+    // Validate the 26.3 packet codec: EID, main hand, compressed zero
+    // hit-vector and secondary-action flag. Reject impossible hands and
+    // malformed trailing fields before reaching gameplay handlers.
+    var packetWriter = new PacketWriter();
+    packetWriter.WriteVarInt(17);
+    packetWriter.WriteVarInt(0);
+    packetWriter.WriteByte(0);
+    packetWriter.WriteBool(false);
+    var interaction = EntityInteractionProtocol.Read(new Packet(
+        EntityInteractionProtocol.ServerboundInteract, packetWriter.ToArray()));
+    Check(interaction.EntityId == 17 && interaction.Hand == 0 &&
+        !interaction.SecondaryAction, "Java 26.3 entity-interact packet parses safely");
+    bool badInteraction = false;
+    try
+    {
+        var bad = new PacketWriter();
+        bad.WriteVarInt(17); bad.WriteVarInt(4);
+        bad.WriteByte(0); bad.WriteBool(false);
+        _ = EntityInteractionProtocol.Read(new Packet(
+            EntityInteractionProtocol.ServerboundInteract, bad.ToArray()));
+    }
+    catch (InvalidDataException) { badInteraction = true; }
+    Check(badInteraction, "Entity interact rejects invalid client hand values");
+
+    using (var interactionOutput = new MemoryStream())
+    using (var interactionChannel = new PacketChannel(interactionOutput))
+    {
+        var farmer = new ConnectedPlayer(Guid.NewGuid(), "Farmer",
+            Array.Empty<ProfileProperty>(), 180, interactionChannel,
+            stationWorld, null, itemsCatalog);
+        farmer.MarkReady();
+        farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
+        Check(itemsCatalog.TryGetByIdentifier("bucket", out var bucket) &&
+            itemsCatalog.TryGetByIdentifier("milk_bucket", out var fullBucket) &&
+            farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 1, true) &&
+            lootWorld.TrySpawn("cow", 11, 80, 12, out var milkTarget),
+            "Prepare cow and bucket for interactive milking");
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
+        Check(farmer.Inventory.Held() == new ItemStack(fullBucket.ProtocolId, 1),
+            "Right-clicking a cow turns an empty bucket into a milk bucket");
+        Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 2, true),
+            "Set up a stacked-bucket milking transaction");
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
+        var (milkSlots, _, _) = farmer.Inventory.Snapshot();
+        Check(milkSlots[36] == new ItemStack(bucket.ProtocolId, 1) &&
+            milkSlots.Any((stack) => stack.ItemId == fullBucket.ProtocolId),
+            "Milking stacked buckets preserves the remaining empties and inserts filled milk");
+        var beforeFar = farmer.Inventory.Snapshot().Slots;
+        farmer.SetPose(new PlayerPose(40, 80, 40, 0, 0, true));
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
+        Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(beforeFar),
+            "Server enforces interaction reach to prevent remote item duplication");
+
+        farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
+        Check(itemsCatalog.TryGetByIdentifier("shears", out var shears) &&
+            itemsCatalog.TryGetByIdentifier("white_wool", out var wool) &&
+            farmer.Inventory.TryCreativeSet(36, shears.ProtocolId, 1, true) &&
+            lootWorld.TrySpawn("sheep", 11, 80, 12, out var shearTarget),
+            "Prepare sheep and shears for triggered shearing");
+        int beforeWool = lootGame.GroundItemsForTests.Length;
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(shearTarget.EntityId, 0, false), CancellationToken.None);
+        var shearedWool = lootGame.GroundItemsForTests;
+        Check(lootWorld.IsSheared(shearTarget.EntityId) &&
+            shearedWool.Length > beforeWool &&
+            shearedWool.Any(d => d.ItemId == wool.ProtocolId && d.Count is >= 1 and <= 3),
+            "~onShear dispatches YAML dropItem mechanic to create real wool drops");
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(shearTarget.EntityId, 0, false), CancellationToken.None);
+        Check(lootGame.GroundItemsForTests.Length == shearedWool.Length,
+            "Repeated shearing cannot duplicate wool rewards");
+    }
 
     using (var stream = new MemoryStream())
     {

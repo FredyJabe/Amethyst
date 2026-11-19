@@ -792,16 +792,12 @@ public sealed class MinecraftServer : IShardItemDropSink
         }
         else if (_groundItems is not null &&
             _items.TryGetByIdentifier("minecraft:shears", out var shears) &&
-            _items.TryGetByIdentifier("minecraft:white_wool", out var wool) &&
             held.ItemId == shears.ProtocolId &&
             _interactions.TryShear(hit.EntityId, out var sheared))
         {
             entity = sheared;
-            // Basic sheep wool support until entity colour metadata and
-            // grazing/regrowth are implemented. One roll per real shearing.
-            if (!_groundItems.TrySpawn(wool.ProtocolId, Random.Shared.Next(1, 4),
-                entity.X, entity.Y + 0.2, entity.Z, out _))
-                Console.WriteLine($"[entities] Could not spawn sheared wool for #{entity.EntityId}");
+            // Reward items are entirely Items skills (dropItem ~onShear).
+            // Entities only changes sheep state and exposes the trigger.
             trigger = "onShear";
         }
         if (trigger is null) return;
