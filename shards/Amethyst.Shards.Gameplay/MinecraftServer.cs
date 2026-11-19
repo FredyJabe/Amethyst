@@ -647,8 +647,29 @@ public sealed class MinecraftServer
         // Even rejected predictions need an authoritative menu resync.
         await SendStationContentAsync(player, ct);
         if (changed && active.Kind == StationKind.Anvil)
+        {
             await ExperienceProtocol.SendExperienceAsync(player.Connection,
                 player.Experience, ct);
+            // The output must be committed (including XP payment) before
+            // the 12% anvil wear roll can change or destroy its block.
+            if (click.Slot == 2 && player.GameMode == PlayerGameMode.Survival &&
+                _blocks is not null)
+            {
+                StationPos position = active.Position;
+                ushort current = _blocks.GetBlockState(
+                    position.X, position.Y, position.Z);
+                if (DurabilityRules.TryWearAnvil(current, out ushort updated) &&
+                    _blocks.TrySetBlockState(position.X, position.Y,
+                        position.Z, updated, out _))
+                {
+                    await BroadcastBlockChangeAsync(player, position.X,
+                        position.Y, position.Z, updated, ct);
+                    if (updated == 0)
+                        await BreakStationAsync(position.X, position.Y,
+                            position.Z, ct);
+                }
+            }
+        }
         if (!changed || active.Kind is StationKind.Crafting or
             StationKind.Anvil or StationKind.Grindstone) return;
         foreach (ConnectedPlayer observer in _players.Snapshot().Where(p =>
