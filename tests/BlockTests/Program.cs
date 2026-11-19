@@ -63,8 +63,10 @@ Check(MiningRules.DurabilityCostForBlock(1, diamondPickaxe.ProtocolId, itemsCata
     itemsCatalog.TryGetByIdentifier("iron_sword", out var ironSword) &&
     MiningRules.DurabilityCostForBlock(1, ironSword.ProtocolId, itemsCatalog) == 2 &&
     MiningRules.DurabilityCostForBlock(30, diamondPickaxe.ProtocolId, itemsCatalog) == 0 &&
+    MiningRules.DurabilityCostForBlock(30, shearsTool.ProtocolId, itemsCatalog) == 1 &&
+    MiningRules.DurabilityCostForBlock(4931, shearsTool.ProtocolId, itemsCatalog) == 0 &&
     MiningRules.DurabilityCostForBlock(1, 1, itemsCatalog) == 0,
-    "Mining wear is one for tools, two for swords, zero for instant-hand blocks");
+    "Mining wear follows tool and sword rules, with shears and instant-block exceptions");
 string wearRoot = Path.Combine(Path.GetTempPath(),
     "amethyst-wear-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(wearRoot);
