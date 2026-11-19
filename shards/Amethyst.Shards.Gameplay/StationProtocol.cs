@@ -1,3 +1,5 @@
+using Amethyst.Shards;
+
 namespace Amethyst;
 
 /// <summary>Minecraft Java 26.3 / protocol 777 workstation window packets.
@@ -27,14 +29,15 @@ public static class StationProtocol
         connection.SendAsync(CloseScreen, p => p.WriteVarInt(windowId), ct);
 
     public static Task SendContentAsync(PacketChannel connection, int windowId,
-        int revision, ItemStack[] slots, ItemStack carried, CancellationToken ct) =>
+        int revision, ItemStack[] slots, ItemStack carried, CancellationToken ct,
+        IShardItemRegistry? items = null) =>
         connection.SendAsync(InventoryProtocol.ClientboundSetContent, p =>
         {
             p.WriteVarInt(windowId);
             p.WriteVarInt(revision);
             p.WriteVarInt(slots.Length);
-            foreach (var item in slots) InventoryProtocol.WriteStack(p, item);
-            InventoryProtocol.WriteStack(p, carried);
+            foreach (var item in slots) InventoryProtocol.WriteStack(p, item, items);
+            InventoryProtocol.WriteStack(p, carried, items);
         }, ct);
 
     public static Task SendDataAsync(PacketChannel connection, int windowId,
