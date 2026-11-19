@@ -150,6 +150,8 @@ finally
     catch (IOException) { }
 }
 
+await DurabilityFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+
 // Mythic-style YAML: each root ID overrides one vanilla item or names a
 // custom alias backed by a vanilla protocol item. Never mint new IDs.
 string yamlTestRoot = Path.Combine(Path.GetTempPath(),
