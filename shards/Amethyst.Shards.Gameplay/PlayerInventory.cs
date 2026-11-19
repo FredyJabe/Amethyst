@@ -297,8 +297,13 @@ public sealed partial class PlayerInventory
                 (_slots[slot], _slots[hotbar]) = (_slots[hotbar], _slots[slot]);
                 changed = slot != hotbar;
             }
-            if (!changed || !ValidSlotStack(slot, _slots[slot]) ||
-                !ValidStack(_cursor)) return false;
+            if (!changed) return false;
+            if (!ValidSlotStack(slot, _slots[slot]) || !ValidStack(_cursor))
+            {
+                Array.Copy(backup, _slots, _slots.Length);
+                _cursor = cursor;
+                return false;
+            }
             try { Persist(); _revision++; }
             catch
             {
