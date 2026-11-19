@@ -1432,10 +1432,13 @@ try
             stationWorld, null, itemsCatalog);
         farmer.MarkReady();
         farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
-        Check(itemsCatalog.TryGetByIdentifier("bucket", out var bucket) &&
-            itemsCatalog.TryGetByIdentifier("milk_bucket", out var fullBucket) &&
+        ShardItemDefinition bucket = default, fullBucket = default;
+        ShardItemDefinition shears = default, wool = default;
+        ShardEntityInstance milkTarget = default, shearTarget = default;
+        Check(itemsCatalog.TryGetByIdentifier("bucket", out bucket) &&
+            itemsCatalog.TryGetByIdentifier("milk_bucket", out fullBucket) &&
             farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 1, true) &&
-            lootWorld.TrySpawn("cow", 11, 80, 12, out var milkTarget),
+            lootWorld.TrySpawn("cow", 11, 80, 12, out milkTarget),
             "Prepare cow and bucket for interactive milking");
         await lootGame.HandleEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
@@ -1457,10 +1460,10 @@ try
             "Server enforces interaction reach to prevent remote item duplication");
 
         farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
-        Check(itemsCatalog.TryGetByIdentifier("shears", out var shears) &&
-            itemsCatalog.TryGetByIdentifier("white_wool", out var wool) &&
+        Check(itemsCatalog.TryGetByIdentifier("shears", out shears) &&
+            itemsCatalog.TryGetByIdentifier("white_wool", out wool) &&
             farmer.Inventory.TryCreativeSet(36, shears.ProtocolId, 1, true) &&
-            lootWorld.TrySpawn("sheep", 11, 80, 12, out var shearTarget),
+            lootWorld.TrySpawn("sheep", 11, 80, 12, out shearTarget),
             "Prepare sheep and shears for triggered shearing");
         int beforeWool = lootGame.GroundItemsForTests.Length;
         await lootGame.HandleEntityInteractionAsync(farmer,
