@@ -181,9 +181,10 @@ public sealed class ItemCatalog : IShardItemRegistry
     {
         // Merge the immutable definition patch rather than replacing unrelated
         // components when one YAML override sets only a single property.
-        var patch = new Dictionary<string, string>(
-            item.Components ?? new Dictionary<string, string>(),
-            StringComparer.Ordinal);
+        var patch = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (item.Components is not null)
+            foreach (var (key, value) in item.Components)
+                patch[key] = value;
         if (fields.Components is not null)
             foreach (var (key, value) in fields.Components)
                 patch[key] = value;
