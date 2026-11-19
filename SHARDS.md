@@ -233,6 +233,17 @@ with `~onMilk` to the cow skills, creating an additional reward.
 The built-in physical actions do not require a skill definition;
 the skill dispatcher runs **after a successful interaction**.
 
+The Items Shard additionally registers `~onLeftClick`,
+`~onRightClick`, `~onDrop`, `~onStackDrop`, `~onPickup`,
+`~onSwap`, `~onEquip`, and `~onUnequip`. Gameplay dispatches
+item skills on validated block left-click, block/entity right-click,
+real Q/Ctrl+Q world-item drops, and successful item-entity pickup.
+Core includes authoritative `ActorUuid`, `ItemId`, and `Count`
+on item events. Full-stack Ctrl+Q fires both `~onDrop` and
+`~onStackDrop`. Offhand swapping and armor equipment are not yet
+implemented, so their trigger names are registered but not fired.
+Inventory-screen dropping and clicking empty air are also pending.
+
 The initial implementation has the `dropItem` mechanic plus
 `~onDeath`, `~onMilk` and `~onShear` triggers.
 Other mechanics and triggers can be added by enabled Shards;

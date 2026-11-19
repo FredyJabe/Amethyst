@@ -5,7 +5,7 @@ Amethyst Core does not contain item definitions. Gameplay consumes the
 `IShardItemRegistry` service for stack sizes and validations in
 inventories, dropped-item entities and crafting/furnace menus.
 
-## Event skills (`dropItem` and `~onDeath`)
+## Event skills (`dropItem`, entity events, and item events)
 
 **Item-drop definitions and the `dropItem` mechanic belong to the Items Shard; the generic skill engine lives in Amethyst Core.** The bundled starter
 definitions live in `shards/Amethyst.Shards.Items/skills-26.3.yml`.
@@ -56,6 +56,52 @@ Shard's bundled skills for that root; independent skill packs
 registered by other Shards combine through Core; duplicate user roots and malformed expressions
 cause a startup error. Run `skillinfo cow` in the server console
 to inspect its configured event skills.
+
+### Item event triggers (Items Shard)
+
+The Items Shard now registers eight additional trigger names with
+the **Core** `IShardSkillEngine`, before loading any user skill YAML.
+Each root ID can also be an item key, not just an entity:
+
+```yaml
+diamond_pickaxe:
+  Skills:
+    - 'dropItem{item=minecraft:emerald;amount=1;chance=0.05} ~onLeftClick'
+
+bucket:
+  Skills:
+    - 'dropItem{item=minecraft:gold_nugget;amount=1} ~onRightClick'
+    - 'dropItem{item=minecraft:iron_nugget;amount=1} ~onPickup'
+```
+
+| Trigger | Meaning and current support |
+| --- | --- |
+| `~onLeftClick` | **Live:** main-hand click on a validated, reachable block (start of mining) |
+| `~onRightClick` | **Live:** main-hand click on a validated, reachable block or living entity; this is a click attempt, not a guarantee that the item was used |
+| `~onDrop` | **Live:** a successful Q or Ctrl+Q world-item drop |
+| `~onStackDrop` | **Live:** additional event for a successful Ctrl+Q full-stack drop |
+| `~onPickup` | **Live:** successful world-item pickup; fires only for the number actually inserted into inventory |
+| `~onSwap` | Registered; pending offhand swap support (F key) |
+| `~onEquip` | Registered; pending armor/equipment slot transactions |
+| `~onUnequip` | Registered; pending armor/equipment slot transactions |
+
+Core now passes the server-authoritative item ID, count, and
+actor UUID in `ShardSkillEvent` (`ItemId`, `Count`,
+`ActorUuid`) for item-triggered executions. Item owners resolve
+from the Items registry, not a client-supplied item ID; this version's
+`ItemStack` does not distinguish custom item aliases sharing a
+vanilla protocol ID.
+
+Ground-item dropping is authoritative: Q creates a real 1-item
+ground stack; Ctrl+Q drops the entire remaining held stack.
+The server persists the drop and removes the matching inventory
+amount before dispatching the event; failed or stale transactions
+roll back the new world stack. `~onDrop` always fires on successful
+drops, and `~onStackDrop` fires additionally on full-stack drops.
+Inventory-window Q/Ctrl+Q actions, offhand (F), armor, air-only
+use-item packets, and left-clicking entities are **not yet wired**.
+Only successfully processed interactions emit triggers; unknown
+mechanics and unregistered trigger names still fail YAML validation.
 
 The Entities Shard registers `onMilk` / `onShear` triggers and
 provides validated species and sheared-state interactions. Gameplay
