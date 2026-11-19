@@ -1210,7 +1210,7 @@ public sealed class MinecraftServer
         int minimum = verb switch
         {
             "gamemode" => GameModeProtocol.RequiredOpLevel,
-            "say" or "kick" or "oplist" => 2,
+            "say" or "kick" or "oplist" or "enchant" => 2,
             "op" or "deop" => 4,
             _ => 0
         };
@@ -1224,7 +1224,7 @@ public sealed class MinecraftServer
             case "help":
                 await ReplyAsync(player, "Commands: /help /list /whoami /msg /me" +
                     (level >= 1 ? " /gamemode" : "") +
-                    (level >= 2 ? " /say /kick /oplist" : "") +
+                    (level >= 2 ? " /say /kick /oplist /enchant" : "") +
                     (level >= 4 ? " /op /deop" : ""), ct);
                 break;
             case "list":
@@ -1260,6 +1260,63 @@ public sealed class MinecraftServer
                     break;
                 }
                 await ChangeGameModeAsync(target, mode, player, ct);
+                break;
+            }
+            case "enchant":
+            {
+                string[] words = argument.Split(' ',
+                    StringSplitOptions.RemoveEmptyEntries);
+                if (words.Length is < 2 or > 3)
+                {
+                    await ReplyAsync(player,
+                        "Usage: /enchant <online-player> <unbreaking|mending> [level]", ct);
+                    break;
+                }
+                ConnectedPlayer? target = FindOnline(words[0]);
+                if (target is null)
+                {
+                    await ReplyAsync(player, "Player not found.", ct);
+                    break;
+                }
+                string enchantment = words[1].ToLowerInvariant();
+                if (enchantment.StartsWith("minecraft:", StringComparison.Ordinal))
+                    enchantment = enchantment["minecraft:".Length..];
+                int enchantmentLevel = 1;
+                if (words.Length == 3 &&
+                    !int.TryParse(words[2], out enchantmentLevel))
+                {
+                    await ReplyAsync(player, "Invalid enchantment level.", ct);
+                    break;
+                }
+                if ((enchantment == "mending" && enchantmentLevel != 1) ||
+                    (enchantment == "unbreaking" &&
+                     enchantmentLevel is < 1 or > 3) ||
+                    (enchantment is not ("mending" or "unbreaking")))
+                {
+                    await ReplyAsync(player,
+                        "Supported enchantments: mending I, unbreaking I–III.", ct);
+                    break;
+                }
+                ItemStack held = target.Inventory.Held();
+                bool applied = enchantment == "mending"
+                    ? target.Inventory.ConfigureHeld(
+                        held.Unbreaking, true, held.Unbreakable)
+                    : target.Inventory.ConfigureHeld(
+                        enchantmentLevel, held.Mending, held.Unbreakable);
+                if (!applied)
+                {
+                    await ReplyAsync(player,
+                        "Unable to enchant: target must hold an enchantable item without that exact enchantment.", ct);
+                    break;
+                }
+                await InventoryProtocol.SendSlotAsync(
+                    target.Connection, target.Inventory,
+                    target.Inventory.SelectedSlot, ct);
+                await ReplyAsync(player,
+                    $"Applied {enchantment} {enchantmentLevel} to {target.Username}'s held item.", ct);
+                if (target != player)
+                    await ReplyAsync(target,
+                        $"Your held item received {enchantment} {enchantmentLevel}.", ct);
                 break;
             }
             case "msg":
