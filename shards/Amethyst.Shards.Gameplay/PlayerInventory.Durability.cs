@@ -116,6 +116,59 @@ public sealed partial class PlayerInventory
         }
     }
 
+    /// <summary>Consume ammunition from the hotbar/main inventory. The
+    /// transaction either consumes the full amount or leaves all slots
+    /// untouched. Supports arrows for bows and crossbows.</summary>
+    public bool TryConsumeItem(int itemId, int count)
+    {
+        if (itemId <= 0 || count <= 0) return false;
+        lock (_sync)
+        {
+            int available = _slots.Skip(9).Where(s => s.ItemId == itemId)
+                .Sum(s => s.Count);
+            if (available < count) return false;
+            ItemStack[] previous = (ItemStack[])_slots.Clone();
+            int left = count;
+            foreach (int index in Enumerable.Range(36, 9)
+                .Concat(Enumerable.Range(9, 27)))
+            {
+                ItemStack stack = _slots[index];
+                if (stack.ItemId != itemId || left == 0) continue;
+                int taken = Math.Min(left, stack.Count);
+                _slots[index] = stack.Count == taken ? ItemStack.Empty :
+                    stack with { Count = stack.Count - taken };
+                left -= taken;
+            }
+            try { Persist(); _revision++; }
+            catch { Array.Copy(previous, _slots, _slots.Length); throw; }
+            return true;
+        }
+    }
+
+    public bool HasItem(int itemId, int count = 1)
+    {
+        lock (_sync) return _slots.Where((s, i) => i >= 9)
+            .Sum(s => s.ItemId == itemId ? s.Count : 0) >= count;
+    }
+
+    /// <summary>Consume an expected stack from a particular hand/offhand.
+    /// Used when throwing a trident, pearl, egg or snowball.</summary>
+    public bool ConsumeSlot(int slot, int itemId, bool creative = false)
+    {
+        if (creative) return true;
+        if (slot is < 36 or > 45) return false;
+        lock (_sync)
+        {
+            ItemStack original = _slots[slot];
+            if (original.ItemId != itemId || original.Count < 1) return false;
+            _slots[slot] = original.Count == 1 ? ItemStack.Empty :
+                original with { Count = original.Count - 1 };
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = original; throw; }
+            return true;
+        }
+    }
+
     /// <summary>Privileged full repair for server administration/tests;
     /// survival repair is performed through item combining/Mending/anvils.</summary>
     public bool RepairHeldCompletely()
