@@ -124,7 +124,7 @@ public sealed partial class PlayerInventory
         if (itemId <= 0 || count <= 0) return false;
         lock (_sync)
         {
-            int available = _slots.Skip(9).Where(s => s.ItemId == itemId)
+            int available = _slots.Skip(9).Take(36).Where(s => s.ItemId == itemId)
                 .Sum(s => s.Count);
             if (available < count) return false;
             ItemStack[] previous = (ItemStack[])_slots.Clone();
