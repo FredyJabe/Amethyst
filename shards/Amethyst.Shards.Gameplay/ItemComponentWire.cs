@@ -113,7 +113,7 @@ internal static class ItemComponentWire
     // <color>Text</color> shorthand is handled as a colored compound; other
     // strings remain literal NBT text components, not fake JSON-on-the-wire.
     private static readonly Regex ColoredText = new(
-        @"^<(?<color>black|dark_blue|dark_green|dark_aqua|dark_red|dark_purple|gold|gray|dark_gray|blue|green|aqua|red|light_purple|yellow|white|#[0-9a-fA-F]{6})>(?<text>.*)</\\k<color>>$",
+        @"^<(?<color>black|dark_blue|dark_green|dark_aqua|dark_red|dark_purple|gold|gray|dark_gray|blue|green|aqua|red|light_purple|yellow|white|#[0-9a-fA-F]{6})>(?<text>.*)</\k<color>>$",
         RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase |
         RegexOptions.CultureInvariant);
 
