@@ -22,6 +22,7 @@ public sealed class ConnectedPlayer : IShardPlayer
         Volatile.Write(ref _gameMode, (int)mode);
         CancelMining();
         UseState.StopShield();
+        UseState.CancelCharge();
     }
     public PlayerInventory Inventory { get; }
     public PlayerVitals Vitals { get; }
