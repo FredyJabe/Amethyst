@@ -37,14 +37,14 @@ internal static class ItemComponentConfig
         if (node is not YamlMappingNode mapping)
             throw new InvalidDataException($"Components in {context} must be a mapping.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        nodes ??= new ItemComponentNodeMap();
         foreach (var pair in mapping.Children)
         {
             string nodeName = Scalar(pair.Key, context);
-            string key = nodes is not null && nodes.TryResolve(nodeName, out var resolved)
-                ? resolved : Key(nodeName);
-            if (!ShardItemComponentIds.TryGetId(key, out _))
+            if (!nodes.TryResolve(nodeName, out string key))
                 throw new InvalidDataException(
-                    $"Unknown Minecraft component '{nodeName}' in {context}.");
+                    $"Unknown or unassigned YAML component node '{nodeName}' in {context}. " +
+                    "Use one of Amethyst's fixed node names or an explicit minecraft: ID.");
             if (!result.TryAdd(key, Encode(key, pair.Value, context)))
                 throw new InvalidDataException($"Duplicate component {key} in {context}.");
         }
