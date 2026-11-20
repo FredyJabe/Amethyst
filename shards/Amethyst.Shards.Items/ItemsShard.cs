@@ -502,6 +502,11 @@ public sealed class ItemsShard : IShard
                 #   Id: minecraft:diamond_pickaxe
                 #   Display: "<aqua>Miner's Pickaxe</aqua>"
                 #   ItemModel: amethyst:miners_pickaxe
+                #   Stats:
+                #     mining_speed:
+                #       Trigger: onMine
+                #       Base: 1.5
+                #       Operation: add
                 #   Components:
                 #     Rarity: rare
                 #     GlintOverride: true
@@ -563,12 +568,23 @@ public sealed class ItemsShard : IShard
                 # Only fields provided here replace bundled values.
                 # sharpness:
                 #   MaxLevel: 6
-                #   Skills:
-                #     - "modify{stat=damage;base=0.5;perLevel=0.75} @target ~onAttack ?level{min=1}"
+                #   Stats:
+                #     damage:
+                #       Trigger: onAttack
+                #       Base: 0.5
+                #       PerLevel: 0.75
+                #       Conditions: ["level{min=1}"]
                 """ + Environment.NewLine);
         var enchantments = new EnchantmentCatalog(
             Path.Combine(directory, "enchantments-26.3.yml"), enchantmentDirectory);
         EnchantmentSkills.Register(ctx);
+        // Fail fast for unknown/invalid Stats conditions instead of throwing
+        // only after a player triggers an affected event.
+        var skillEngine = ctx.GetRequiredService<IShardSkillEngine>();
+        foreach (var stat in catalog.All.SelectMany(item => item.Stats ?? []))
+            skillEngine.ValidateConditions(stat.Conditions);
+        foreach (var stat in enchantments.All.SelectMany(e => e.Stats))
+            skillEngine.ValidateConditions(stat.Conditions);
         ctx.RegisterSkillInstructions(enchantments.Instructions);
         ctx.RegisterService<IShardEnchantmentRegistry>(enchantments);
         ctx.RegisterConsoleCommand("enchantments", (args, token) =>
@@ -598,7 +614,7 @@ public sealed class ItemsShard : IShard
                     $"max stack {item.MaxStackSize} | max durability: {item.MaxDurability} | block item: {item.IsBlockItem}" +
                     (item.Display is null ? "" : $" | display: {item.Display}") +
                     (item.ItemModel is null ? "" : $" | model: {item.ItemModel}") +
-                    $" | components: {item.Components?.Count ?? 0}");
+                    $" | components: {item.Components?.Count ?? 0} | stats: {item.Stats?.Count ?? 0}");
                 return true;
             }
         });

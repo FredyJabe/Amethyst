@@ -1,5 +1,6 @@
 # Minecraft Java 26.3 - all 43 vanilla enchantments.
-# Keys are vanilla registry identifiers. Skills execute via Core's shared SkillEngine.
+# Keys are vanilla registry identifiers. Numeric bonuses are Stats, not skill mechanics.
+# Skills execute actions via Core's shared SkillEngine; Stats apply on matching events.
 # Copy individual keys into shards/data/items/enchantments/*.yml to override them.
 # Runtime hooks supply event context; effects without a producer/sink remain declarative.
 
@@ -9,8 +10,13 @@ aqua_affinity:
   Weight: 2
   AnvilCost: 4
   SupportedItems: [helmet]
-  Skills:
-    - "modify{stat=mining_speed;operation=multiply;base=1;perLevel=1} @self ~onMine ?flag{name=underwater}"
+  Stats:
+    mining_speed:
+      Trigger: onMine
+      Operation: multiply
+      Base: 1
+      PerLevel: 1
+      Conditions: ["flag{name=underwater}"]
 
 bane_of_arthropods:
   Id: minecraft:bane_of_arthropods
@@ -19,8 +25,11 @@ bane_of_arthropods:
   AnvilCost: 2
   SupportedItems: [weapon]
   Conflicts: [minecraft:sharpness, minecraft:smite]
-  Skills:
-    - "modify{stat=damage;perLevel=2.5} @target ~onAttack ?target{type=arthropod}"
+  Stats:
+    damage:
+      Trigger: onAttack
+      PerLevel: 2.5
+      Conditions: ["target{type=arthropod}"]
 
 binding_curse:
   Id: minecraft:binding_curse
@@ -39,8 +48,13 @@ blast_protection:
   AnvilCost: 4
   SupportedItems: [armor]
   Conflicts: [minecraft:protection, minecraft:fire_protection, minecraft:projectile_protection]
-  Skills:
-    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.08} @self ~onHurt ?damageType{type=explosion}"
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.08
+      Conditions: ["damageType{type=explosion}"]
 
 breach:
   Id: minecraft:breach
@@ -49,8 +63,10 @@ breach:
   AnvilCost: 4
   SupportedItems: [mace]
   Conflicts: [minecraft:density, minecraft:smite, minecraft:bane_of_arthropods]
-  Skills:
-    - "modify{stat=armor_reduction;perLevel=0.15} @target ~onAttack"
+  Stats:
+    armor_reduction:
+      Trigger: onAttack
+      PerLevel: 0.15
 
 channeling:
   Id: minecraft:channeling
@@ -69,8 +85,10 @@ density:
   AnvilCost: 2
   SupportedItems: [mace]
   Conflicts: [minecraft:breach, minecraft:smite, minecraft:bane_of_arthropods]
-  Skills:
-    - "modify{stat=damage;perLevel=0.5} @target ~onSmash"
+  Stats:
+    damage:
+      Trigger: onSmash
+      PerLevel: 0.5
 
 depth_strider:
   Id: minecraft:depth_strider
@@ -79,8 +97,11 @@ depth_strider:
   AnvilCost: 4
   SupportedItems: [boots]
   Conflicts: [minecraft:frost_walker]
-  Skills:
-    - "modify{stat=movement_speed;perLevel=0.18} @self ~onMove ?flag{name=underwater}"
+  Stats:
+    movement_speed:
+      Trigger: onMove
+      PerLevel: 0.18
+      Conditions: ["flag{name=underwater}"]
 
 efficiency:
   Id: minecraft:efficiency
@@ -88,8 +109,10 @@ efficiency:
   Weight: 10
   AnvilCost: 1
   SupportedItems: [tool]
-  Skills:
-    - "modify{stat=mining_speed;perLevel=2} @self ~onMine"
+  Stats:
+    mining_speed:
+      Trigger: onMine
+      PerLevel: 2
 
 feather_falling:
   Id: minecraft:feather_falling
@@ -97,8 +120,13 @@ feather_falling:
   Weight: 5
   AnvilCost: 2
   SupportedItems: [boots]
-  Skills:
-    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.12} @self ~onHurt ?damageType{type=fall}"
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.12
+      Conditions: ["damageType{type=fall}"]
 
 fire_aspect:
   Id: minecraft:fire_aspect
@@ -116,8 +144,13 @@ fire_protection:
   AnvilCost: 2
   SupportedItems: [armor]
   Conflicts: [minecraft:protection, minecraft:blast_protection, minecraft:projectile_protection]
-  Skills:
-    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.08} @self ~onHurt ?damageType{type=fire}"
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.08
+      Conditions: ["damageType{type=fire}"]
 
 flame:
   Id: minecraft:flame
@@ -135,8 +168,10 @@ fortune:
   AnvilCost: 4
   SupportedItems: [tool]
   Conflicts: [minecraft:silk_touch]
-  Skills:
-    - "modify{stat=fortune_level;perLevel=1} @self ~onBlockDrop"
+  Stats:
+    fortune_level:
+      Trigger: onBlockDrop
+      PerLevel: 1
 
 frost_walker:
   Id: minecraft:frost_walker
@@ -155,8 +190,11 @@ impaling:
   Weight: 2
   AnvilCost: 4
   SupportedItems: [trident]
-  Skills:
-    - "modify{stat=damage;perLevel=2.5} @target ~onProjectileHit ?flag{name=wet_target}"
+  Stats:
+    damage:
+      Trigger: onProjectileHit
+      PerLevel: 2.5
+      Conditions: ["flag{name=wet_target}"]
 
 infinity:
   Id: minecraft:infinity
@@ -174,8 +212,10 @@ knockback:
   Weight: 5
   AnvilCost: 2
   SupportedItems: [weapon]
-  Skills:
-    - "modify{stat=knockback;perLevel=0.5} @target ~onAttack"
+  Stats:
+    knockback:
+      Trigger: onAttack
+      PerLevel: 0.5
 
 looting:
   Id: minecraft:looting
@@ -183,8 +223,10 @@ looting:
   Weight: 2
   AnvilCost: 4
   SupportedItems: [weapon]
-  Skills:
-    - "modify{stat=looting_level;perLevel=1} @target ~onEntityDrop"
+  Stats:
+    looting_level:
+      Trigger: onEntityDrop
+      PerLevel: 1
 
 loyalty:
   Id: minecraft:loyalty
@@ -193,8 +235,10 @@ loyalty:
   AnvilCost: 2
   SupportedItems: [trident]
   Conflicts: [minecraft:riptide]
-  Skills:
-    - "modify{stat=loyalty_level;perLevel=1} @self ~onProjectileReturn"
+  Stats:
+    loyalty_level:
+      Trigger: onProjectileReturn
+      PerLevel: 1
 
 luck_of_the_sea:
   Id: minecraft:luck_of_the_sea
@@ -202,8 +246,10 @@ luck_of_the_sea:
   Weight: 2
   AnvilCost: 4
   SupportedItems: [fishing_rod]
-  Skills:
-    - "modify{stat=fishing_luck;perLevel=1} @self ~onFishing"
+  Stats:
+    fishing_luck:
+      Trigger: onFishing
+      PerLevel: 1
 
 lunge:
   Id: minecraft:lunge
@@ -211,8 +257,10 @@ lunge:
   Weight: 5
   AnvilCost: 2
   SupportedItems: [spear]
-  Skills:
-    - "modify{stat=lunge_strength;perLevel=1} @self ~onSpearAttack"
+  Stats:
+    lunge_strength:
+      Trigger: onSpearAttack
+      PerLevel: 1
 
 lure:
   Id: minecraft:lure
@@ -220,8 +268,10 @@ lure:
   Weight: 2
   AnvilCost: 4
   SupportedItems: [fishing_rod]
-  Skills:
-    - "modify{stat=fishing_wait;perLevel=-5} @self ~onFishing"
+  Stats:
+    fishing_wait:
+      Trigger: onFishing
+      PerLevel: -5
 
 mending:
   Id: minecraft:mending
@@ -241,8 +291,11 @@ multishot:
   AnvilCost: 4
   SupportedItems: [crossbow]
   Conflicts: [minecraft:piercing]
-  Skills:
-    - "modify{stat=projectile_count;base=1;perLevel=2} @self ~onProjectileLaunch"
+  Stats:
+    projectile_count:
+      Trigger: onProjectileLaunch
+      Base: 1
+      PerLevel: 2
 
 piercing:
   Id: minecraft:piercing
@@ -251,8 +304,10 @@ piercing:
   AnvilCost: 1
   SupportedItems: [crossbow]
   Conflicts: [minecraft:multishot]
-  Skills:
-    - "modify{stat=piercing;perLevel=1} @self ~onProjectileLaunch"
+  Stats:
+    piercing:
+      Trigger: onProjectileLaunch
+      PerLevel: 1
 
 power:
   Id: minecraft:power
@@ -260,8 +315,11 @@ power:
   Weight: 10
   AnvilCost: 1
   SupportedItems: [bow]
-  Skills:
-    - "modify{stat=projectile_damage;base=0.5;perLevel=0.5} @target ~onProjectileLaunch"
+  Stats:
+    projectile_damage:
+      Trigger: onProjectileLaunch
+      Base: 0.5
+      PerLevel: 0.5
 
 projectile_protection:
   Id: minecraft:projectile_protection
@@ -270,8 +328,13 @@ projectile_protection:
   AnvilCost: 2
   SupportedItems: [armor]
   Conflicts: [minecraft:protection, minecraft:fire_protection, minecraft:blast_protection]
-  Skills:
-    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.08} @self ~onHurt ?damageType{type=projectile}"
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.08
+      Conditions: ["damageType{type=projectile}"]
 
 protection:
   Id: minecraft:protection
@@ -280,8 +343,12 @@ protection:
   AnvilCost: 1
   SupportedItems: [armor]
   Conflicts: [minecraft:fire_protection, minecraft:blast_protection, minecraft:projectile_protection]
-  Skills:
-    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.04} @self ~onHurt"
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.04
 
 punch:
   Id: minecraft:punch
@@ -289,8 +356,10 @@ punch:
   Weight: 2
   AnvilCost: 4
   SupportedItems: [bow]
-  Skills:
-    - "modify{stat=knockback;perLevel=1} @target ~onProjectileHit"
+  Stats:
+    knockback:
+      Trigger: onProjectileHit
+      PerLevel: 1
 
 quick_charge:
   Id: minecraft:quick_charge
@@ -298,8 +367,10 @@ quick_charge:
   Weight: 5
   AnvilCost: 2
   SupportedItems: [crossbow]
-  Skills:
-    - "modify{stat=charge_ticks;perLevel=-5} @self ~onProjectileCharge"
+  Stats:
+    charge_ticks:
+      Trigger: onProjectileCharge
+      PerLevel: -5
 
 respiration:
   Id: minecraft:respiration
@@ -307,8 +378,11 @@ respiration:
   Weight: 2
   AnvilCost: 4
   SupportedItems: [helmet]
-  Skills:
-    - "modify{stat=air_ticks;perLevel=15} @self ~onAirTick ?flag{name=underwater}"
+  Stats:
+    air_ticks:
+      Trigger: onAirTick
+      PerLevel: 15
+      Conditions: ["flag{name=underwater}"]
 
 riptide:
   Id: minecraft:riptide
@@ -317,8 +391,11 @@ riptide:
   AnvilCost: 4
   SupportedItems: [trident]
   Conflicts: [minecraft:loyalty, minecraft:channeling]
-  Skills:
-    - "modify{stat=riptide_force;perLevel=1} @self ~onProjectileLaunch ?flag{name=wet_caster}"
+  Stats:
+    riptide_force:
+      Trigger: onProjectileLaunch
+      PerLevel: 1
+      Conditions: ["flag{name=wet_caster}"]
 
 sharpness:
   Id: minecraft:sharpness
@@ -327,8 +404,11 @@ sharpness:
   AnvilCost: 1
   SupportedItems: [weapon]
   Conflicts: [minecraft:smite, minecraft:bane_of_arthropods]
-  Skills:
-    - "modify{stat=damage;base=0.5;perLevel=0.5} @target ~onAttack"
+  Stats:
+    damage:
+      Trigger: onAttack
+      Base: 0.5
+      PerLevel: 0.5
 
 silk_touch:
   Id: minecraft:silk_touch
@@ -347,8 +427,11 @@ smite:
   AnvilCost: 2
   SupportedItems: [weapon]
   Conflicts: [minecraft:sharpness, minecraft:bane_of_arthropods]
-  Skills:
-    - "modify{stat=damage;perLevel=2.5} @target ~onAttack ?target{type=undead}"
+  Stats:
+    damage:
+      Trigger: onAttack
+      PerLevel: 2.5
+      Conditions: ["target{type=undead}"]
 
 soul_speed:
   Id: minecraft:soul_speed
@@ -357,8 +440,11 @@ soul_speed:
   AnvilCost: 8
   SupportedItems: [boots]
   Treasure: true
-  Skills:
-    - "modify{stat=movement_speed;perLevel=0.15} @self ~onMove ?flag{name=soul_ground}"
+  Stats:
+    movement_speed:
+      Trigger: onMove
+      PerLevel: 0.15
+      Conditions: ["flag{name=soul_ground}"]
 
 sweeping_edge:
   Id: minecraft:sweeping_edge
@@ -366,8 +452,10 @@ sweeping_edge:
   Weight: 2
   AnvilCost: 4
   SupportedItems: [sword]
-  Skills:
-    - "modify{stat=sweep_damage;perLevel=0.25} @target ~onSweep"
+  Stats:
+    sweep_damage:
+      Trigger: onSweep
+      PerLevel: 0.25
 
 swift_sneak:
   Id: minecraft:swift_sneak
@@ -376,8 +464,11 @@ swift_sneak:
   AnvilCost: 8
   SupportedItems: [leggings]
   Treasure: true
-  Skills:
-    - "modify{stat=movement_speed;perLevel=0.15} @self ~onMove ?flag{name=sneaking}"
+  Stats:
+    movement_speed:
+      Trigger: onMove
+      PerLevel: 0.15
+      Conditions: ["flag{name=sneaking}"]
 
 thorns:
   Id: minecraft:thorns

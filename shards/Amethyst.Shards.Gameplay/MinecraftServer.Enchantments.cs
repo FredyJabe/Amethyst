@@ -14,14 +14,25 @@ public sealed partial class MinecraftServer
         string? damageType = null, Guid? actor = null)
     {
         runtime ??= new ShardSkillRuntime();
-        if (_skills is null || _enchantments is null || item.Count == 0)
-            return runtime;
+        if (item.Count == 0) return runtime;
 
+        ShardItemDefinition? itemDefinition = null;
+        if (_items is not null && _items.TryGetById(item.ItemId, out var foundItem))
+        {
+            itemDefinition = foundItem;
+            // Always apply intrinsic item Stats, even if no enchantments exist.
+            var evt = new ShardSkillEvent(foundItem.Identifier, trigger,
+                ActorUuid: actor, ItemId: item.ItemId, Count: item.Count,
+                EnchantmentLevel: 1, TargetKind: targetKind, DamageType: damageType)
+                { Runtime = runtime };
+            foreach (var stat in foundItem.Stats ?? [])
+                stat.Apply(evt, _skills);
+        }
+        if (_skills is null || _enchantments is null) return runtime;
         var active = new Dictionary<string, int>(StringComparer.Ordinal);
         // The definition's Enchantments component provides base levels.
         // Instance enchantments override those defaults.
-        if (_items is not null && _items.TryGetById(item.ItemId, out var definition) &&
-            definition.Components is not null &&
+        if (itemDefinition is { Components: not null } definition &&
             definition.Components.TryGetValue("minecraft:enchantments", out string? encoded))
         {
             using var data = JsonDocument.Parse(encoded);
@@ -35,12 +46,14 @@ public sealed partial class MinecraftServer
             active[id] = level;
         foreach (var (id, level) in active)
         {
-            if (level <= 0 || !_enchantments.TryGet(id, out _)) continue;
+            if (level <= 0 || !_enchantments.TryGet(id, out var enchantment)) continue;
             var evt = new ShardSkillEvent(id, trigger, ActorUuid: actor,
                 ItemId: item.ItemId, Count: item.Count,
                 EnchantmentLevel: level, TargetKind: targetKind,
                 DamageType: damageType) { Runtime = runtime };
             await _skills.DispatchAsync(evt, ct);
+            foreach (var stat in enchantment.Stats)
+                stat.Apply(evt, _skills);
         }
         return runtime;
     }
