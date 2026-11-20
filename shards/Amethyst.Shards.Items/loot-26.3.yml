@@ -1,0 +1,24 @@
+# Java 26.3 loot skills maintained by the Items Shard.
+# One root per entity kind, one ordered Skills list.
+# Override in shards/data/items/loot/*.yml (Skills: [] disables defaults).
+# dropItem intents are committed by Gameplay AFTER all skills run.
+# This is the first entity loot table, not the entire vanilla loot dataset.
+minecraft:sheep:
+  Skills:
+    - "dropItem{item=minecraft:mutton;min=1;max=2;bonus=looting} @self ~onDeath"
+    - "dropItem{item=minecraft:white_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_white}"
+    - "dropItem{item=minecraft:orange_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_orange}"
+    - "dropItem{item=minecraft:magenta_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_magenta}"
+    - "dropItem{item=minecraft:light_blue_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_light_blue}"
+    - "dropItem{item=minecraft:yellow_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_yellow}"
+    - "dropItem{item=minecraft:lime_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_lime}"
+    - "dropItem{item=minecraft:pink_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_pink}"
+    - "dropItem{item=minecraft:gray_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_gray}"
+    - "dropItem{item=minecraft:light_gray_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_light_gray}"
+    - "dropItem{item=minecraft:cyan_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_cyan}"
+    - "dropItem{item=minecraft:purple_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_purple}"
+    - "dropItem{item=minecraft:blue_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_blue}"
+    - "dropItem{item=minecraft:brown_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_brown}"
+    - "dropItem{item=minecraft:green_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_green}"
+    - "dropItem{item=minecraft:red_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_red}"
+    - "dropItem{item=minecraft:black_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_black}"

@@ -20,6 +20,7 @@ public sealed class ShardSkillRuntime
     private readonly Dictionary<string, double> _numbers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _flags = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<ShardSkillEffect> _effects = [];
+    private readonly List<ShardItemDrop> _drops = [];
 
     /// <summary>Whether a mechanic cancelled the publisher's default gameplay
     /// action. This does not interrupt the skill list; the publisher
@@ -31,6 +32,9 @@ public sealed class ShardSkillRuntime
 
     public IReadOnlyCollection<string> Flags => _flags;
     public IReadOnlyList<ShardSkillEffect> Effects => _effects;
+    /// <summary>Explicit skill-generated drops, distinct from the event's
+    /// default vanilla drops. The publisher commits them after dispatch.</summary>
+    public IReadOnlyList<ShardItemDrop> Drops => _drops;
     public double Number(string key, double fallback = 0) =>
         _numbers.TryGetValue(key, out double value) ? value : fallback;
     public void SetNumber(string key, double value)
@@ -41,8 +45,18 @@ public sealed class ShardSkillRuntime
     public void SetFlag(string flag) => _flags.Add(flag);
     public bool HasFlag(string flag) => _flags.Contains(flag);
     public void AddEffect(ShardSkillEffect effect) => _effects.Add(effect);
+    public void AddDrop(ShardItemDrop drop)
+    {
+        if (drop.ItemId <= 0 || drop.Count is < 1 or > 64 ||
+            _drops.Count >= 32)
+            throw new InvalidDataException("Invalid or excessive skill item drop.");
+        _drops.Add(drop);
+    }
 }
 public sealed record ShardSkillEffect(string Type, string Id, int Duration = 0, int Amplifier = 0);
+/// <summary>Requested stack spawn, evaluated after all mechanics have run.
+/// The Gameplay Shard owns physical entity creation and persistence.</summary>
+public readonly record struct ShardItemDrop(int ItemId, int Count);
 
 /// <summary>Event data supplied by a Shard when dispatching a trigger.
 /// OwnerId is the exact entity/item/other object definition key;

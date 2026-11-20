@@ -27,6 +27,38 @@ Check(catalog.TryGet("sharpness", out var sharpness) &&
 Check(catalog.ConflictsWith("sharpness", "smite") &&
     !catalog.ConflictsWith("sharpness", "unbreaking"),
     "Mutual exclusion and independent effects");
+// The Items Shard owns entity loot, expressed entirely as normal skills.
+var loot = new LootCatalog(Path.Combine(path, "loot-26.3.yml"));
+Check(loot.Count == 1 && loot.HasDefinition("minecraft:sheep") &&
+    loot.Instructions.Count == 17,
+    "Sheep meat and all 16 wool colors are defined in YAML");
+var lootEngine = new SkillEngine();
+var lootContext = new TestSkillContext(lootEngine);
+EnchantmentSkills.Register(lootContext);
+LootSkills.Register(lootContext, items);
+lootEngine.RegisterInstructions("loot-tests", loot.Instructions);
+var blueLoot = new ShardSkillRuntime();
+blueLoot.SetFlag("not_sheared");
+blueLoot.SetFlag("color_blue");
+blueLoot.SetNumber("looting_level", 3);
+await lootEngine.DispatchAsync(new ShardSkillEvent(
+    "minecraft:sheep", "onDeath", Random: new Random(12))
+    { Runtime = blueLoot });
+Check(items.TryGetByIdentifier("minecraft:blue_wool", out var blueWool) &&
+    items.TryGetByIdentifier("minecraft:mutton", out var mutton) &&
+    blueLoot.Drops.Count == 2 &&
+    blueLoot.Drops.Single(x => x.ItemId == blueWool.ProtocolId).Count == 1 &&
+    blueLoot.Drops.Single(x => x.ItemId == mutton.ProtocolId).Count is >= 1 and <= 5,
+    "Sheep loot respects color flags and rolled Looting bonus");
+var shearedLoot = new ShardSkillRuntime();
+shearedLoot.SetFlag("color_blue");
+await lootEngine.DispatchAsync(new ShardSkillEvent(
+    "minecraft:sheep", "onDeath", Random: new Random(21))
+    { Runtime = shearedLoot });
+Check(shearedLoot.Drops.Count == 1 &&
+    shearedLoot.Drops[0].ItemId == mutton.ProtocolId,
+    "Sheared sheep never drop wool");
+
 Check(items.TryGetByIdentifier("minecraft:diamond_sword", out var sword) &&
     catalog.CanApply("sharpness", sword) &&
     !catalog.CanApply("aqua_affinity", sword),
@@ -348,6 +380,47 @@ try
     var reloaded = new PlayerInventory(temporary, playerId, items);
     Check(reloaded.Held().EnchantmentLevel("sharpness") == 4,
         "Enchantment levels survive inventory reload");
+    string lootOverrides = Path.Combine(temporary, "loot-override");
+    Directory.CreateDirectory(lootOverrides);
+    File.WriteAllText(Path.Combine(lootOverrides, "sheep.yml"), """
+        minecraft:sheep:
+          Skills: []
+        """);
+    var emptyLoot = new LootCatalog(Path.Combine(path, "loot-26.3.yml"),
+        lootOverrides);
+    Check(emptyLoot.HasDefinition("minecraft:sheep") &&
+        emptyLoot.Instructions.Count == 0,
+        "Loot Skills: [] removes vanilla drops without re-enabling fallback");
+    File.WriteAllText(Path.Combine(lootOverrides, "sheep.yml"), """
+        minecraft:sheep:
+          Skills:
+            - "cancelEvent @self ~onDeath"
+            - "dropItem{item=minecraft:diamond;amount=2} @self ~onDeath"
+        """);
+    var customLoot = new LootCatalog(Path.Combine(path, "loot-26.3.yml"),
+        lootOverrides);
+    var customLootEngine = new SkillEngine();
+    var customContext = new TestSkillContext(customLootEngine);
+    EnchantmentSkills.Register(customContext);
+    LootSkills.Register(customContext, items);
+    customLootEngine.RegisterInstructions("custom-loot", customLoot.Instructions);
+    var customDeath = new ShardSkillEvent("minecraft:sheep", "onDeath");
+    await customLootEngine.DispatchAsync(customDeath);
+    Check(items.TryGetByIdentifier("minecraft:diamond", out var diamond) &&
+        customDeath.Runtime.IsCancelled && customDeath.Runtime.Drops.Count == 1 &&
+        customDeath.Runtime.Drops[0] == new ShardItemDrop(diamond.ProtocolId, 2),
+        "cancelEvent leaves later dropItem skills executable");
+    bool invalidLootItem = false;
+    try
+    {
+        customLootEngine.RegisterInstructions("bad-loot", [
+            SkillEngine.Parse("minecraft:fake_mob",
+                "dropItem{item=minecraft:not_a_real_item;amount=1} @self ~onDeath")
+        ]);
+    }
+    catch (InvalidDataException) { invalidLootItem = true; }
+    Check(invalidLootItem, "Unknown loot material rejected during registration");
+
     File.WriteAllText(Path.Combine(temporary, "invalid.yml"), """
         nonexistent:
           MaxLevel: 1

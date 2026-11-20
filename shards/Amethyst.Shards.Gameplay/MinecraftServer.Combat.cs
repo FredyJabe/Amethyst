@@ -68,9 +68,30 @@ public sealed partial class MinecraftServer
             hit = true;
             if (killed)
             {
-                // Server-generated mob drops, never client-authoritative.
-                if (_groundItems is not null && _items is not null)
+                // Loot is owned by Items YAML. The weapon's Looting Stats
+                // run before the entity's ~onDeath mechanics, and all explicit
+                // dropItem intents are committed after the full skill list.
+                // A declared Skills: [] intentionally suppresses defaults.
+                if (_loot?.HasDefinition(mob.Kind) == true && _skills is not null)
                 {
+                    var lootRuntime = new ShardSkillRuntime();
+                    if (!mob.Sheared) lootRuntime.SetFlag("not_sheared");
+                    lootRuntime.SetFlag("color_" + WoolColors[mob.Color]);
+                    await EnchantmentEventAsync(weapon, "onEntityDrop", ct,
+                        lootRuntime, targetKind: "sheep", actor: attacker.PlayerUuid);
+                    await _skills.DispatchAsync(new ShardSkillEvent(
+                        mob.Kind, "onDeath", mob.X, mob.Y, mob.Z,
+                        EntityId: mob.EntityId, ActorUuid: attacker.PlayerUuid,
+                        TargetKind: "sheep") { Runtime = lootRuntime }, ct);
+                    if (_groundItems is not null)
+                        foreach (ShardItemDrop drop in lootRuntime.Drops)
+                            _groundItems.TrySpawn(drop.ItemId, drop.Count,
+                                mob.X, mob.Y + 0.25, mob.Z, out _);
+                }
+                else if (_groundItems is not null && _items is not null)
+                {
+                    // Compatibility for embedded Gameplay tests without the
+                    // Items loot registry. Live servers always resolve YAML.
                     if (_items.TryGetByIdentifier("minecraft:mutton", out var meat))
                         _groundItems.TrySpawn(meat.ProtocolId, 1,
                             mob.X, mob.Y + 0.25, mob.Z, out _);

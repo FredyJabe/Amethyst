@@ -25,6 +25,7 @@ public sealed partial class MinecraftServer
     private readonly IShardItemRegistry? _items;
     private readonly IShardEnchantmentRegistry? _enchantments;
     private readonly IShardSkillEngine? _skills;
+    private readonly IShardLootRegistry? _loot;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private readonly Dictionary<Guid, Dictionary<int, ExperienceOrb>> _experienceViews = new();
@@ -37,7 +38,8 @@ public sealed partial class MinecraftServer
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
         IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
-        IShardEnchantmentRegistry? enchantments = null, IShardSkillEngine? skills = null)
+        IShardEnchantmentRegistry? enchantments = null, IShardSkillEngine? skills = null,
+        IShardLootRegistry? loot = null)
     {
         _options = options;
         _world = world;
@@ -46,6 +48,7 @@ public sealed partial class MinecraftServer
         _items = items;
         _enchantments = enchantments;
         _skills = skills;
+        _loot = loot;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers);
         _operators = new OperatorStore(options.OperatorsFile);

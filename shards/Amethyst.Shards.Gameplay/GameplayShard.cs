@@ -23,7 +23,8 @@ public sealed class GameplayShard : IShard, IShardGameplay
             context.GetRequiredService<IShardPacketBus>(), context.GetService<IShardBlockWorld>(),
             context.DataDirectory, items, recipes,
             context.GetService<IShardEnchantmentRegistry>(),
-            context.GetService<IShardSkillEngine>());
+            context.GetService<IShardSkillEngine>(),
+            context.GetService<IShardLootRegistry>());
         game.Start();
         _gameplay = game;
         context.RegisterService<IShardGameplay>(this);

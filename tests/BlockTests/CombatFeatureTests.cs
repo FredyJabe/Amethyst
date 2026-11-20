@@ -96,14 +96,18 @@ internal static class CombatFeatureTests
                 solutionRoot.FullName, "shards", "Amethyst.Shards.Items",
                 "enchantments-26.3.yml"));
             var skills = new SkillEngine();
-            skills.RegisterTrigger("combat-tests", "onAttack");
-            skills.RegisterInstructions("combat-tests", [
+            var skillContext = new LootTestContext(skills);
+            EnchantmentSkills.Register(skillContext);
+            LootSkills.Register(skillContext, items);
+            var loot = new LootCatalog(Path.Combine(solutionRoot.FullName,
+                "shards", "Amethyst.Shards.Items", "loot-26.3.yml"));
+            skills.RegisterInstructions("combat-tests", loot.Instructions.Concat([
                 SkillEngine.Parse("minecraft:sharpness",
                     "cancelEvent @self ~onAttack")
-            ]);
+            ]));
             var server = new MinecraftServer(settings, world,
                 null!, world, items: items, recipes: recipes,
-                enchantments: enchantments, skills: skills);
+                enchantments: enchantments, skills: skills, loot: loot);
             Guid id1 = Guid.NewGuid(), id2 = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(id1, "FighterOne", []),
                 connection1, 0, out _) &&
@@ -189,11 +193,48 @@ internal static class CombatFeatureTests
             player1.AdvanceClientTick();
             Check(!player1.ConsumeAttackSwingCancellation(),
                 "A missing punch cannot suppress animation in the next tick");
+
+            // A second, uncancelled attack kills the sheep. Gameplay now
+            // executes the Items Shard's YAML loot skills instead of a
+            // hardcoded mutton/white-wool drop.
+            Check(player1.Inventory.TryCreativeSet(36, sword.ProtocolId, 1, true),
+                "Clear attack-cancelling enchantment to test a real kill");
+            await Task.Delay(140);
+            await server.HandleAttackAsync(player1, summoned.EntityId,
+                CancellationToken.None);
+            Check(server.LivingEntitiesForTests.Length == 0 &&
+                items.TryGetByIdentifier("minecraft:mutton", out var mutton) &&
+                items.TryGetByIdentifier("minecraft:white_wool", out var wool) &&
+                server.GroundItemsForTests.Any(x => x.ItemId == mutton.ProtocolId) &&
+                server.GroundItemsForTests.Any(x => x.ItemId == wool.ProtocolId),
+                "Killing a sheep commits the YAML-defined meat and wool skill drops");
         }
         finally
         {
             try { Directory.Delete(root, true); }
             catch (IOException) { }
         }
+    }
+
+    private sealed class LootTestContext(SkillEngine engine) : IShardContext
+    {
+        public string Id => "combat-tests";
+        public ServerOptions Options => throw new NotSupportedException();
+        public string DataDirectory => Path.GetTempPath();
+        public void RegisterService<T>(T service) where T : class { }
+        public T GetRequiredService<T>() where T : class => throw new NotSupportedException();
+        public T? GetService<T>() where T : class => null;
+        public void Log(string message) { }
+        public void RegisterPlayPacketHandler(int packetId, ShardPlayPacketHandler handler) { }
+        public void RegisterConsoleCommand(string name, ShardConsoleCommand handler) { }
+        public void RegisterSkillTrigger(string trigger) => engine.RegisterTrigger(Id, trigger);
+        public void RegisterSkillMechanic(string name, ShardSkillValidator validator,
+            ShardSkillExecutor executor) => engine.RegisterMechanic(Id, name, validator, executor);
+        public void RegisterSkillCondition(string name, ShardSkillConditionValidator validator,
+            ShardSkillConditionEvaluator evaluator) => engine.RegisterCondition(Id, name, validator, evaluator);
+        public void RegisterSkillDefinitions(string file, string? directory = null) =>
+            engine.RegisterDefinitions(Id, file, directory);
+        public void RegisterSkillInstructions(IEnumerable<ShardSkillInstruction> instructions) =>
+            engine.RegisterInstructions(Id, instructions);
     }
 }

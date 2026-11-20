@@ -594,6 +594,11 @@ public sealed class ItemsShard : IShard
         var enchantments = new EnchantmentCatalog(
             Path.Combine(directory, "enchantments-26.3.yml"), enchantmentDirectory);
         EnchantmentSkills.Register(ctx);
+        LootSkills.Register(ctx, catalog);
+        string lootDirectory = Path.Combine(ctx.DataDirectory, "loot");
+        var loot = new LootCatalog(Path.Combine(directory, "loot-26.3.yml"),
+            lootDirectory);
+        ctx.RegisterService<IShardLootRegistry>(loot);
         // Fail fast for unknown/invalid Stats conditions instead of throwing
         // only after a player triggers an affected event.
         var skillEngine = ctx.GetRequiredService<IShardSkillEngine>();
@@ -605,7 +610,8 @@ public sealed class ItemsShard : IShard
         // triggers, mechanics, and conditions, but have distinct owner IDs.
         ctx.RegisterSkillInstructions(enchantments.Instructions
             .Concat(catalog.All.SelectMany(item => item.Skills ?? []))
-            .Concat(catalog.Aliases.SelectMany(item => item.Skills ?? [])));
+            .Concat(catalog.Aliases.SelectMany(item => item.Skills ?? []))
+            .Concat(loot.Instructions));
         ctx.RegisterService<IShardEnchantmentRegistry>(enchantments);
         ctx.RegisterConsoleCommand("enchantments", (args, token) =>
         {
@@ -678,7 +684,8 @@ public sealed class ItemsShard : IShard
             $"item overrides: {definitions}; fixed component nodes: " +
             $"{componentNodes.Nodes.Count} assigned, {componentNodes.PendingCount} pending; " +
             $"recipe overrides: {recipeDirectory}; " +
-            $"enchantments: {enchantments.Count} (overrides: {enchantmentDirectory}).");
+            $"enchantments: {enchantments.Count} (overrides: {enchantmentDirectory}); " +
+            $"loot owners: {loot.Count} (overrides: {lootDirectory}).");
         return Task.CompletedTask;
     }
 

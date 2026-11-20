@@ -697,6 +697,42 @@ activate them.
 Custom aliases have registered definitions, but physical stacks still
 need separate alias identity before their per-alias skills can fire.
 
+## YAML loot drops and `dropItem` (Phase 4)
+
+`shards/Amethyst.Shards.Items/loot-26.3.yml` bundles initial
+entity loot rules. The Items Shard installs this file alongside item,
+recipe and enchantment YAML. Server operators can replace entity loot
+packs by writing `*.yml` files to
+`shards/data/items/loot/`, with one root per entity ID.
+
+```yaml
+minecraft:sheep:
+  Skills:
+    - "dropItem{item=minecraft:mutton;min=1;max=2;bonus=looting} @self ~onDeath"
+    - "dropItem{item=minecraft:white_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_white}"
+```
+
+Each `dropItem` mechanic validates its `item` against the registered
+vanilla item catalog at startup. Specify either `amount` or `min` and
+`max` (1..64); optional `bonus=looting` adds a uniformly rolled
+0..Looting-level count. Items are produced as runtime drop intents.
+Gameplay commits them to ground entities **after all skills execute**.
+They do not short-circuit on `cancelEvent`.
+
+Sheep's 16 wool colors are chosen by `?flag{name=color_<color>}`;
+`not_sheared` prevents wool from sheared sheep. The killer's
+`~onEntityDrop` Stats are applied first, allowing Looting YAML to
+modify drop rolls. `Skills: []` in an override disables that entity's
+bundled drops (it does not restore hardcoded defaults).
+
+Currently the shipped loot YAML covers **sheep**, the only persistent
+living mob implemented in Gameplay. This is a data-driven foundation,
+**not** a complete vanilla loot table importer: other entities, block
+loot predicates, burning-state cooked drops, complex vanilla loot
+functions and other item interactions are pending. The old built-in
+sheep fallback remains only for direct Gameplay constructors that do
+not supply an Items Shard loot registry.
+
 ## Skill-based enchantments (Java 26.3)
 
 The Items Shard registers all **43 vanilla enchantments** from
