@@ -94,8 +94,54 @@ change the base material's physical capacity, durability, or block nature.
 
 ### Item components (Java 26.3 / protocol 777)
 
-For the **complete, numbered registry of all 122 components** (including
-unimplemented codecs), see [COMPONENTS.md](COMPONENTS.md).
+For the **complete, numbered registry of all 122 components** and its
+wire format coverage, see [COMPONENTS.md](COMPONENTS.md).
+
+### Assign a YAML node name to every component
+
+The editable file `shards/data/items/component-nodes.yml` contains one
+mapping per Minecraft component. The Items Shard loads it at startup,
+generating a complete template if it does not exist. **Edit the value,
+not the minecraft: registry key.** For example:
+
+```yaml
+minecraft:item_model: ItemModel
+minecraft:custom_name: DisplayName
+minecraft:food: FoodSettings
+minecraft:glider: FlyMode
+```
+
+Then use any configured node inside an item definition's `Components:`
+or `Options:` mapping, for instance:
+
+```yaml
+diamond_pickaxe:
+  Id: minecraft:diamond_pickaxe
+  Options:
+    ItemModel: amethyst:custom_pickaxe
+    DisplayName: "<gold>Custom Pickaxe</gold>"
+    FlyMode: true
+  Components:
+    # Complex types can still be configured with pre-encoded packet bytes:
+    FoodSettings: { WireHex: "..." }
+```
+
+The `WireHex` food value above is a placeholder, not runnable configuration.
+A typed codec is necessary to express complex values in natural YAML.
+Until implemented, `WireHex` accepts at most 65,536 bytes of
+**already encoded Java 26.3 component value payload**, and
+`{ Remove: true }` removes any component from vanilla defaults.
+Wrong payload bytes can disconnect clients; use only verified protocol
+encodings. The 122 component IDs are queryable from
+`ShardItemComponentIds.All`, and the mapping is available as
+`IShardItemRegistry.ComponentNodes`. The server command
+`componentnodes` lists all mappings (`componentnodes food` filters them).
+
+This provides **full 122-name YAML registration and a universal
+protocol-level escape hatch**, not full typed codecs or server-side
+gameplay behavior for every component. Java item components such as
+`equippable`, `food`, `weapon` and `blocks_attacks` need specialized
+gameplay integration as well as correct packet serialization.
 
 
 **Mythic-style top-level fields** and the explicit `Components` map
@@ -154,11 +200,11 @@ Top-level shorthands also include `TooltipStyle`, `Rarity`,
 `Unbreakable`, and `Glint`. Do not define the same component in a
 shorthand and the `Components` map; duplicates are rejected.
 
-Complex components (attributes, equippable, food, custom effects,
-enchantment lists, etc.) require individual codec and gameplay support
-before they can be configured; unsupported types fail at startup. The
-public `ShardItemComponentIds` resolves all 122 protocol-777 component
-IDs, but that does not imply wire serialization for all of them.
+Additional simple typed codecs handle max damage, damage, enchantability,
+map IDs, dyed colors, and no-payload flag components. Other complex
+components accept `WireHex` or `Remove` on their assigned YAML nodes;
+they still require individual typed codecs and gameplay integration
+for convenient, safe data-driven behavior.
 
 Simple `<aqua>Text</aqua>` or `<gold>Text</gold>` names are translated
 into Minecraft text components. Full MiniMessage (nested tags,
