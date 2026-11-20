@@ -565,6 +565,27 @@ public sealed class ItemsShard : IShard
                 return true;
             }
         });
+        ctx.RegisterConsoleCommand("componentnodes", (args, token) =>
+        {
+            string filter = args.Trim();
+            int count = 0;
+            for (int i = 0; i < ShardItemComponentIds.Count; i++)
+            {
+                string component = ShardItemComponentIds.All[i];
+                string node = componentNodes.Nodes[component];
+                if (filter.Length > 0 &&
+                    !component.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
+                    !node.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
+                    filter != i.ToString(CultureInfo.InvariantCulture))
+                    continue;
+                ctx.Log($"[{i,3}] {component} => {node}");
+                count++;
+            }
+            ctx.Log($"Component YAML nodes: {count} matching of " +
+                $"{ShardItemComponentIds.Count} registered in Java {catalog.MinecraftVersion}. " +
+                $"Edit: {componentNodesPath}");
+            return Task.CompletedTask;
+        });
         ctx.RegisterConsoleCommand("recipes", (args, token) =>
         {
             string filter = args.Trim();
