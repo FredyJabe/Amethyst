@@ -751,11 +751,20 @@ Elytra and tridents (including damage on the returned trident stack).
 No configured engine means no enchantment-based wear prevention.
 Skill mechanics on this synchronous durability event must complete
 without awaiting; this avoids asynchronous callbacks while holding
-the inventory transaction lock. `cancelEvent` also stops further skill
-instructions on the cancelled event; publishers of other event types
-must explicitly honor `Runtime.IsCancelled` for it to cancel their
-corresponding gameplay action. A regular `setFlag` does not cancel
-an event.
+the inventory transaction lock. `cancelEvent` does **not** stop the
+remaining skills: everything after the cancellation still executes,
+including other enchantments' skills. The event publisher reads
+`Runtime.IsCancelled` after dispatch to suppress only its default
+gameplay action. A regular `setFlag` does not cancel an event.
+
+Currently connected cancellation handlers prevent:
+`~onAttack` server-side attack damage, knockback and weapon wear;
+`~onHurt` health damage and armor wear; `~onMine` block destruction
+(including instant and Creative mining); `~onBlockDrop` item drops;
+and `~onProjectileLaunch` projectile creation and ammunition use.
+Other events must honor `Runtime.IsCancelled` when implemented.
+The client-rendered swing animation itself cannot be undone by
+server-side cancellation.
 
 As with all server-authored enchantments, client-provided item NBT
 cannot substitute for inventory authority. Vanilla item components

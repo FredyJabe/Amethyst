@@ -34,7 +34,8 @@ public sealed class SkillEngine : IShardSkillEngine
         _packs = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Core-owned cancelEvent mechanic, available to every shard.
-    /// It cancels the active skill event, not its owner or future events.</summary>
+    /// It suppresses the publisher's default action without interrupting
+    /// the remaining skills for this event.</summary>
     public SkillEngine()
     {
         RegisterMechanic("amethyst", "cancelEvent",
@@ -250,7 +251,6 @@ public sealed class SkillEngine : IShardSkillEngine
         foreach (var skill in skills)
         {
             ct.ThrowIfCancellationRequested();
-            if (context.Runtime.IsCancelled) break;
             if (!string.Equals(skill.Trigger, context.Trigger, StringComparison.OrdinalIgnoreCase))
                 continue;
             ShardSkillExecutor executor;
@@ -324,7 +324,6 @@ public sealed class SkillEngine : IShardSkillEngine
             return false;
         foreach (var skill in skills)
         {
-            if (context.Runtime.IsCancelled) break;
             if (!string.Equals(skill.Trigger, context.Trigger,
                     StringComparison.OrdinalIgnoreCase))
                 continue;

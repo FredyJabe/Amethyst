@@ -21,10 +21,12 @@ public sealed class ShardSkillRuntime
     private readonly HashSet<string> _flags = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<ShardSkillEffect> _effects = [];
 
-    /// <summary>Whether a mechanic cancelled the current event. The event
-    /// publisher must check this before committing its gameplay action.</summary>
+    /// <summary>Whether a mechanic cancelled the publisher's default gameplay
+    /// action. This does not interrupt the skill list; the publisher
+    /// must check it before committing the vanilla action.</summary>
     public bool IsCancelled { get; private set; }
-    /// <summary>Cancel only this event instance; future events start uncancelled.</summary>
+    /// <summary>Cancel this event's default action, not the remaining skills
+    /// or any subsequent event.</summary>
     public void Cancel() => IsCancelled = true;
 
     public IReadOnlyCollection<string> Flags => _flags;

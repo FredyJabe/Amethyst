@@ -1,5 +1,6 @@
 using Amethyst;
 using Amethyst.BuiltinShards;
+using Amethyst.Shards;
 
 internal static class CombatFeatureTests
 {
@@ -73,8 +74,26 @@ internal static class CombatFeatureTests
             using var stream2 = new MemoryStream();
             using var connection1 = new PacketChannel(stream1);
             using var connection2 = new PacketChannel(stream2);
+            // The attack event is cancelled by a configured enchantment
+            // without changing the semantics of ordinary unenchanted hits.
+            DirectoryInfo? solutionRoot = new(AppContext.BaseDirectory);
+            while (solutionRoot is not null &&
+                !File.Exists(Path.Combine(solutionRoot.FullName, "Amethyst.slnx")))
+                solutionRoot = solutionRoot.Parent;
+            if (solutionRoot is null)
+                throw new InvalidOperationException("Amethyst.slnx not found.");
+            var enchantments = new EnchantmentCatalog(Path.Combine(
+                solutionRoot.FullName, "shards", "Amethyst.Shards.Items",
+                "enchantments-26.3.yml"));
+            var skills = new SkillEngine();
+            skills.RegisterTrigger("combat-tests", "onAttack");
+            skills.RegisterInstructions("combat-tests", [
+                SkillEngine.Parse("minecraft:sharpness",
+                    "cancelEvent @self ~onAttack")
+            ]);
             var server = new MinecraftServer(settings, world,
-                null!, world, items: items, recipes: recipes);
+                null!, world, items: items, recipes: recipes,
+                enchantments: enchantments, skills: skills);
             Guid id1 = Guid.NewGuid(), id2 = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(id1, "FighterOne", []),
                 connection1, 0, out _) &&
@@ -118,6 +137,15 @@ internal static class CombatFeatureTests
             Check(server.LivingEntitiesForTests.Single().Health < 8 &&
                 player1.Inventory.Held().Damage == 2,
                 "Sheep receive melee damage through the same validated pathway");
+            float healthBeforeCancel = server.LivingEntitiesForTests.Single().Health;
+            Check(player1.Inventory.EnchantHeld("sharpness", 1, enchantments),
+                "Prepare enchanted weapon with cancellable ~onAttack");
+            await Task.Delay(140);
+            await server.HandleAttackAsync(player1, summoned.EntityId,
+                CancellationToken.None);
+            Check(server.LivingEntitiesForTests.Single().Health == healthBeforeCancel &&
+                player1.Inventory.Held().Damage == 2,
+                "cancelEvent prevents vanilla attack damage and weapon wear");
         }
         finally
         {

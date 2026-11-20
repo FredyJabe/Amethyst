@@ -131,6 +131,9 @@ public sealed partial class MinecraftServer
         projectileEffects.SetNumber("piercing", 0);
         await EnchantmentEventAsync(stack, "onProjectileLaunch", ct,
             projectileEffects, actor: player.PlayerUuid);
+        // All configured launch skills have executed; cancellation prevents
+        // the vanilla launch, ammo consumption, and durability wear.
+        if (projectileEffects.IsCancelled) return;
         damage = (float)Math.Clamp(projectileEffects.Number(
             "projectile_damage", damage), 0, 1000);
         if (_projectiles.Snapshot().Length >= ProjectileWorld.MaximumProjectiles)

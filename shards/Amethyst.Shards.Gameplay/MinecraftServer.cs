@@ -559,15 +559,29 @@ public sealed partial class MinecraftServer
                 int held = player.Inventory.Held().ItemId;
                 int duration = player.GameMode == PlayerGameMode.Creative ? 0 :
                     MiningRules.RequiredMilliseconds(state, held);
-                if (survival && duration > 0 && duration < int.MaxValue)
+                if (duration < int.MaxValue)
                 {
                     var miningContext = new ShardSkillRuntime();
                     miningContext.SetNumber("mining_speed", 1);
                     await EnchantmentEventAsync(player.Inventory.Held(),
                         "onMine", ct, miningContext, actor: player.PlayerUuid);
-                    double bonus = Math.Clamp(
-                        miningContext.Number("mining_speed", 1), 0.05, 256);
-                    duration = (int)Math.Max(0, Math.Ceiling(duration / bonus));
+                    if (miningContext.IsCancelled)
+                    {
+                        // A cancelled ~onMine suppresses vanilla block breaking
+                        // even for Creative and one-tick Survival mining.
+                        // Reconcile client-side predicted AIR with server state.
+                        outcome = "mining cancelled by skill";
+                        await BlockInteractionProtocol.SendBlockUpdateAsync(
+                            player.Connection, action.X, action.Y, action.Z,
+                            state, ct);
+                        break;
+                    }
+                    if (survival && duration > 0)
+                    {
+                        double bonus = Math.Clamp(
+                            miningContext.Number("mining_speed", 1), 0.05, 256);
+                        duration = (int)Math.Max(0, Math.Ceiling(duration / bonus));
+                    }
                 }
                 if (duration == int.MaxValue)
                 {
@@ -643,7 +657,10 @@ public sealed partial class MinecraftServer
                     drops.SetNumber("drop_count", 1);
                     await EnchantmentEventAsync(player.Inventory.Held(),
                         "onBlockDrop", ct, drops, actor: player.PlayerUuid);
-                    int count = (int)Math.Clamp(drops.Number("drop_count", 1), 0, 64);
+                    // Cancelled ~onBlockDrop means no vanilla item drop.
+                    // The mined block, XP and tool wear are independent events.
+                    int count = drops.IsCancelled ? 0 :
+                        (int)Math.Clamp(drops.Number("drop_count", 1), 0, 64);
                     // Fortune changes resource drops, not dropped block items.
                     if (!drops.HasFlag("silk_touch") &&
                         _items is not null &&

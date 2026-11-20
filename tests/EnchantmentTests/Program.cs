@@ -182,8 +182,8 @@ try
     Check(alwaysWear.PreventsWear(enchantedTool, true, new ConstantRandom(0.99)),
         "Overriding Unbreaking with unconditional cancelEvent prevents wear");
 
-    // A normal flag is not event cancellation. Validate both execution
-    // modes and ensure cancelled events skip later skill instructions.
+    // A normal flag is not event cancellation. Cancellation does not stop
+    // any remaining skill instructions in either dispatch mode.
     File.WriteAllText(Path.Combine(inactiveDir, "unbreaking.yml"), """
         unbreaking:
           Skills:
@@ -211,8 +211,8 @@ try
     Check(cancellationEngine.DispatchImmediate(cancelContext) &&
         cancelContext.Runtime.IsCancelled &&
         cancelContext.Runtime.HasFlag("before") &&
-        !cancelContext.Runtime.HasFlag("after"),
-        "cancelEvent stops subsequent synchronous mechanics");
+        cancelContext.Runtime.HasFlag("after"),
+        "cancelEvent marks vanilla event cancelled but runs subsequent sync skills");
     var allowedContext = new ShardSkillEvent("test_cancel", "onItemDamage",
         EnchantmentLevel: 1);
     Check(cancellationEngine.DispatchImmediate(allowedContext) &&
@@ -223,8 +223,8 @@ try
         EnchantmentLevel: 2);
     Check(await cancellationEngine.DispatchAsync(asyncContext) &&
         asyncContext.Runtime.IsCancelled &&
-        !asyncContext.Runtime.HasFlag("after"),
-        "cancelEvent also stops asynchronous skill dispatch");
+        asyncContext.Runtime.HasFlag("after"),
+        "cancelEvent keeps executing subsequent async skills");
     bool rejectedArgs = false;
     try
     {
@@ -235,6 +235,30 @@ try
     }
     catch (InvalidDataException) { rejectedArgs = true; }
     Check(rejectedArgs, "cancelEvent rejects unknown parameters at registration");
+
+    // A cancelled event can also reach other skill packs (e.g. separate
+    // enchantments), all sharing the same event runtime.
+    cancellationEngine.RegisterInstructions("other-enchantment", [
+        SkillEngine.Parse("test_cancel", "setFlag{name=other_pack} @self ~onItemDamage")
+    ]);
+    var sharedRuntime = new ShardSkillRuntime();
+    await cancellationEngine.DispatchAsync(new ShardSkillEvent(
+        "test_cancel", "onItemDamage", EnchantmentLevel: 2)
+        { Runtime = sharedRuntime });
+    Check(sharedRuntime.IsCancelled && sharedRuntime.HasFlag("after") &&
+        sharedRuntime.HasFlag("other_pack"),
+        "Cancellation preserves later skills from multiple skill packs");
+
+    var attackRuntime = new ShardSkillRuntime();
+    cancellationEngine.RegisterTrigger("attack-test", "onAttack");
+    cancellationEngine.RegisterInstructions("attack-cancel", [
+        SkillEngine.Parse("test_attack", "cancelEvent @self ~onAttack"),
+        SkillEngine.Parse("test_attack", "setFlag{name=attack_after} @self ~onAttack")
+    ]);
+    await cancellationEngine.DispatchAsync(new ShardSkillEvent(
+        "test_attack", "onAttack") { Runtime = attackRuntime });
+    Check(attackRuntime.IsCancelled && attackRuntime.HasFlag("attack_after"),
+        "~onAttack cancellation still executes subsequent attack skills");
 
     string componentDir = Path.Combine(temporary, "component-enchantments");
     Directory.CreateDirectory(componentDir);

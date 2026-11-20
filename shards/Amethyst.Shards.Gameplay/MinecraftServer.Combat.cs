@@ -45,6 +45,9 @@ public sealed partial class MinecraftServer
         await EnchantmentEventAsync(weapon, "onAttack", ct, attackEffects,
             targetKind: victim is null ? EnchantmentMobCategory(mob.Kind) : "player",
             actor: attacker.PlayerUuid);
+        // Every skill has executed. Only the underlying server-side attack
+        // (damage, knockback and weapon wear) is now cancelled.
+        if (attackEffects.IsCancelled) return;
         raw = (float)Math.Clamp(attackEffects.Number("damage", raw), 0, 1000);
         if (raw <= 0) return;
         double knockbackBonus = Math.Max(0, attackEffects.Number("knockback", 0.4) - 0.4);
@@ -130,6 +133,9 @@ public sealed partial class MinecraftServer
                 targetKind: "player", damageType: projectile ? "projectile" : "generic",
                 actor: victim.PlayerUuid);
         }
+        // Keep executing all armor skills; cancellation prevents the vanilla
+        // hit and armor wear after the entire event has been dispatched.
+        if (hurt.IsCancelled) return false;
         damage = (float)Math.Clamp(hurt.Number("damage", damage), 0, 1000);
         if (damage <= 0) return false;
         if (!victim.Vitals.TryDamage(damage, Environment.TickCount64,
