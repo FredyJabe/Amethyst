@@ -80,14 +80,10 @@ try
         wornInventory.Held() == new ItemStack(woodenTool.ProtocolId, 1) { Damage = 7 },
         "Survival wear is accumulated per tool stack");
     int revision = wornInventory.Snapshot().Revision;
-    bool picked = wornInventory.ApplyClick(new InventoryClick(0, revision, 36, 0, 0));
-    bool placed = wornInventory.ApplyClick(new InventoryClick(0, revision + 1, 10, 0, 0));
-    var inspection = wornInventory.Snapshot();
-    Console.WriteLine($"Enchantment debug: picked={picked}, placed={placed}, " +
-        $"slot10={inspection.Slots[10]}, cursor={inspection.Cursor}, " +
-        $"empty={inspection.Cursor == ItemStack.Empty}, revision={inspection.Revision}");
-    Check(picked && placed && inspection.Slots[10].Damage == 7 &&
-        inspection.Cursor == ItemStack.Empty,
+    Check(wornInventory.ApplyClick(new InventoryClick(0, revision, 36, 0, 0)) &&
+        wornInventory.ApplyClick(new InventoryClick(0, revision + 1, 10, 0, 0)) &&
+        wornInventory.Snapshot().Slots[10].Damage == 7 &&
+        wornInventory.Snapshot().Cursor == ItemStack.Empty,
         "Inventory clicks preserve tool damage when moving to main inventory");
     Check(new PlayerInventory(wearRoot, wearId, itemsCatalog)
         .Snapshot().Slots[10].Damage == 7,

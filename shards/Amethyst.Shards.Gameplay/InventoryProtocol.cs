@@ -19,7 +19,7 @@ public readonly record struct ItemStack(int ItemId, int Count)
     /// <summary>Additional vanilla enchantments in canonical, sorted
     /// "minecraft:id=level;..." form. Unbreaking/Mending retain their
     /// legacy fields for compatibility with older inventories.</summary>
-    public string EnchantmentData { get; init; } = "";
+    public string? EnchantmentData { get; init; }
 
     public int EnchantmentLevel(string id)
     {

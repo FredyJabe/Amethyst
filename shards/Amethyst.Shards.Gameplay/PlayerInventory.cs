@@ -373,7 +373,7 @@ public sealed partial class PlayerInventory
             {
                 Damage = damage, Unbreaking = unbreaking, Mending = mending,
                 Unbreakable = unbreakable, RepairCost = cost,
-                EnchantmentData = enchantments
+                EnchantmentData = enchantments.Length == 0 ? null : enchantments
             };
         }
         for (int i = 0; i < _slots.Length; i++)
