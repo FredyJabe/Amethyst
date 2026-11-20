@@ -23,6 +23,21 @@ internal static class ItemComponentWire
                 throw new InvalidDataException($"Unknown component {name}.");
             using var document = JsonDocument.Parse(json);
             JsonElement value = document.RootElement;
+            if (value.ValueKind == JsonValueKind.Object &&
+                value.TryGetProperty("WireHex", out JsonElement encoded))
+            {
+                byte[] payload = Convert.FromHexString(encoded.GetString()!);
+                added[id] = writer => writer.WriteBytes(payload);
+                continue;
+            }
+            if (value.ValueKind == JsonValueKind.Object &&
+                value.TryGetProperty("Remove", out JsonElement remove))
+            {
+                if (!remove.GetBoolean())
+                    throw new InvalidDataException($"Invalid removal for {name}.");
+                removed.Add(id);
+                continue;
+            }
             switch (name)
             {
                 case "minecraft:unbreakable":
@@ -31,8 +46,23 @@ internal static class ItemComponentWire
                     break;
                 case "minecraft:max_stack_size":
                 case "minecraft:repair_cost":
+                case "minecraft:max_damage":
+                case "minecraft:damage":
+                case "minecraft:enchantable":
+                case "minecraft:map_id":
                     int number = value.GetInt32();
                     added[id] = w => w.WriteVarInt(number);
+                    break;
+                case "minecraft:dyed_color":
+                    int color = value.GetInt32();
+                    added[id] = w => w.WriteInt32(color);
+                    break;
+                case "minecraft:creative_slot_lock":
+                case "minecraft:intangible_projectile":
+                case "minecraft:glider":
+                case "minecraft:waxed":
+                    if (value.GetBoolean()) added[id] = static _ => { };
+                    else removed.Add(id);
                     break;
                 case "minecraft:item_model":
                 case "minecraft:tooltip_style":
@@ -105,7 +135,8 @@ internal static class ItemComponentWire
                     break;
                 default:
                     throw new InvalidDataException(
-                        $"No 26.3 network serializer for configured component {name}.");
+                        $"No 26.3 network serializer for configured component {name}; " +
+                        "use WireHex or Remove in its YAML node.");
             }
         }
     }
