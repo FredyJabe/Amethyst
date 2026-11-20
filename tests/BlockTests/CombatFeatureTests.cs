@@ -36,6 +36,16 @@ internal static class CombatFeatureTests
             CombatProtocol.ServerboundAttack,
             parserWriter.ToArray())) == 42,
             "Protocol 777 attack payload accepts precisely one entity ID");
+        CombatProtocol.ReadPunch(new Packet(CombatProtocol.ServerboundPunch,
+            ReadOnlyMemory<byte>.Empty));
+        bool malformedPunch = false;
+        try
+        {
+            CombatProtocol.ReadPunch(new Packet(CombatProtocol.ServerboundPunch,
+                new byte[] { 1 }));
+        }
+        catch (InvalidDataException) { malformedPunch = true; }
+        Check(malformedPunch, "Protocol 777 punch packet requires an empty body");
 
         string root = Path.Combine(Path.GetTempPath(),
             "amethyst-combat-" + Guid.NewGuid().ToString("N"));
@@ -115,6 +125,28 @@ internal static class CombatFeatureTests
             Check(player2.Vitals.Snapshot().Health < 20 &&
                 player1.Inventory.Held().Damage == 1,
                 "A successful PvP attack reduces health and sword durability");
+
+            long observerBeforeSwing = stream2.Length;
+            long attackerBeforeSwing = stream1.Length;
+            await server.HandlePunchAsync(player1, CancellationToken.None);
+            Check(stream2.Length > observerBeforeSwing &&
+                stream1.Length == attackerBeforeSwing,
+                "Uncancelled punch broadcasts a swing to observers, not attacker");
+            using (var outbound = new MemoryStream(stream2.ToArray()
+                .AsSpan((int)observerBeforeSwing).ToArray()))
+            {
+                Packet? swing = await Protocol.ReadPacketAsync(
+                    outbound, CancellationToken.None);
+                var fields = swing?.Reader() ?? throw new Exception(
+                    "Missing swing animation frame");
+                Check(swing.Value.Id == CombatProtocol.ClientboundSwingAnimation &&
+                    fields.ReadVarInt() == player1.EntityId &&
+                    fields.ReadVarInt() == 0 && // main hand
+                    fields.ReadVarInt() == 1 && // whack
+                    fields.ReadVarInt() == 6 && // duration in ticks
+                    fields.Remaining == 0,
+                    "Swing animation packet matches Java 26.3 protocol 777");
+            }
             float previous = player2.Vitals.Snapshot().Health;
             await server.HandleAttackAsync(player1, player2.EntityId,
                 CancellationToken.None);
@@ -146,6 +178,17 @@ internal static class CombatFeatureTests
             Check(server.LivingEntitiesForTests.Single().Health == healthBeforeCancel &&
                 player1.Inventory.Held().Damage == 2,
                 "cancelEvent prevents vanilla attack damage and weapon wear");
+            long beforeCancelledPunch = stream2.Length;
+            await server.HandlePunchAsync(player1, CancellationToken.None);
+            Check(stream2.Length == beforeCancelledPunch,
+                "cancelEvent suppresses observer-side swing animation");
+            await server.HandlePunchAsync(player1, CancellationToken.None);
+            Check(stream2.Length > beforeCancelledPunch,
+                "Cancelled swing suppression is consumed only once");
+            player1.RecordAttackSwingCancellation(true);
+            player1.AdvanceClientTick();
+            Check(!player1.ConsumeAttackSwingCancellation(),
+                "A missing punch cannot suppress animation in the next tick");
         }
         finally
         {

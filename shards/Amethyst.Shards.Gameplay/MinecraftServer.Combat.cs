@@ -47,6 +47,7 @@ public sealed partial class MinecraftServer
             actor: attacker.PlayerUuid);
         // Every skill has executed. Only the underlying server-side attack
         // (damage, knockback and weapon wear) is now cancelled.
+        attacker.RecordAttackSwingCancellation(attackEffects.IsCancelled);
         if (attackEffects.IsCancelled) return;
         raw = (float)Math.Clamp(attackEffects.Number("damage", raw), 0, 1000);
         if (raw <= 0) return;
@@ -105,6 +106,27 @@ public sealed partial class MinecraftServer
         if (attacker.Inventory.DamageHeld(weapon.ItemId, 1))
             await InventoryProtocol.SendSlotAsync(attacker.Connection,
                 attacker.Inventory, attacker.Inventory.SelectedSlot, ct);
+    }
+
+    /// <summary>Broadcast the vanilla swing only when the preceding attack
+    /// did not cancel its gameplay event. A vanilla client animates its own
+    /// local arm before sending punch, so there is no packet to undo that.</summary>
+    internal async Task HandlePunchAsync(ConnectedPlayer player, CancellationToken ct)
+    {
+        if (!player.Ready || player.GameMode == PlayerGameMode.Spectator ||
+            player.Vitals.Snapshot().Health <= 0) return;
+        if (player.ConsumeAttackSwingCancellation()) return;
+        foreach (ConnectedPlayer viewer in _players.Snapshot()
+            .Where(p => p.Ready && p != player))
+        {
+            try
+            {
+                await CombatProtocol.SendSwingAsync(viewer.Connection,
+                    player.EntityId, ct);
+            }
+            catch (IOException) { /* Disconnected peer. */ }
+            catch (ObjectDisposedException) { }
+        }
     }
 
     /// <summary>Damage a player from a verified physical source. Armor

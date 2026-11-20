@@ -763,8 +763,17 @@ Currently connected cancellation handlers prevent:
 (including instant and Creative mining); `~onBlockDrop` item drops;
 and `~onProjectileLaunch` projectile creation and ammunition use.
 Other events must honor `Runtime.IsCancelled` when implemented.
-The client-rendered swing animation itself cannot be undone by
-server-side cancellation.
+The **attacker's first-person swing is client-predicted** in vanilla
+26.3, before the attack or punch packet reaches Amethyst. The server
+cannot undo or conditionally suppress it via vanilla packets; fully
+blocking that local animation requires a compatible client mod.
+However, Amethyst now handles serverbound `punch` (0x2E), and sends
+clientbound `swing_animation` (0x7B) to nearby observers on allowed
+swings. If the preceding `~onAttack` is cancelled, the subsequent
+swing is withheld from observers. The punch correlation lasts one
+client tick to avoid accidentally suppressing later unrelated swings.
+The default remote animation is a six-tick main-hand whack; item-
+specific `attack_animation` variants are not yet used for this relay.
 
 As with all server-authored enchantments, client-provided item NBT
 cannot substitute for inventory authority. Vanilla item components

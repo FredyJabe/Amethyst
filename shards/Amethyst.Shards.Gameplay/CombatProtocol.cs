@@ -5,6 +5,10 @@ namespace Amethyst;
 public static class CombatProtocol
 {
     public const int ServerboundAttack = 0x01;
+    // Java 26.3: the client sends an empty punch packet after its attack
+    // packet. Only other viewers receive clientbound swing animations.
+    public const int ServerboundPunch = 0x2E;
+    public const int ClientboundSwingAnimation = 0x7B;
     public const int ClientboundHealth = 0x6A;
     public const int ClientboundDamageEvent = 0x19;
     public const int ClientboundHurtAnimation = 0x2B;
@@ -20,6 +24,22 @@ public static class CombatProtocol
         if (entityId < 0) throw new InvalidDataException("Invalid attack entity.");
         return entityId;
     }
+
+    /// <summary>Validate the bodyless Java 26.3 punch packet.</summary>
+    public static void ReadPunch(Packet packet) => packet.Reader().RequireEnd();
+
+    /// <summary>Send a normal main-hand whack to a remote observer.
+    /// Java 26.3 uses entity VarInt, hand VarInt, animation type VarInt
+    /// (1=whack), and duration VarInt (6 ticks by default).</summary>
+    public static Task SendSwingAsync(PacketChannel observer, int entityId,
+        CancellationToken ct) =>
+        observer.SendAsync(ClientboundSwingAnimation, p =>
+        {
+            p.WriteVarInt(entityId);
+            p.WriteVarInt(0); // main hand
+            p.WriteVarInt(1); // whack
+            p.WriteVarInt(6); // six ticks
+        }, ct);
 
     public static Task SendHealthAsync(ConnectedPlayer target, CancellationToken ct)
     {

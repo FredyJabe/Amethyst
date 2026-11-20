@@ -272,6 +272,12 @@ public sealed partial class MinecraftServer
                         await HandleAttackAsync(player, entityId, lifetime.Token);
                         break;
                     }
+                    case CombatProtocol.ServerboundPunch:
+                    {
+                        CombatProtocol.ReadPunch(packet.Value);
+                        await HandlePunchAsync(player, lifetime.Token);
+                        break;
+                    }
                     case EntityInteractionProtocol.ServerboundInteract:
                     {
                         EntityInteraction interaction =

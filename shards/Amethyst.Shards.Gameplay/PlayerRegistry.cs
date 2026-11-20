@@ -46,6 +46,18 @@ public sealed class ConnectedPlayer : IShardPlayer
     // Count these in stream order so stalled packet processing does not make
     // an entire real dig look like START and STOP in the same millisecond.
     private long _clientTicks;
+    // Attack packet precedes the punch packet in the same client tick.
+    // Keep cancellation for only that tick, so a lost punch cannot suppress
+    // an unrelated later swing. The receive loop consumes this once.
+    private long _cancelledPunchTick = -1;
+    public void RecordAttackSwingCancellation(bool cancelled) =>
+        _cancelledPunchTick = cancelled ? _clientTicks : -1;
+    public bool ConsumeAttackSwingCancellation()
+    {
+        bool cancelled = _cancelledPunchTick == _clientTicks;
+        _cancelledPunchTick = -1;
+        return cancelled;
+    }
     public void AdvanceClientTick() => _clientTicks++;
     private (int X, int Y, int Z, ushort State, int HeldItem, long Started,
         int RequiredMs, long ClientTicksAtStart)? _mining;
