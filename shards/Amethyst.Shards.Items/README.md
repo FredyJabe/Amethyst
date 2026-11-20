@@ -646,3 +646,34 @@ dotnet build Amethyst.slnx -c Release
 dotnet run --project tests/ShardTests/ShardTests.csproj -c Release --no-build
 dotnet run --project tests/BlockTests/BlockTests.csproj -c Release --no-build
 ```
+
+
+## Skill-based enchantments (Java 26.3)
+
+The Items Shard registers all **43 vanilla enchantments** from
+`enchantments-26.3.yml` as source-validated registry entries and exposes
+`IShardEnchantmentRegistry`. Administrators override individual keys in
+`shards/data/items/enchantments/*.yml` (or the installed Items shard's data directory).
+An override replaces only the keys it supplies; `Skills` replaces the complete
+skill list. The server rejects unknown vanilla IDs, duplicate overrides,
+invalid max levels, unregistered mechanics, unknown conditions and triggers.
+
+Each `Skills` entry has Mythic-style syntax:
+
+```yaml
+sharpness:
+  MaxLevel: 6
+  Skills:
+    - "modify{stat=damage;base=0.5;perLevel=0.75} @target ~onAttack ?level{min=1}"
+```
+
+Core owns the skill parser, registration, `~triggers` and `?conditions`;
+Items contributes `modify`, `setFlag` and `effect` mechanics and
+`level`, `target`, `damageType`, `flag` and `chance` conditions.
+Mechanics modify an event-local `ShardSkillRuntime`; gameplay Shards
+must explicitly publish events and consume the resulting numeric changes
+and effect intents. An entry present in YAML **does not automatically make
+all vanilla effects functional**: hook and effect-sink support is required.
+
+This deliberately retains the **45 selected** source-fixed item-component
+node aliases; unassigned nodes are still pending and are never auto-named.

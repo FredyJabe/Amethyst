@@ -549,6 +549,32 @@ public sealed class ItemsShard : IShard
             Path.Combine(directory, "recipes-26.3.yml"), recipeDirectory);
         ctx.RegisterService<IShardItemRegistry>(catalog);
         ctx.RegisterService<IShardRecipeRegistry>(recipes);
+        string enchantmentDirectory = Path.Combine(ctx.DataDirectory, "enchantments");
+        Directory.CreateDirectory(enchantmentDirectory);
+        string exampleEnchantment = Path.Combine(enchantmentDirectory, "example-enchantments.yml");
+        if (!File.Exists(exampleEnchantment))
+            File.WriteAllText(exampleEnchantment, """
+                # Copy an enchantment key from the bundled enchantments-26.3.yml.
+                # Only fields provided here replace bundled values.
+                # sharpness:
+                #   MaxLevel: 6
+                #   Skills:
+                #     - "modify{stat=damage;base=0.5;perLevel=0.75} @target ~onAttack ?level{min=1}"
+                """ + Environment.NewLine);
+        var enchantments = new EnchantmentCatalog(
+            Path.Combine(directory, "enchantments-26.3.yml"), enchantmentDirectory);
+        EnchantmentSkills.Register(ctx);
+        ctx.RegisterSkillInstructions(enchantments.Instructions);
+        ctx.RegisterService<IShardEnchantmentRegistry>(enchantments);
+        ctx.RegisterConsoleCommand("enchantments", (args, token) =>
+        {
+            string filter = args.Trim();
+            var found = enchantments.All.Where(e => filter.Length == 0 ||
+                e.Identifier.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                .Take(43).Select(e => $"{e.Identifier} (I..{e.MaxLevel})");
+            ctx.Log($"Enchantments ({enchantments.Count}): " + string.Join(", ", found));
+            return Task.CompletedTask;
+        });
         ctx.RegisterConsoleCommand("iteminfo", (args, token) =>
         {
             string query = args.Trim();
@@ -610,7 +636,8 @@ public sealed class ItemsShard : IShard
             $"item definitions and {recipes.RecipeCount} YAML recipes; " +
             $"item overrides: {definitions}; fixed component nodes: " +
             $"{componentNodes.Nodes.Count} assigned, {componentNodes.PendingCount} pending; " +
-            $"recipe overrides: {recipeDirectory}.");
+            $"recipe overrides: {recipeDirectory}; " +
+            $"enchantments: {enchantments.Count} (overrides: {enchantmentDirectory}).");
         return Task.CompletedTask;
     }
 
