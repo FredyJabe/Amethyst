@@ -218,10 +218,9 @@ public sealed class ItemCatalog : IShardItemRegistry
             Shorthand("minecraft:enchantment_glint_override", glint);
         if (fields.Unbreakable is bool unbreakable)
             Shorthand("minecraft:unbreakable", unbreakable);
-        if (fields.CustomModelData is int customModel)
+        if (fields.CustomModelData is int customModel &&
+            fields.Components?.ContainsKey("minecraft:custom_model_data") != true)
         {
-            if (fields.Components?.ContainsKey("minecraft:custom_model_data") == true)
-                throw new InvalidDataException("CustomModelData was specified twice.");
             patch["minecraft:custom_model_data"] =
                 ItemComponentConfig.Encode("minecraft:custom_model_data",
                     new YamlScalarNode(customModel.ToString(CultureInfo.InvariantCulture)),
@@ -384,9 +383,16 @@ public sealed class ItemCatalog : IShardItemRegistry
                         }
                         break;
                     case "custommodeldata":
-                        fields.CustomModelData = Integer(field.Value, path, key);
-                        if (fields.CustomModelData < 0)
-                            throw new InvalidDataException($"Negative CustomModelData in {key} ({path}).");
+                        // The approved fixed node supports both the legacy
+                        // integer shorthand and modern structured model data.
+                        if (field.Value is YamlScalarNode)
+                        {
+                            fields.CustomModelData = Integer(field.Value, path, key);
+                            if (fields.CustomModelData < 0)
+                                throw new InvalidDataException(
+                                    $"Negative CustomModelData in {key} ({path}).");
+                        }
+                        AddComponent(fieldName, field.Value);
                         break;
                     case "hidden": fields.Hidden = Boolean(field.Value, path, key); break;
                     case "lore":
@@ -492,9 +498,9 @@ public sealed class ItemsShard : IShard
                 #   Display: "<aqua>Miner's Pickaxe</aqua>"
                 #   ItemModel: amethyst:miners_pickaxe
                 #   Components:
-                #     minecraft:rarity: rare
-                #     minecraft:enchantment_glint_override: true
-                #     minecraft:custom_model_data:
+                #     Rarity: rare
+                #     GlintOverride: true
+                #     CustomModelData:
                 #       floats: [3.0]
                 #       flags: []
                 #       strings: [amethyst:miners_pickaxe]
@@ -511,9 +517,9 @@ public sealed class ItemsShard : IShard
                 #   Lore:
                 #     - "An alias of the vanilla pickaxe; NOT a new protocol item."
                 """ + Environment.NewLine);
-        string componentNodesPath = Path.Combine(ctx.DataDirectory, "component-nodes.yml");
-        ItemComponentNodeMap.WriteTemplateIfMissing(componentNodesPath);
-        var componentNodes = new ItemComponentNodeMap(componentNodesPath);
+        // Component YAML node assignments are fixed by Amethyst source code.
+        // No component-nodes.yml is generated, read or monitored.
+        var componentNodes = new ItemComponentNodeMap();
         var catalog = new ItemCatalog(Path.Combine(directory, "items-26.3.yml"),
             definitions, componentNodes);
         string recipeDirectory = Path.Combine(ctx.DataDirectory, "recipes");
@@ -572,18 +578,20 @@ public sealed class ItemsShard : IShard
             for (int i = 0; i < ShardItemComponentIds.Count; i++)
             {
                 string component = ShardItemComponentIds.All[i];
-                string node = componentNodes.Nodes[component];
+                string? node = componentNodes.Nodes.TryGetValue(component, out string? assigned)
+                    ? assigned : null;
                 if (filter.Length > 0 &&
                     !component.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
-                    !node.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
+                    !(node?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false) &&
                     filter != i.ToString(CultureInfo.InvariantCulture))
                     continue;
-                ctx.Log($"[{i,3}] {component} => {node}");
+                ctx.Log($"[{i,3}] {component} => {node ?? "(unassigned)"}");
                 count++;
             }
             ctx.Log($"Component YAML nodes: {count} matching of " +
-                $"{ShardItemComponentIds.Count} registered in Java {catalog.MinecraftVersion}. " +
-                $"Edit: {componentNodesPath}");
+                $"{ShardItemComponentIds.Count} registered in Java {catalog.MinecraftVersion}; " +
+                $"{componentNodes.Nodes.Count} fixed assignments, " +
+                $"{componentNodes.PendingCount} pending (no user-configurable mapping file).");
             return Task.CompletedTask;
         });
         ctx.RegisterConsoleCommand("recipes", (args, token) =>
@@ -600,7 +608,8 @@ public sealed class ItemsShard : IShard
         });
         ctx.Log($"Registered {catalog.Count} vanilla Java {catalog.MinecraftVersion} " +
             $"item definitions and {recipes.RecipeCount} YAML recipes; " +
-            $"item overrides: {definitions}; component nodes: {componentNodesPath}; " +
+            $"item overrides: {definitions}; fixed component nodes: " +
+            $"{componentNodes.Nodes.Count} assigned, {componentNodes.PendingCount} pending; " +
             $"recipe overrides: {recipeDirectory}.");
         return Task.CompletedTask;
     }
