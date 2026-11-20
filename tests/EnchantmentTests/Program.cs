@@ -250,7 +250,6 @@ try
         "Cancellation preserves later skills from multiple skill packs");
 
     var attackRuntime = new ShardSkillRuntime();
-    cancellationEngine.RegisterTrigger("attack-test", "onAttack");
     cancellationEngine.RegisterInstructions("attack-cancel", [
         SkillEngine.Parse("test_attack", "cancelEvent @self ~onAttack"),
         SkillEngine.Parse("test_attack", "setFlag{name=attack_after} @self ~onAttack")
