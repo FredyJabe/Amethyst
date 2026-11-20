@@ -184,6 +184,19 @@ public sealed class GroundItemStore
         }
     }
 
+    /// <summary>Discard an uncommitted drop when its source inventory
+    /// transaction is rejected. Never turn a failed drop into free items.</summary>
+    public bool TryDiscard(int entityId)
+    {
+        lock (_gate)
+        {
+            if (!_entities.Remove(entityId, out GroundItem entity)) return false;
+            try { Persist(); }
+            catch { _entities[entityId] = entity; throw; }
+            return true;
+        }
+    }
+
     public void Save()
     {
         lock (_gate) Persist();

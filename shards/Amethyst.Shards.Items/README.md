@@ -686,9 +686,14 @@ and enchantment Skills are registered into the same Items Shard pack.
 Configured `~onRightClick` skills run on use-item and use-on-block,
 and `~onLeftClick` runs before server-authoritative attacks and mines.
 The publisher checks cancellation before committing vanilla actions.
-Other registered triggers (`onDrop`, `onStackDrop`, `onSwap`,
-`onPickup`, `onEquip`, `onUnequip`) still require their corresponding
-Gameplay event publishers; declaring them alone does not activate them.
+Gameplay also publishes `~onDrop`, `~onStackDrop` (Q vs Ctrl-Q), and
+`~onPickup`: cancellation of these events prevents respectively the
+ground drop or inventory pickup, while subsequent Skills still execute.
+Dropping stages the physical ground entity and rolls it back if the
+inventory transaction cannot consume the exact held stack. Remaining
+registered triggers (`onSwap`, `onEquip`, `onUnequip`) still require
+their corresponding Gameplay publishers; declarations alone do not
+activate them.
 Custom aliases have registered definitions, but physical stacks still
 need separate alias identity before their per-alias skills can fire.
 

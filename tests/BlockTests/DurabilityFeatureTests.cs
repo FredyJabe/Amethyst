@@ -242,6 +242,19 @@ internal static class DurabilityFeatureTests
                     s.Count == 2 && s.ComponentData == otherStone.ComponentData),
                 "Component-carrying stackable items survive inventory reload");
 
+            ItemStack beforeDrop = stackInventory.Held();
+            Check(beforeDrop.Count == 4 &&
+                stackInventory.TryDropHeld(beforeDrop, 1) &&
+                stackInventory.Held().Count == 3 &&
+                stackInventory.Held().ComponentData == namedStone.ComponentData &&
+                !stackInventory.TryDropHeld(beforeDrop, 1),
+                "Authoritative held-item drops preserve components and reject stale stacks");
+            Check(ground.TrySpawn(namedStone with { Count = 1 }, 6.5, 81.5, 6.5,
+                    out GroundItem abortable, now) &&
+                ground.TryDiscard(abortable.EntityId) &&
+                !ground.Snapshot().Any(d => d.EntityId == abortable.EntityId),
+                "Failed item-drop inventory transactions can discard the staged entity");
+
             var wireWriter = new PacketWriter();
             InventoryProtocol.WriteStack(wireWriter, namedStone, items);
             var stackWire = new PacketReader(wireWriter.ToArray());

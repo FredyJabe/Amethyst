@@ -536,9 +536,39 @@ public sealed partial class MinecraftServer
         if (action.Status is BlockInteractionProtocol.DropAllItems
             or BlockInteractionProtocol.DropItem)
         {
-            // Drop actions have no item entities yet. Resynchronize instead of
-            // letting the client invent a dropped item or lose inventory.
-            await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+            if (!player.Ready || player.GameMode == PlayerGameMode.Spectator ||
+                _groundItems is null)
+            {
+                await InventoryProtocol.SendContentAsync(player.Connection,
+                    player.Inventory, ct);
+                return;
+            }
+            ItemStack held = player.Inventory.Held();
+            if (held.Count <= 0) return;
+            bool stackDrop = action.Status == BlockInteractionProtocol.DropAllItems;
+            var evt = await EnchantmentEventAsync(held,
+                stackDrop ? "onStackDrop" : "onDrop", ct, actor: player.PlayerUuid);
+            if (!evt.IsCancelled)
+            {
+                int amount = stackDrop ? held.Count : 1;
+                PlayerPose pose = player.Pose;
+                var item = held with { Count = amount };
+                if (_groundItems.TrySpawn(item, pose.X, pose.Y + 1.1,
+                    pose.Z, out GroundItem created))
+                {
+                    bool consumed;
+                    try { consumed = player.Inventory.TryDropHeld(held, amount); }
+                    catch
+                    {
+                        _groundItems.TryDiscard(created.EntityId);
+                        throw;
+                    }
+                    if (!consumed) _groundItems.TryDiscard(created.EntityId);
+                }
+            }
+            // Correct predicted inventory regardless of accepted/cancelled drop.
+            await InventoryProtocol.SendContentAsync(player.Connection,
+                player.Inventory, ct);
             return;
         }
         // RELEASE_USE_ITEM, SWAP_ITEM_WITH_OFFHAND, STAB need separate
@@ -937,9 +967,9 @@ public sealed partial class MinecraftServer
         // Do not open menus, place blocks, or consume materials if cancelled.
         if (hit.ValidHit && player.Ready)
         {
-            ItemStack held = hit.Hand == 0 ? player.Inventory.Held() :
+            ItemStack rightClickStack = hit.Hand == 0 ? player.Inventory.Held() :
                 player.Inventory.Snapshot().Slots[45];
-            var evt = await EnchantmentEventAsync(held, "onRightClick", ct,
+            var evt = await EnchantmentEventAsync(rightClickStack, "onRightClick", ct,
                 actor: player.PlayerUuid);
             if (evt.IsCancelled)
             {
@@ -1178,6 +1208,9 @@ public sealed partial class MinecraftServer
                     Math.Abs(item.Y - (pose.Y + 0.35)) > 1.6) continue;
                 if (!_itemViews.TryGetValue(collector.ConnectionId, out var collectorView) ||
                     !collectorView.ContainsKey(item.EntityId)) continue;
+                var pickupEvent = await EnchantmentEventAsync(item.ResolvedStack,
+                    "onPickup", ct, actor: collector.PlayerUuid);
+                if (pickupEvent.IsCancelled) continue;
                 int count = _groundItems.TryCollect(item.EntityId, collector.Inventory,
                     out GroundItem remaining);
                 if (count == 0) continue;

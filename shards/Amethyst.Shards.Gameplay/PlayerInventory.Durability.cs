@@ -125,6 +125,26 @@ public sealed partial class PlayerInventory
         }
     }
 
+    /// <summary>Consume the exact authoritative held stack after a validated
+    /// ground drop has been created. Revision and persistence are transaction-
+    /// protected, and a mismatch never removes a different item.</summary>
+    public bool TryDropHeld(ItemStack expected, int count)
+    {
+        if (expected.Count <= 0 || count is < 1 || count > expected.Count)
+            return false;
+        lock (_sync)
+        {
+            int slot = SelectedSlot;
+            ItemStack current = _slots[slot];
+            if (current != expected) return false;
+            _slots[slot] = current.Count == count ? ItemStack.Empty :
+                current with { Count = current.Count - count };
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = current; throw; }
+            return true;
+        }
+    }
+
     /// <summary>Consume ammunition from the hotbar/main inventory. The
     /// transaction either consumes the full amount or leaves all slots
     /// untouched. Supports arrows for bows and crossbows.</summary>
