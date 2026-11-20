@@ -654,26 +654,67 @@ The Items Shard registers all **43 vanilla enchantments** from
 `enchantments-26.3.yml` as source-validated registry entries and exposes
 `IShardEnchantmentRegistry`. Administrators override individual keys in
 `shards/data/items/enchantments/*.yml` (or the installed Items shard's data directory).
-An override replaces only the keys it supplies; `Skills` replaces the complete
-skill list. The server rejects unknown vanilla IDs, duplicate overrides,
-invalid max levels, unregistered mechanics, unknown conditions and triggers.
+An override replaces only the keys it supplies. `Stats` replaces
+the complete stat-modifier list for that enchantment; `Skills` replaces
+the skill list independently. The server rejects unknown vanilla IDs,
+duplicate overrides, invalid max levels, unknown conditions and mechanics.
 
-Each `Skills` entry has Mythic-style syntax:
+### Stats (items and enchantments)
+
+Use top-level `Stats` to declare **numeric modifications**; `modify`
+is no longer a skill mechanic. This format is identical in
+`shards/data/items/definitions/*.yml` and
+`shards/data/items/enchantments/*.yml`:
 
 ```yaml
-sharpness:
-  MaxLevel: 6
+# In an item definition
+diamond_sword:
+  Stats:
+    damage:
+      Trigger: onAttack
+      Base: 3
+      Operation: add
+    knockback: 0.25 # Shorthand: constant additive bonus on all relevant events
+
+# In an enchantment override (independent of the item)
+smite:
+  Stats:
+    damage:
+      Trigger: onAttack
+      PerLevel: 2.5
+      Conditions:
+        - "target{type=undead}"
+
+# Enchantments can keep Skills for actions, not numeric modifiers
+fire_aspect:
   Skills:
-    - "modify{stat=damage;base=0.5;perLevel=0.75} @target ~onAttack ?level{min=1}"
+    - "effect{id=fire;duration=4;perLevel=4} @target ~onAttack"
 ```
 
-Core owns the skill parser, registration, `~triggers` and `?conditions`;
-Items contributes `modify`, `setFlag` and `effect` mechanics and
-`level`, `target`, `damageType`, `flag` and `chance` conditions.
-Mechanics modify an event-local `ShardSkillRuntime`; gameplay Shards
-must explicitly publish events and consume the resulting numeric changes
-and effect intents. An entry present in YAML **does not automatically make
-all vanilla effects functional**: hook and effect-sink support is required.
+Each Stats key is a server-side numeric name (e.g. `damage`,
+`mining_speed`, `knockback`, `projectile_damage`).
+The value is a number, a mapping with `Base`, `PerLevel`,
+`Operation` (`add`, `multiply`, `set`), `Trigger`, and
+`Conditions`, or a list of such modifier mappings. `PerLevel`
+scales with the active enchantment level; item modifiers use level 1.
+Unspecified `Operation` defaults to `add`; an absent `Trigger`
+applies on any event. `Conditions` accepts the same named
+`?conditions` as Skills (with or without a leading `?`) and
+requires all listed conditions to pass. Stats modifiers are evaluated
+in YAML order, before enchantment modifiers; Skills can set flags
+before the enchantment's Stats are evaluated.
+
+Core owns the skill parser, registration, `~triggers` and `?conditions`.
+Items provides `setFlag` and `effect` mechanics and the
+`level`, `target`, `damageType`, `flag`, and `chance`
+conditions. Gameplay Shards must publish events and consume the resulting
+numeric values and effect intents; **declaring a stat does not automatically
+implement an unsupported gameplay event**.
+
+Stats are server-side behavior, **not Minecraft item components**, and
+do not change Java protocol component node assignments. As with
+other item aliases, custom alias Stats currently have no separate
+stack identity, so Gameplay applies physical vanilla-item Stats.
 
 This deliberately retains the **45 selected** source-fixed item-component
 node aliases; unassigned nodes are still pending and are never auto-named.

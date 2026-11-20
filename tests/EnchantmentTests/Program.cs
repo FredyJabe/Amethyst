@@ -15,11 +15,15 @@ if (root is null) throw new InvalidOperationException("No solution root.");
 string path = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items");
 var catalog = new EnchantmentCatalog(Path.Combine(path, "enchantments-26.3.yml"));
 var items = new ItemCatalog(Path.Combine(path, "items-26.3.yml"));
-Check(catalog.Count == 43 && catalog.All.All(x => x.Skills.Count > 0),
-    "All 43 Java 26.3 enchantments have skill definitions");
+Check(catalog.Count == 43 && catalog.All.All(x =>
+    x.Skills.Count > 0 || x.Stats.Count > 0),
+    "All 43 Java 26.3 enchantments have Stats or Skills definitions");
+Check(catalog.All.SelectMany(x => x.Skills).All(x => x.Mechanic != "modify"),
+    "No vanilla enchantment uses the removed modify mechanic");
 Check(catalog.TryGet("sharpness", out var sharpness) &&
-    sharpness.MaxLevel == 5 && sharpness.Skills[0].Trigger == "onAttack",
-    "Vanilla metadata and trigger loaded");
+    sharpness.MaxLevel == 5 && sharpness.Stats.Count == 1 &&
+    sharpness.Stats[0].Trigger == "onAttack",
+    "Vanilla enchantment metadata and Stats trigger loaded");
 Check(catalog.ConflictsWith("sharpness", "smite") &&
     !catalog.ConflictsWith("sharpness", "unbreaking"),
     "Mutual exclusion and independent effects");
@@ -36,30 +40,84 @@ try
     File.WriteAllText(Path.Combine(temporary, "override.yml"), """
         sharpness:
           MaxLevel: 6
-          Skills:
-            - "modify{stat=damage;base=0.5;perLevel=0.75} @target ~onAttack ?level{min=2}"
+          Stats:
+            damage:
+              Trigger: onAttack
+              Base: 0.5
+              PerLevel: 0.75
+              Conditions: ["level{min=2}"]
         """);
     var overridden = new EnchantmentCatalog(
         Path.Combine(path, "enchantments-26.3.yml"), temporary);
     Check(overridden.TryGet("sharpness", out var modified) &&
-        modified.MaxLevel == 6 && modified.Skills[0].Conditions.Count == 1 &&
-        modified.Weight == sharpness.Weight, "Partial YAML override and conditions");
+        modified.MaxLevel == 6 && modified.Stats[0].Conditions.Count == 1 &&
+        modified.Weight == sharpness.Weight, "Partial YAML Stats override and conditions");
     var engine = new SkillEngine();
     var context = new TestSkillContext(engine);
     EnchantmentSkills.Register(context);
     engine.RegisterInstructions("items", overridden.Instructions);
+    engine.ValidateConditions(modified.Stats[0].Conditions);
     var values = new ShardSkillRuntime();
     values.SetNumber("damage", 4);
-    bool dispatched = await engine.DispatchAsync(new ShardSkillEvent(
-        "minecraft:sharpness", "onAttack", EnchantmentLevel:3) { Runtime = values });
-    Check(dispatched && Math.Abs(values.Number("damage") - 6.75) < 0.001,
-        "Core dispatches Items mechanic with configured level condition");
+    var levelThree = new ShardSkillEvent("minecraft:sharpness", "onAttack",
+        EnchantmentLevel:3) { Runtime = values };
+    foreach (var stat in modified.Stats) stat.Apply(levelThree, engine);
+    Check(Math.Abs(values.Number("damage") - 6.75) < 0.001,
+        "Stats apply Base and PerLevel using registered Core conditions");
     var disabled = new ShardSkillRuntime();
     disabled.SetNumber("damage", 4);
-    await engine.DispatchAsync(new ShardSkillEvent(
-        "minecraft:sharpness", "onAttack", EnchantmentLevel:1) { Runtime = disabled });
-    Check(disabled.Number("damage") == 4,
-        "Skill condition suppresses effects outside level range");
+    var levelOne = new ShardSkillEvent("minecraft:sharpness", "onAttack",
+        EnchantmentLevel:1) { Runtime = disabled };
+    foreach (var stat in modified.Stats) stat.Apply(levelOne, engine);
+    Check(disabled.Number("damage") == 4, "Stats condition suppresses low levels");
+    var wrongEvent = new ShardSkillRuntime();
+    wrongEvent.SetNumber("damage", 4);
+    var eventMismatch = new ShardSkillEvent("minecraft:sharpness", "onMine",
+        EnchantmentLevel:3) { Runtime = wrongEvent };
+    foreach (var stat in modified.Stats) stat.Apply(eventMismatch, engine);
+    Check(wrongEvent.Number("damage") == 4, "Stats trigger filter prevents wrong-event bonuses");
+
+    var itemOverrides = Path.Combine(temporary, "item-overrides");
+    Directory.CreateDirectory(itemOverrides);
+    File.WriteAllText(Path.Combine(itemOverrides, "sword.yml"), """
+        diamond_sword:
+          Stats:
+            damage:
+              Trigger: onAttack
+              Base: 3
+            knockback:
+              - Trigger: onAttack
+                Base: 0.5
+              - Trigger: onAttack
+                Operation: multiply
+                Base: 2
+        """);
+    var statItems = new ItemCatalog(Path.Combine(path, "items-26.3.yml"), itemOverrides);
+    Check(statItems.TryGetByIdentifier("diamond_sword", out var boosted) &&
+        boosted.Stats?.Count == 3 && boosted.Components?.Count == sword.Components?.Count,
+        "Items accept independent Stats without altering item components");
+    var itemRuntime = new ShardSkillRuntime();
+    itemRuntime.SetNumber("damage", 7);
+    itemRuntime.SetNumber("knockback", 0.4);
+    var itemEvent = new ShardSkillEvent(boosted.Identifier, "onAttack",
+        EnchantmentLevel:1) { Runtime = itemRuntime };
+    foreach (var stat in boosted.Stats ?? []) stat.Apply(itemEvent, engine);
+    Check(Math.Abs(itemRuntime.Number("damage") - 10) < 0.001 &&
+        Math.Abs(itemRuntime.Number("knockback") - 1.8) < 0.001,
+        "Multiple item modifiers compose add and multiply in order");
+    var smite = catalog.All.Single(x => x.Identifier == "minecraft:smite").Stats[0];
+    engine.ValidateConditions(smite.Conditions);
+    var undead = new ShardSkillRuntime();
+    undead.SetNumber("damage", 5);
+    smite.Apply(new ShardSkillEvent("minecraft:smite", "onAttack",
+        EnchantmentLevel:2, TargetKind:"undead") { Runtime = undead }, engine);
+    Check(Math.Abs(undead.Number("damage") - 10) < 0.001,
+        "Stats conditions still distinguish undead targets");
+    var living = new ShardSkillRuntime();
+    living.SetNumber("damage", 5);
+    smite.Apply(new ShardSkillEvent("minecraft:smite", "onAttack",
+        EnchantmentLevel:2, TargetKind:"other") { Runtime = living }, engine);
+    Check(living.Number("damage") == 5, "Stats conditions reject mismatched targets");
     var inventory = new PlayerInventory(temporary, Guid.NewGuid(), items);
     Check(inventory.TryCreativeSet(36, sword.ProtocolId, 1, true) &&
         inventory.EnchantHeld("sharpness", 5, catalog) &&
