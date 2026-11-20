@@ -30,14 +30,6 @@ public interface IShardContext
         ShardSkillConditionEvaluator evaluator);
     void RegisterSkillDefinitions(string builtInFile, string? overridesDirectory = null);
     void RegisterSkillInstructions(IEnumerable<ShardSkillInstruction> instructions);
-    /// <summary>Register a new skill trigger understood by Amethyst Core.</summary>
-    void RegisterSkillTrigger(string trigger);
-    /// <summary>Contribute a mechanic, validator and executor to the global skill engine.</summary>
-    void RegisterSkillMechanic(string name, ShardSkillValidator validator,
-        ShardSkillExecutor executor);
-    /// <summary>Load a Shard's bundled skills plus its administrator overrides.
-    /// A root key is an object ID containing a Skills list.</summary>
-    void RegisterSkillDefinitions(string builtInFile, string? overridesDirectory = null);
 }
 
 /// <summary>Safe view of an authenticated Play-state session for Shards.</summary>
