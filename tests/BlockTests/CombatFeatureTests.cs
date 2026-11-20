@@ -103,7 +103,11 @@ internal static class CombatFeatureTests
                 "shards", "Amethyst.Shards.Items", "loot-26.3.yml"));
             skills.RegisterInstructions("combat-tests", loot.Instructions.Concat([
                 SkillEngine.Parse("minecraft:sharpness",
-                    "cancelEvent @self ~onAttack")
+                    "cancelEvent @self ~onAttack"),
+                SkillEngine.Parse("minecraft:diamond_sword",
+                    "cancelEvent @self ~onBlockDrop"),
+                SkillEngine.Parse("minecraft:diamond_sword",
+                    "dropItem{item=minecraft:diamond;amount=2} @self ~onBlockDrop")
             ]));
             var server = new MinecraftServer(settings, world,
                 null!, world, items: items, recipes: recipes,
@@ -208,6 +212,21 @@ internal static class CombatFeatureTests
                 server.GroundItemsForTests.Any(x => x.ItemId == mutton.ProtocolId) &&
                 server.GroundItemsForTests.Any(x => x.ItemId == wool.ProtocolId),
                 "Killing a sheep commits the YAML-defined meat and wool skill drops");
+            Check(items.TryGetByIdentifier("minecraft:diamond", out var rewardDiamond) &&
+                world.TrySetBlockState(0, 81, 1, 10, out _),
+                "Prepare a Survival dirt block for onBlockDrop custom skills");
+            await server.HandleBlockActionAsync(player1,
+                new PlayerBlockAction(BlockInteractionProtocol.StartDestroyBlock,
+                    0, 81, 1, 1, 101), CancellationToken.None);
+            await Task.Delay(950);
+            await server.HandleBlockActionAsync(player1,
+                new PlayerBlockAction(BlockInteractionProtocol.StopDestroyBlock,
+                    0, 81, 1, 1, 102), CancellationToken.None);
+            Check(world.GetBlockState(0, 81, 1) == 0 &&
+                server.GroundItemsForTests.Any(x =>
+                    x.ItemId == rewardDiamond.ProtocolId && x.Count == 2) &&
+                !server.GroundItemsForTests.Any(x => x.ItemId == 55),
+                "onBlockDrop cancelEvent suppresses the dirt drop but commits later dropItem skills");
         }
         finally
         {

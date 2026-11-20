@@ -406,8 +406,10 @@ try
     var emptyLoot = new LootCatalog(Path.Combine(path, "loot-26.3.yml"),
         lootOverrides);
     Check(emptyLoot.HasDefinition("minecraft:sheep") &&
-        emptyLoot.Instructions.Count == 0,
-        "Loot Skills: [] removes vanilla drops without re-enabling fallback");
+        emptyLoot.HasDefinition("minecraft:fishing") &&
+        emptyLoot.Instructions.Count == 6 &&
+        emptyLoot.Instructions.All(skill => skill.OwnerId == "minecraft:fishing"),
+        "Loot Skills: [] disables only that entity's drops, keeping other packs");
     File.WriteAllText(Path.Combine(lootOverrides, "sheep.yml"), """
         minecraft:sheep:
           Skills:
