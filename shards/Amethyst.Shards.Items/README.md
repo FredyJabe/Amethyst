@@ -716,5 +716,45 @@ do not change Java protocol component node assignments. As with
 other item aliases, custom alias Stats currently have no separate
 stack identity, so Gameplay applies physical vanilla-item Stats.
 
+### Unbreaking driven by Skills
+
+The bundled Unbreaking definition has two `~onItemDamage` skill rules:
+
+```yaml
+unbreaking:
+  Id: minecraft:unbreaking
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [breakable]
+  Skills:
+    - "setFlag{name=prevent_item_damage} @self ~onItemDamage ?flag{name=non_armor} ?chance{mode=level_ratio}"
+    - "setFlag{name=prevent_item_damage} @self ~onItemDamage ?flag{name=armor} ?chance{mode=level_ratio;factor=0.4}"
+```
+
+Every attempted durability point dispatches `~onItemDamage` through
+Core's shared skill engine. `prevent_item_damage` prevents that
+individual point of wear, including when it would have broken the item.
+`?chance{mode=level_ratio}` calculates level / (level + 1);
+`factor=0.4` gives armor its vanilla reduced protection chance.
+`?flag{name=armor}` and `?flag{name=non_armor}` are event context
+provided by the durability publisher. For other skills,
+`?chance{base=0.1;perLevel=0.05}` retains linear probability.
+`factor` is also available for linear chances.
+
+Unlike the former hard-coded wear calculation, YAML overrides of
+`Skills` really change or disable protection. `Skills: []` disables
+Unbreaking's effect while keeping its enchantment metadata. Gameplay
+consumes this rule for mining, tool use, weapons, armor, fishing rods,
+Elytra and tridents (including damage on the returned trident stack).
+No configured engine means no enchantment-based wear prevention.
+Skill mechanics on this synchronous durability event must complete
+without awaiting; this avoids asynchronous callbacks while holding
+the inventory transaction lock.
+
+As with all server-authored enchantments, client-provided item NBT
+cannot substitute for inventory authority. Vanilla item components
+with definition-level Enchantments also supply enchantment levels.
+
 This deliberately retains the **45 selected** source-fixed item-component
 node aliases; unassigned nodes are still pending and are never auto-named.

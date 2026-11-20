@@ -1,5 +1,6 @@
 using Amethyst;
 using Amethyst.BuiltinShards;
+using Amethyst.Shards;
 
 internal static class DurabilityFeatureTests
 {
@@ -9,6 +10,11 @@ internal static class DurabilityFeatureTests
         public override int Next(int minValue, int maxValue) =>
             ignore ? maxValue - 1 : minValue;
         public override double NextDouble() => ignore ? 1.0 : 0.0;
+    }
+
+    private sealed class FixedFractionRandom(double fraction) : Random
+    {
+        public override double NextDouble() => fraction;
     }
 
     private static void Check(bool result, string message)
@@ -25,22 +31,38 @@ internal static class DurabilityFeatureTests
             items.TryGetByIdentifier("diamond_axe", out axe) &&
             items.TryGetByIdentifier("iron_shovel", out shovel),
             "Pinned items cover tool and equipment durability");
+        DirectoryInfo? solutionRoot = new(AppContext.BaseDirectory);
+        while (solutionRoot is not null &&
+            !File.Exists(Path.Combine(solutionRoot.FullName, "Amethyst.slnx")))
+            solutionRoot = solutionRoot.Parent;
+        if (solutionRoot is null) throw new InvalidOperationException("Missing Amethyst.slnx");
+        var enchantments = new EnchantmentCatalog(Path.Combine(solutionRoot.FullName,
+            "shards", "Amethyst.Shards.Items", "enchantments-26.3.yml"));
+        var engine = new SkillEngine();
+        EnchantmentSkills.Register(new TestSkillContext(engine));
+        engine.RegisterInstructions("items", enchantments.Instructions);
+        var wear = new EnchantmentDurability(items, enchantments, engine);
         ItemStack item = new(wood.ProtocolId, 1) { Damage = 10, Unbreaking = 3 };
         Check(DurabilityRules.ApplyWear(item, wood.MaxDurability, 10,
-            random: new FixedRandom(true)) == item &&
+            random: new FixedRandom(false), preventsWear: wear.PreventsWear) == item &&
             DurabilityRules.ApplyWear(item, wood.MaxDurability, 3,
-            random: new FixedRandom(false)).Damage == 13,
-            "Unbreaking uses independent per-point prevention rolls");
+            random: new FixedRandom(true), preventsWear: wear.PreventsWear).Damage == 13,
+            "Unbreaking from configured Skills checks every durability point");
         Check(DurabilityRules.ApplyWear(item with { Unbreakable = true },
             wood.MaxDurability, 100) == item with { Unbreakable = true },
             "Unbreakable items do not take damage");
         ItemStack armor = new(helm.ProtocolId, 1)
             { Damage = 4, Unbreaking = 3 };
         Check(DurabilityRules.ApplyWear(armor, helm.MaxDurability, 3,
-            armor: true, random: new FixedRandom(false)).Damage == 7 &&
+            armor: true, random: new FixedFractionRandom(0.5),
+            preventsWear: wear.PreventsWear).Damage == 7 &&
             DurabilityRules.ApplyWear(armor, helm.MaxDurability, 3,
-            armor: true, random: new FixedRandom(true)) == armor,
-            "Armor has vanilla Unbreaking's reduced prevention probability");
+            armor: true, random: new FixedFractionRandom(0.1),
+            preventsWear: wear.PreventsWear) == armor &&
+            DurabilityRules.ApplyWear(item, wood.MaxDurability, 3,
+            random: new FixedFractionRandom(0.5),
+            preventsWear: wear.PreventsWear) == item,
+            "Armor's configured 40% multiplier reduces Unbreaking protection");
         Check(DurabilityRules.TryCombine(
                 new ItemStack(wood.ProtocolId, 1) { Damage = 50, Unbreaking = 3 },
                 new ItemStack(wood.ProtocolId, 1) { Damage = 40, Mending = true },
@@ -61,12 +83,12 @@ internal static class DurabilityFeatureTests
         try
         {
             Guid playerId = Guid.NewGuid();
-            var inventory = new PlayerInventory(root, playerId, items);
+            var inventory = new PlayerInventory(root, playerId, items, enchantments, engine);
             Check(inventory.TryCreativeSet(36, wood.ProtocolId, 1, true) &&
                 inventory.ConfigureHeld(3, mending: true, unbreakable: false),
                 "Enchantments can be authored only by the authoritative server");
             Check(!inventory.DamageSlot(36, wood.ProtocolId, 8,
-                    random: new FixedRandom(true)) &&
+                    random: new FixedRandom(false)) &&
                 inventory.Held().Damage == 0 &&
                 inventory.Held().Unbreaking == 3,
                 "Server applies Unbreaking to mining wear");
@@ -115,7 +137,7 @@ internal static class DurabilityFeatureTests
                 "Armor carries its own independent enchantments and wear");
             Check(inventory.RepairFromExperience(2) == (0, 5) &&
                 inventory.Snapshot().Slots[5].Damage == 16 &&
-                inventory.DamageArmor(2, new FixedRandom(false)) == 1 &&
+                inventory.DamageArmor(2, new FixedRandom(true)) == 1 &&
                 inventory.Snapshot().Slots[5].Damage == 18,
                 "Mending targets equipped armor and armor wear uses Unbreaking");
             int beforeInvalid = inventory.Snapshot().Revision;
@@ -258,11 +280,11 @@ internal static class DurabilityFeatureTests
                 Check(stations.Close(anvilPlayerId).Length == 0,
                     "Anvil keeps no phantom inputs after successful repair");
 
-                var grindInventory = new PlayerInventory(null, Guid.NewGuid(), items);
+                var grindInventory = new PlayerInventory(null, Guid.NewGuid(), items, enchantments, engine);
                 Check(grindInventory.TryCreativeSet(36, wood.ProtocolId, 1, true) &&
                     grindInventory.ConfigureHeld(2, true, false) &&
                     grindInventory.DamageSlot(36, wood.ProtocolId, 1,
-                        random: new FixedRandom(false)),
+                        random: new FixedRandom(true)),
                     "Prepare damaged enchanted tool for grindstone");
                 Guid grindPlayerId = Guid.NewGuid();
                 var grindMenu = stations.Open(grindPlayerId,
@@ -335,5 +357,27 @@ internal static class DurabilityFeatureTests
             try { Directory.Delete(root, recursive: true); }
             catch (IOException) { }
         }
+    }
+
+    private sealed class TestSkillContext(SkillEngine engine) : IShardContext
+    {
+        public string Id => "items";
+        public ServerOptions Options => throw new NotSupportedException();
+        public string DataDirectory => Path.GetTempPath();
+        public void RegisterService<T>(T service) where T : class { }
+        public T GetRequiredService<T>() where T : class => throw new NotSupportedException();
+        public T? GetService<T>() where T : class => null;
+        public void Log(string message) { }
+        public void RegisterPlayPacketHandler(int packetId, ShardPlayPacketHandler handler) { }
+        public void RegisterConsoleCommand(string name, ShardConsoleCommand handler) { }
+        public void RegisterSkillTrigger(string trigger) => engine.RegisterTrigger(Id, trigger);
+        public void RegisterSkillMechanic(string name, ShardSkillValidator validator,
+            ShardSkillExecutor executor) => engine.RegisterMechanic(Id, name, validator, executor);
+        public void RegisterSkillCondition(string name, ShardSkillConditionValidator validator,
+            ShardSkillConditionEvaluator evaluator) => engine.RegisterCondition(Id, name, validator, evaluator);
+        public void RegisterSkillDefinitions(string file, string? directory = null) =>
+            engine.RegisterDefinitions(Id, file, directory);
+        public void RegisterSkillInstructions(IEnumerable<ShardSkillInstruction> skills) =>
+            engine.RegisterInstructions(Id, skills);
     }
 }

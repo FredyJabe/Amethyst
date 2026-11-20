@@ -119,6 +119,76 @@ try
     smite.Apply(new ShardSkillEvent("minecraft:smite", "onAttack",
         EnchantmentLevel:2, TargetKind:"other") { Runtime = living }, engine);
     Check(living.Number("damage") == 5, "Stats conditions reject mismatched targets");
+
+    // A durability point must consult ~onItemDamage, not the legacy
+    // Unbreaking integer alone. These rules use the actual enchantment YAML.
+    var unbreakingEngine = new SkillEngine();
+    EnchantmentSkills.Register(new TestSkillContext(unbreakingEngine));
+    unbreakingEngine.RegisterInstructions("items", catalog.Instructions);
+    var wearSkills = new EnchantmentDurability(items, catalog, unbreakingEngine);
+    Check(items.TryGetByIdentifier("minecraft:diamond_pickaxe", out var pickaxe),
+        "Durability test item is registered");
+    var enchantedTool = new ItemStack(pickaxe.ProtocolId, 1)
+        { Damage = 7, Unbreaking = 3 };
+    var enchantedArmor = new ItemStack(pickaxe.ProtocolId, 1)
+        { Damage = 7, Unbreaking = 3 };
+    Check(wearSkills.PreventsWear(enchantedTool, false, new ConstantRandom(0.6)) &&
+        !wearSkills.PreventsWear(enchantedArmor, true, new ConstantRandom(0.6)) &&
+        wearSkills.PreventsWear(enchantedArmor, true, new ConstantRandom(0.1)),
+        "Vanilla YAML independently controls tool and armor Unbreaking rolls");
+    Check(!wearSkills.PreventsWear(enchantedTool with { Unbreaking = 0 }, false,
+        new ConstantRandom(0.0)), "Without enchantment there is no durability protection");
+    Check(DurabilityRules.ApplyWear(enchantedTool, pickaxe.MaxDurability, 3,
+            random: new ConstantRandom(0.0), preventsWear: wearSkills.PreventsWear)
+            == enchantedTool &&
+        DurabilityRules.ApplyWear(enchantedTool, pickaxe.MaxDurability, 3,
+            random: new ConstantRandom(0.99), preventsWear: wearSkills.PreventsWear)
+            .Damage == 10,
+        "Actual durability wear uses the configured skill result for every point");
+
+    string inactiveDir = Path.Combine(temporary, "inactive-unbreaking");
+    Directory.CreateDirectory(inactiveDir);
+    File.WriteAllText(Path.Combine(inactiveDir, "unbreaking.yml"), """
+        unbreaking:
+          Skills: []
+        """);
+    var inactiveCatalog = new EnchantmentCatalog(
+        Path.Combine(path, "enchantments-26.3.yml"), inactiveDir);
+    var inactiveEngine = new SkillEngine();
+    EnchantmentSkills.Register(new TestSkillContext(inactiveEngine));
+    inactiveEngine.RegisterInstructions("items", inactiveCatalog.Instructions);
+    var inactiveWear = new EnchantmentDurability(items, inactiveCatalog, inactiveEngine);
+    Check(!inactiveWear.PreventsWear(enchantedTool, false, new ConstantRandom(0)),
+        "Clearing Unbreaking Skills in YAML disables its protective effect");
+
+    File.WriteAllText(Path.Combine(inactiveDir, "unbreaking.yml"), """
+        unbreaking:
+          Skills:
+            - "setFlag{name=prevent_item_damage} @self ~onItemDamage"
+        """);
+    var alwaysCatalog = new EnchantmentCatalog(
+        Path.Combine(path, "enchantments-26.3.yml"), inactiveDir);
+    var alwaysEngine = new SkillEngine();
+    EnchantmentSkills.Register(new TestSkillContext(alwaysEngine));
+    alwaysEngine.RegisterInstructions("items", alwaysCatalog.Instructions);
+    var alwaysWear = new EnchantmentDurability(items, alwaysCatalog, alwaysEngine);
+    Check(alwaysWear.PreventsWear(enchantedTool, true, new ConstantRandom(0.99)),
+        "Overriding Unbreaking Skills in YAML immediately changes the wear rule");
+
+    string componentDir = Path.Combine(temporary, "component-enchantments");
+    Directory.CreateDirectory(componentDir);
+    File.WriteAllText(Path.Combine(componentDir, "pickaxe.yml"), """
+        diamond_pickaxe:
+          Components:
+            Enchantments: {minecraft:unbreaking: 3}
+        """);
+    var componentItems = new ItemCatalog(Path.Combine(path, "items-26.3.yml"),
+        componentDir);
+    var componentWear = new EnchantmentDurability(componentItems, catalog,
+        unbreakingEngine);
+    Check(componentWear.PreventsWear(new ItemStack(pickaxe.ProtocolId, 1), false,
+        new ConstantRandom(0.0)),
+        "Definition-level Enchantments component also activates the skill");
     var inventory = new PlayerInventory(temporary, Guid.NewGuid(), items);
     Check(inventory.TryCreativeSet(36, sword.ProtocolId, 1, true) &&
         inventory.EnchantHeld("sharpness", 5, catalog) &&
@@ -168,4 +238,9 @@ sealed class TestSkillContext(SkillEngine engine) : IShardContext
         engine.RegisterDefinitions(Id, file, directory);
     public void RegisterSkillInstructions(IEnumerable<ShardSkillInstruction> skills) =>
         engine.RegisterInstructions(Id, skills);
+}
+
+sealed class ConstantRandom(double fraction) : Random
+{
+    public override double NextDouble() => fraction;
 }
