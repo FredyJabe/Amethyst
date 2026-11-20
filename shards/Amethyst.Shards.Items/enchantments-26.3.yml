@@ -1,0 +1,418 @@
+# Minecraft Java 26.3 - all 43 vanilla enchantments.
+# Keys are vanilla registry identifiers. Skills execute via Core's shared SkillEngine.
+# Copy individual keys into shards/data/items/enchantments/*.yml to override them.
+# Runtime hooks supply event context; effects without a producer/sink remain declarative.
+
+aqua_affinity:
+  Id: minecraft:aqua_affinity
+  MaxLevel: 1
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [helmet]
+  Skills:
+    - "modify{stat=mining_speed;operation=multiply;base=1;perLevel=1} @self ~onMine ?flag{name=underwater}"
+
+bane_of_arthropods:
+  Id: minecraft:bane_of_arthropods
+  MaxLevel: 5
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [weapon]
+  Conflicts: [minecraft:sharpness, minecraft:smite]
+  Skills:
+    - "modify{stat=damage;perLevel=2.5} @target ~onAttack ?target{type=arthropod}"
+
+binding_curse:
+  Id: minecraft:binding_curse
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [armor]
+  Curse: true
+  Skills:
+    - "setFlag{name=binding_curse} @self ~onUnequip"
+
+blast_protection:
+  Id: minecraft:blast_protection
+  MaxLevel: 4
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [armor]
+  Conflicts: [minecraft:protection, minecraft:fire_protection, minecraft:projectile_protection]
+  Skills:
+    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.08} @self ~onHurt ?damageType{type=explosion}"
+
+breach:
+  Id: minecraft:breach
+  MaxLevel: 4
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [mace]
+  Conflicts: [minecraft:density, minecraft:smite, minecraft:bane_of_arthropods]
+  Skills:
+    - "modify{stat=armor_reduction;perLevel=0.15} @target ~onAttack"
+
+channeling:
+  Id: minecraft:channeling
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [trident]
+  Conflicts: [minecraft:riptide]
+  Skills:
+    - "effect{id=lightning;duration=0} @target ~onProjectileHit ?flag{name=thundering}"
+
+density:
+  Id: minecraft:density
+  MaxLevel: 5
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [mace]
+  Conflicts: [minecraft:breach, minecraft:smite, minecraft:bane_of_arthropods]
+  Skills:
+    - "modify{stat=damage;perLevel=0.5} @target ~onSmash"
+
+depth_strider:
+  Id: minecraft:depth_strider
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [boots]
+  Conflicts: [minecraft:frost_walker]
+  Skills:
+    - "modify{stat=movement_speed;perLevel=0.18} @self ~onMove ?flag{name=underwater}"
+
+efficiency:
+  Id: minecraft:efficiency
+  MaxLevel: 5
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [tool]
+  Skills:
+    - "modify{stat=mining_speed;perLevel=2} @self ~onMine"
+
+feather_falling:
+  Id: minecraft:feather_falling
+  MaxLevel: 4
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [boots]
+  Skills:
+    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.12} @self ~onHurt ?damageType{type=fall}"
+
+fire_aspect:
+  Id: minecraft:fire_aspect
+  MaxLevel: 2
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [weapon]
+  Skills:
+    - "effect{id=fire;duration=4;perLevel=4} @target ~onAttack"
+
+fire_protection:
+  Id: minecraft:fire_protection
+  MaxLevel: 4
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [armor]
+  Conflicts: [minecraft:protection, minecraft:blast_protection, minecraft:projectile_protection]
+  Skills:
+    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.08} @self ~onHurt ?damageType{type=fire}"
+
+flame:
+  Id: minecraft:flame
+  MaxLevel: 1
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [bow]
+  Skills:
+    - "effect{id=fire;duration=5} @target ~onProjectileHit"
+
+fortune:
+  Id: minecraft:fortune
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [tool]
+  Conflicts: [minecraft:silk_touch]
+  Skills:
+    - "modify{stat=fortune_level;perLevel=1} @self ~onBlockDrop"
+
+frost_walker:
+  Id: minecraft:frost_walker
+  MaxLevel: 2
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [boots]
+  Conflicts: [minecraft:depth_strider]
+  Treasure: true
+  Skills:
+    - "effect{id=freeze_water;duration=5;perLevel=1} @self ~onMove ?flag{name=on_ground}"
+
+impaling:
+  Id: minecraft:impaling
+  MaxLevel: 5
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [trident]
+  Skills:
+    - "modify{stat=damage;perLevel=2.5} @target ~onProjectileHit ?flag{name=wet_target}"
+
+infinity:
+  Id: minecraft:infinity
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [bow]
+  Conflicts: [minecraft:mending]
+  Skills:
+    - "setFlag{name=infinity} @self ~onProjectileLaunch"
+
+knockback:
+  Id: minecraft:knockback
+  MaxLevel: 2
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [weapon]
+  Skills:
+    - "modify{stat=knockback;perLevel=0.5} @target ~onAttack"
+
+looting:
+  Id: minecraft:looting
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [weapon]
+  Skills:
+    - "modify{stat=looting_level;perLevel=1} @target ~onEntityDrop"
+
+loyalty:
+  Id: minecraft:loyalty
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [trident]
+  Conflicts: [minecraft:riptide]
+  Skills:
+    - "modify{stat=loyalty_level;perLevel=1} @self ~onProjectileReturn"
+
+luck_of_the_sea:
+  Id: minecraft:luck_of_the_sea
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [fishing_rod]
+  Skills:
+    - "modify{stat=fishing_luck;perLevel=1} @self ~onFishing"
+
+lunge:
+  Id: minecraft:lunge
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [spear]
+  Skills:
+    - "modify{stat=lunge_strength;perLevel=1} @self ~onSpearAttack"
+
+lure:
+  Id: minecraft:lure
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [fishing_rod]
+  Skills:
+    - "modify{stat=fishing_wait;perLevel=-5} @self ~onFishing"
+
+mending:
+  Id: minecraft:mending
+  MaxLevel: 1
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [breakable]
+  Conflicts: [minecraft:infinity]
+  Treasure: true
+  Skills:
+    - "setFlag{name=mending} @self ~onExperiencePickup"
+
+multishot:
+  Id: minecraft:multishot
+  MaxLevel: 1
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [crossbow]
+  Conflicts: [minecraft:piercing]
+  Skills:
+    - "modify{stat=projectile_count;base=1;perLevel=2} @self ~onProjectileLaunch"
+
+piercing:
+  Id: minecraft:piercing
+  MaxLevel: 4
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [crossbow]
+  Conflicts: [minecraft:multishot]
+  Skills:
+    - "modify{stat=piercing;perLevel=1} @self ~onProjectileLaunch"
+
+power:
+  Id: minecraft:power
+  MaxLevel: 5
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [bow]
+  Skills:
+    - "modify{stat=projectile_damage;base=0.5;perLevel=0.5} @target ~onProjectileLaunch"
+
+projectile_protection:
+  Id: minecraft:projectile_protection
+  MaxLevel: 4
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [armor]
+  Conflicts: [minecraft:protection, minecraft:fire_protection, minecraft:blast_protection]
+  Skills:
+    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.08} @self ~onHurt ?damageType{type=projectile}"
+
+protection:
+  Id: minecraft:protection
+  MaxLevel: 4
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [armor]
+  Conflicts: [minecraft:fire_protection, minecraft:blast_protection, minecraft:projectile_protection]
+  Skills:
+    - "modify{stat=damage;operation=multiply;base=1;perLevel=-0.04} @self ~onHurt"
+
+punch:
+  Id: minecraft:punch
+  MaxLevel: 2
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [bow]
+  Skills:
+    - "modify{stat=knockback;perLevel=1} @target ~onProjectileHit"
+
+quick_charge:
+  Id: minecraft:quick_charge
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [crossbow]
+  Skills:
+    - "modify{stat=charge_ticks;perLevel=-5} @self ~onProjectileCharge"
+
+respiration:
+  Id: minecraft:respiration
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [helmet]
+  Skills:
+    - "modify{stat=air_ticks;perLevel=15} @self ~onAirTick ?flag{name=underwater}"
+
+riptide:
+  Id: minecraft:riptide
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [trident]
+  Conflicts: [minecraft:loyalty, minecraft:channeling]
+  Skills:
+    - "modify{stat=riptide_force;perLevel=1} @self ~onProjectileLaunch ?flag{name=wet_caster}"
+
+sharpness:
+  Id: minecraft:sharpness
+  MaxLevel: 5
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [weapon]
+  Conflicts: [minecraft:smite, minecraft:bane_of_arthropods]
+  Skills:
+    - "modify{stat=damage;base=0.5;perLevel=0.5} @target ~onAttack"
+
+silk_touch:
+  Id: minecraft:silk_touch
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [tool]
+  Conflicts: [minecraft:fortune]
+  Skills:
+    - "setFlag{name=silk_touch} @self ~onBlockDrop"
+
+smite:
+  Id: minecraft:smite
+  MaxLevel: 5
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [weapon]
+  Conflicts: [minecraft:sharpness, minecraft:bane_of_arthropods]
+  Skills:
+    - "modify{stat=damage;perLevel=2.5} @target ~onAttack ?target{type=undead}"
+
+soul_speed:
+  Id: minecraft:soul_speed
+  MaxLevel: 3
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [boots]
+  Treasure: true
+  Skills:
+    - "modify{stat=movement_speed;perLevel=0.15} @self ~onMove ?flag{name=soul_ground}"
+
+sweeping_edge:
+  Id: minecraft:sweeping_edge
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [sword]
+  Skills:
+    - "modify{stat=sweep_damage;perLevel=0.25} @target ~onSweep"
+
+swift_sneak:
+  Id: minecraft:swift_sneak
+  MaxLevel: 3
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [leggings]
+  Treasure: true
+  Skills:
+    - "modify{stat=movement_speed;perLevel=0.15} @self ~onMove ?flag{name=sneaking}"
+
+thorns:
+  Id: minecraft:thorns
+  MaxLevel: 3
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [armor]
+  Skills:
+    - "effect{id=thorns;duration=0;perLevel=1} @attacker ~onHurt ?chance{base=0;perLevel=0.15}"
+
+unbreaking:
+  Id: minecraft:unbreaking
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [breakable]
+  Skills:
+    - "setFlag{name=unbreaking} @self ~onItemDamage"
+
+vanishing_curse:
+  Id: minecraft:vanishing_curse
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [breakable]
+  Curse: true
+  Skills:
+    - "setFlag{name=vanish_on_death} @self ~onDeath"
+
+wind_burst:
+  Id: minecraft:wind_burst
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [mace]
+  Treasure: true
+  Skills:
+    - "effect{id=wind_burst;duration=0;perLevel=1} @self ~onSmash"
