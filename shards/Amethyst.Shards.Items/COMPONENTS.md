@@ -7,7 +7,7 @@ Every component type is addressable from YAML using the configurable name in `sh
 ## YAML node mapping
 
 Change the **value** on any of the 122 lines in
-[component-nodes.yml](../../data/items/component-nodes.yml), e.g.:
+[component-nodes.yml](../data/items/component-nodes.yml), e.g.:
 
 ```yaml
 minecraft:item_model: MyItemModel
