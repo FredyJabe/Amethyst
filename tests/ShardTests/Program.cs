@@ -27,16 +27,24 @@ try
         OperatorsFile = Path.Combine(temp, "ops.yaml"),
         WorldPath = Path.Combine(temp, "world")
     };
+    // Override component YAML node aliases without changing registry IDs.
+    string nodesFile = Path.Combine(temp, "shards", "items", "component-nodes.yml");
+    Directory.CreateDirectory(Path.GetDirectoryName(nodesFile)!);
+    File.WriteAllText(nodesFile, """
+        minecraft:item_model: ModelPath
+        minecraft:custom_data: DataBlob
+        minecraft:glider: FlightFlag
+        """);
     // Test administrator YAML loaded through the real ShardHost data path.
     string yamlDir = Path.Combine(temp, "shards", "items", "definitions");
     Directory.CreateDirectory(yamlDir);
     File.WriteAllText(Path.Combine(yamlDir, "custom.yml"), """
         crafting_table:
           Display: "Workshop Table"
-          ItemModel: amethyst:workshop_table
           Lore:
             - "Configured before the Shard loads"
           Components:
+            ModelPath: amethyst:workshop_table
             minecraft:rarity: rare
             minecraft:enchantment_glint_override: true
             minecraft:custom_model_data:
@@ -50,6 +58,10 @@ try
         diamond_pickaxe:
           Unbreakable: true
           ItemModel: amethyst:eternal_pickaxe
+        stone:
+          Options:
+            DataBlob: { WireHex: "0A00" }
+            FlightFlag: { Remove: true }
         """);
     string recipeDir = Path.Combine(temp, "shards", "items", "recipes");
     Directory.CreateDirectory(recipeDir);
@@ -218,6 +230,14 @@ try
         table.Lore is { Count: 1 } &&
         items.TryGetByIdentifier("crafting_table", out var byName) && byName == table,
         "Items can be resolved by protocol ID and canonical/short identifier");
+    Check(ShardItemComponentIds.Count == 122 &&
+        ShardItemComponentIds.All.Count == 122 &&
+        ShardItemComponentIds.TryGetIdentifier(121, out var lastComponent) &&
+        lastComponent == "minecraft:cushion/color" &&
+        File.ReadAllLines(Path.Combine(root.FullName, "shards", "data",
+            "items", "component-nodes.yml"))
+            .Count(line => line.StartsWith("minecraft:", StringComparison.Ordinal)) == 122,
+        "Editable shipped component-nodes.yml lists all 122 Minecraft 26.3 components");
     Check(table.ItemModel == "amethyst:workshop_table" &&
         table.Components is { Count: 7 } &&
         table.Components.ContainsKey("minecraft:custom_name") &&
@@ -260,6 +280,22 @@ try
         "Tooltip display uses validated component registry references");
     Check(slot.ReadVarInt() == 21 && slot.ReadByte() == 1 &&
         slot.Remaining == 0, "Glint override encodes as a boolean component");
+
+    Check(items.TryGetByIdentifier("stone", out var stone) &&
+        stone.Components is { Count: 2 } &&
+        stone.Components.ContainsKey("minecraft:custom_data") &&
+        stone.Components.ContainsKey("minecraft:glider"),
+        "Custom YAML node names map Options values to two canonical components");
+    var blobWriter = new PacketWriter();
+    InventoryProtocol.WriteStack(blobWriter, new ItemStack(stone.ProtocolId, 1), items);
+    var blobReader = new PacketReader(blobWriter.ToArray());
+    Check(blobReader.ReadVarInt() == 1 &&
+        blobReader.ReadVarInt() == stone.ProtocolId &&
+        blobReader.ReadVarInt() == 1 && blobReader.ReadVarInt() == 1 &&
+        blobReader.ReadVarInt() == 0 &&
+        blobReader.ReadByte() == 0x0A && blobReader.ReadByte() == 0 &&
+        blobReader.ReadVarInt() == 34 && blobReader.Remaining == 0,
+        "Any registered component supports raw wire payloads and removal patches");
 
     Check(items.TryGetByIdentifier("diamond_pickaxe", out var configuredPickaxe) &&
         configuredPickaxe.ItemModel == "amethyst:eternal_pickaxe",
