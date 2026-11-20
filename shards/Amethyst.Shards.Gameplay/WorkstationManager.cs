@@ -47,7 +47,8 @@ public sealed class StationState
 /// client state IDs and never trust client-supplied item contents.</summary>
 public sealed class WorkstationManager
 {
-    private static readonly byte[] Magic = "AMSTAT03"u8.ToArray();
+    private static readonly byte[] Magic = "AMSTAT04"u8.ToArray();
+    private static readonly byte[] PreviousMagic = "AMSTAT03"u8.ToArray();
     private static readonly byte[] DamageMagic = "AMSTAT02"u8.ToArray();
     private static readonly byte[] LegacyMagic = "AMSTAT01"u8.ToArray();
     private readonly object _gate = new();
@@ -142,9 +143,13 @@ public sealed class WorkstationManager
     private bool ValidStack(ItemStack stack)
     {
         if (stack.Damage < 0 || stack.Unbreaking is < 0 or > 3 ||
-            stack.RepairCost is < 0 or > 1_000_000) return false;
+            stack.RepairCost is < 0 or > 1_000_000 ||
+            !ItemStackComponents.IsValid(stack.ComponentData) ||
+            (stack.Count == 0 && !string.IsNullOrEmpty(stack.ComponentData)))
+            return false;
         bool patched = stack.Damage > 0 || stack.Unbreaking > 0 ||
-            stack.Mending || stack.Unbreakable || stack.RepairCost > 0;
+            stack.Mending || stack.Unbreakable || stack.RepairCost > 0 ||
+            !string.IsNullOrEmpty(stack.EnchantmentData);
         if (_items is null)
             return !patched && stack.ItemId is >= 0 and <= 1657 &&
                 stack.Count is >= 0 and <= 64 &&
@@ -152,14 +157,24 @@ public sealed class WorkstationManager
         if (!_items.IsValidStack(stack.ItemId, stack.Count)) return false;
         if (stack.Count == 0) return !patched;
         if (!_items.TryGetById(stack.ItemId, out var item)) return false;
-        return !patched || stack.Count == 1 &&
-            item.MaxDurability > stack.Damage && item.MaxDurability > 0;
+        if (!patched) return true;
+        if (stack.Count != 1) return false;
+        if (item.MaxDurability > 0)
+            return stack.Damage < item.MaxDurability;
+        return stack.Damage == 0 && stack.Unbreaking == 0 &&
+            !stack.Mending && !stack.Unbreakable && stack.RepairCost == 0 &&
+            !string.IsNullOrEmpty(stack.EnchantmentData) &&
+            item.Identifier is "minecraft:book" or "minecraft:enchanted_book";
     }
 
     private static bool SameItemData(ItemStack a, ItemStack b) =>
         a.ItemId == b.ItemId && a.Damage == b.Damage &&
         a.Unbreaking == b.Unbreaking && a.Mending == b.Mending &&
-        a.Unbreakable == b.Unbreakable && a.RepairCost == b.RepairCost;
+        a.Unbreakable == b.Unbreakable && a.RepairCost == b.RepairCost &&
+        string.Equals(a.EnchantmentData ?? "", b.EnchantmentData ?? "",
+            StringComparison.Ordinal) &&
+        string.Equals(a.ComponentData ?? "", b.ComponentData ?? "",
+            StringComparison.Ordinal);
 
     public static StationKind? FromBlockState(ushort state) =>
         state switch
@@ -631,7 +646,8 @@ public sealed class WorkstationManager
         byte[] magic = reader.ReadBytes(Magic.Length);
         bool legacy = magic.SequenceEqual(LegacyMagic);
         bool damageOnly = magic.SequenceEqual(DamageMagic);
-        if (!legacy && !damageOnly && !magic.SequenceEqual(Magic) ||
+        bool previous = magic.SequenceEqual(PreviousMagic);
+        if (!legacy && !damageOnly && !previous && !magic.SequenceEqual(Magic) ||
             reader.ReadInt64() != _world.Seed || reader.ReadString() != _world.DimensionId)
             throw new InvalidDataException("Invalid station store header/world identity.");
         int count = reader.ReadInt32();
@@ -657,10 +673,17 @@ public sealed class WorkstationManager
                 bool mending = !legacy && !damageOnly && reader.ReadBoolean();
                 bool unbreakable = !legacy && !damageOnly && reader.ReadBoolean();
                 int repairCost = legacy || damageOnly ? 0 : reader.ReadInt32();
+                string enchantments = legacy || damageOnly || previous ? "" : reader.ReadString();
+                string components = legacy || damageOnly || previous ? "" : reader.ReadString();
+                if (enchantments.Length > 4096 ||
+                    components.Length > ItemStackComponents.MaximumCharacters)
+                    throw new InvalidDataException("Oversized station item components.");
                 var item = new ItemStack(itemId, amount)
                 {
                     Damage = damage, Unbreaking = unbreaking, Mending = mending,
-                    Unbreakable = unbreakable, RepairCost = repairCost
+                    Unbreakable = unbreakable, RepairCost = repairCost,
+                    EnchantmentData = enchantments.Length == 0 ? null : enchantments,
+                    ComponentData = components.Length == 0 ? null : components
                 };
                 if (!ValidStack(item))
                     throw new InvalidDataException("Invalid persisted station inventory.");
@@ -713,6 +736,8 @@ public sealed class WorkstationManager
                         writer.Write(stack.Mending);
                         writer.Write(stack.Unbreakable);
                         writer.Write(stack.RepairCost);
+                        writer.Write(stack.EnchantmentData ?? "");
+                        writer.Write(stack.ComponentData ?? "");
                     }
                 }
                 writer.Flush();

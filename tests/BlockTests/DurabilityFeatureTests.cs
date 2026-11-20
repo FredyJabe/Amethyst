@@ -178,10 +178,21 @@ internal static class DurabilityFeatureTests
             // ground, through persistence, or when collected.
             int groundId = 2000;
             var ground = new GroundItemStore(root, worldPath, () => ++groundId, items);
+            var componentPatch = ItemStackComponents.Encode(
+                new Dictionary<string, string>
+                {
+                    ["minecraft:custom_name"] = System.Text.Json.JsonSerializer.Serialize("Persisted Pickaxe"),
+                    ["minecraft:enchantment_glint_override"] = "true"
+                });
             var droppedTool = new ItemStack(wood.ProtocolId, 1)
             {
-                Damage = 14, Unbreaking = 2, Mending = true, RepairCost = 3
+                Damage = 14, Unbreaking = 2, Mending = true, RepairCost = 3,
+                EnchantmentData = "minecraft:efficiency=2",
+                ComponentData = componentPatch
             };
+            Check(ItemStackComponents.IsValid(componentPatch) &&
+                droppedTool.Components.Count == 2,
+                "Validated component patches retain arbitrary per-stack presentation values");
             Check(ground.TrySpawn(droppedTool, 3.5, 81.5, 3.5,
                 out var enchantedDrop, now) &&
                 enchantedDrop.ResolvedStack == droppedTool,
@@ -196,6 +207,53 @@ internal static class DurabilityFeatureTests
                     out _, now + 600) == 1 &&
                 receiver.Snapshot().Slots.Any(item => item == droppedTool),
                 "Enchanted tools persist as drops and retain data on pickup");
+
+            Guid componentOwner = Guid.NewGuid();
+            var componentInventory = new PlayerInventory(root, componentOwner, items);
+            Check(componentInventory.GiveStack(droppedTool) == 1 &&
+                new PlayerInventory(root, componentOwner, items)
+                    .Snapshot().Slots.Any(item => item == droppedTool),
+                "Player inventory persistence retains enchantments and arbitrary stack components");
+
+            Check(items.TryGetByIdentifier("stone", out var stone),
+                "Stone is available for component-aware stack merging");
+            var namedStone = new ItemStack(stone.ProtocolId, 3).WithComponents(
+                new Dictionary<string, string>
+                {
+                    ["minecraft:custom_name"] = System.Text.Json.JsonSerializer.Serialize("Named Stone")
+                });
+            var otherStone = new ItemStack(stone.ProtocolId, 2).WithComponents(
+                new Dictionary<string, string>
+                {
+                    ["minecraft:custom_name"] = System.Text.Json.JsonSerializer.Serialize("Other Stone")
+                });
+            Guid stackOwner = Guid.NewGuid();
+            var stackInventory = new PlayerInventory(root, stackOwner, items);
+            Check(stackInventory.GiveStack(namedStone) == 3 &&
+                stackInventory.GiveStack(otherStone) == 2 &&
+                stackInventory.GiveStack(namedStone with { Count = 1 }) == 1 &&
+                stackInventory.Snapshot().Slots.Count(s =>
+                    s.ItemId == stone.ProtocolId && s.Count != 0) == 2,
+                "Stack merges use canonical components and separate differently patched items");
+            var namedReload = new PlayerInventory(root, stackOwner, items);
+            Check(namedReload.Snapshot().Slots.Any(s => s.ItemId == stone.ProtocolId &&
+                    s.Count == 4 && s.ComponentData == namedStone.ComponentData) &&
+                namedReload.Snapshot().Slots.Any(s => s.ItemId == stone.ProtocolId &&
+                    s.Count == 2 && s.ComponentData == otherStone.ComponentData),
+                "Component-carrying stackable items survive inventory reload");
+
+            var wireWriter = new PacketWriter();
+            InventoryProtocol.WriteStack(wireWriter, namedStone, items);
+            var stackWire = new PacketReader(wireWriter.ToArray());
+            Check(stackWire.ReadVarInt() == 3 &&
+                stackWire.ReadVarInt() == stone.ProtocolId &&
+                stackWire.ReadVarInt() == 1 &&
+                stackWire.ReadVarInt() == 0 &&
+                stackWire.ReadVarInt() == 6,
+                "Per-stack custom name is emitted as a Java 26.3 component patch");
+            Check(!ItemStackComponents.IsValid(
+                "{\"minecraft:nonexistent\":\"true\"}"),
+                "Invalid component registry IDs cannot enter authoritative stacks");
 
             Check(DurabilityRules.TryWearAnvil(12962, out ushort chipped,
                     new FixedRandom(false)) && chipped == 12966 &&

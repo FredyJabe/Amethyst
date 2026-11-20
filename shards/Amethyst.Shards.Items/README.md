@@ -149,6 +149,26 @@ names, 21 typed value codecs and all 122 registry IDs accessible by
 canonical ID. The remaining complex codecs and game-side mechanics
 such as consumption, combat and equipping still require implementation.
 
+### Per-stack component patches (incremental support)
+
+Gameplay now supports a canonical, authoritative `ItemStack.ComponentData`
+JSON patch and an `ItemStack.WithComponents` helper. Use
+`ItemStackComponents.Encode` with a map of **canonical**
+`minecraft:` component identifiers to values already encoded as JSON by
+the Items Shard. No new YAML shorthand names were introduced.
+Per-stack patches override bundled item-definition components,
+including removals. The server validates registry IDs and serializable
+values before accepting them and preserves patches through
+stack merging, inventory persistence, ground drops and workstation
+storage. Durability and enchantment fields continue to take precedence.
+
+The new file versions `AMINV006`, `AMDROP03`, and `AMSTAT04`
+accept older persisted formats. These additions do **not** implement
+all 122 typed codecs: unsupported structured values still require
+explicit `WireHex`, and the remaining consumable/equipment/etc.
+behavior has separate Gameplay work ahead. Arbitrary client-supplied
+components are never trusted during inventory clicks.
+
 **Mythic-style top-level fields** and the explicit `Components` map
 can be used in your item definition YAML:
 

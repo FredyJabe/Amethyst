@@ -17,7 +17,16 @@ internal static class ItemComponentWire
         ShardItemDefinition definition)
     {
         if (definition.Components is null) return;
-        foreach (var (name, json) in definition.Components)
+        AddComponents(added, removed, definition.Components);
+    }
+
+    /// <summary>Apply canonical per-stack patches over definition defaults.
+    /// A removal overrides a previously added definition component.</summary>
+    public static void AddComponents(
+        IDictionary<int, Action<PacketWriter>> added, ISet<int> removed,
+        IReadOnlyDictionary<string, string> components)
+    {
+        foreach (var (name, json) in components)
         {
             if (!ShardItemComponentIds.TryGetId(name, out int id))
                 throw new InvalidDataException($"Unknown component {name}.");
@@ -27,6 +36,7 @@ internal static class ItemComponentWire
                 value.TryGetProperty("WireHex", out JsonElement encoded))
             {
                 byte[] payload = Convert.FromHexString(encoded.GetString()!);
+                removed.Remove(id);
                 added[id] = writer => writer.WriteBytes(payload);
                 continue;
             }
@@ -35,9 +45,11 @@ internal static class ItemComponentWire
             {
                 if (!remove.GetBoolean())
                     throw new InvalidDataException($"Invalid removal for {name}.");
+                added.Remove(id);
                 removed.Add(id);
                 continue;
             }
+            removed.Remove(id);
             switch (name)
             {
                 case "minecraft:unbreakable":

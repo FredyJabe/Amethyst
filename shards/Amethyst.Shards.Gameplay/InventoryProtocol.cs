@@ -21,6 +21,15 @@ public readonly record struct ItemStack(int ItemId, int Count)
     /// legacy fields for compatibility with older inventories.</summary>
     public string? EnchantmentData { get; init; }
 
+    /// <summary>Canonical, immutable component patches for this specific
+    /// stack. These are distinct from the vanilla item definition defaults;
+    /// validated and normalized by ItemStackComponents.Encode.</summary>
+    public string? ComponentData { get; init; }
+    public IReadOnlyDictionary<string, string> Components =>
+        ItemStackComponents.Decode(ComponentData);
+    public ItemStack WithComponents(IReadOnlyDictionary<string, string> patches) =>
+        this with { ComponentData = ItemStackComponents.Encode(patches) };
+
     public int EnchantmentLevel(string id)
     {
         if (string.IsNullOrWhiteSpace(id)) return 0;
@@ -78,6 +87,8 @@ public static class InventoryProtocol
         var removed = new SortedSet<int>();
         if (items is not null && items.TryGetById(stack.ItemId, out var definition))
             ItemComponentWire.AddDefinition(added, removed, definition);
+        if (!string.IsNullOrEmpty(stack.ComponentData))
+            ItemComponentWire.AddComponents(added, removed, stack.Components);
 
         // Authoritative instance components override a definition's defaults.
         if (stack.Damage > 0)

@@ -93,8 +93,7 @@ public sealed partial class PlayerInventory
         bool extra = incoming.Damage > 0 || incoming.Unbreaking > 0 ||
             incoming.Mending || incoming.Unbreakable ||
             incoming.RepairCost > 0 || !string.IsNullOrEmpty(incoming.EnchantmentData);
-        if (extra && (incoming.Count != 1 ||
-            !ValidStack(incoming))) return 0;
+        if ((extra && incoming.Count != 1) || !ValidStack(incoming)) return 0;
         lock (_sync)
         {
             ItemStack[] previous = (ItemStack[])_slots.Clone();

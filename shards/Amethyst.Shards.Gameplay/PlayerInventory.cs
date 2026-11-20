@@ -8,7 +8,8 @@ namespace Amethyst;
 /// All edits are persisted atomically under Gameplay's Shard data directory.</summary>
 public sealed partial class PlayerInventory
 {
-    private static readonly byte[] Magic = "AMINV005"u8.ToArray();
+    private static readonly byte[] Magic = "AMINV006"u8.ToArray();
+    private static readonly byte[] EnchantmentMagic = "AMINV005"u8.ToArray();
     private static readonly byte[] PreviousMagic = "AMINV004"u8.ToArray();
     private static readonly byte[] DamageMagic = "AMINV003"u8.ToArray();
     private static readonly byte[] LegacyMagic = "AMINV002"u8.ToArray();
@@ -166,6 +167,8 @@ public sealed partial class PlayerInventory
 
     private bool ValidStack(ItemStack s)
     {
+        if (!ItemStackComponents.IsValid(s.ComponentData)) return false;
+        if (s.Count == 0 && !string.IsNullOrEmpty(s.ComponentData)) return false;
         if (s.Damage < 0 || s.Unbreaking is < 0 or > 3 ||
             s.RepairCost is < 0 or > 1_000_000) return false;
         bool enchanted = !string.IsNullOrEmpty(s.EnchantmentData);
@@ -235,6 +238,8 @@ public sealed partial class PlayerInventory
         a.Unbreaking == b.Unbreaking && a.Mending == b.Mending &&
         a.Unbreakable == b.Unbreakable && a.RepairCost == b.RepairCost &&
         string.Equals(a.EnchantmentData ?? "", b.EnchantmentData ?? "",
+            StringComparison.Ordinal) &&
+        string.Equals(a.ComponentData ?? "", b.ComponentData ?? "",
             StringComparison.Ordinal);
 
     /// <summary>Execute server-side mouse clicks, hotbar swaps and shift-clicks.
@@ -361,7 +366,9 @@ public sealed partial class PlayerInventory
         bool oldPlain = magic.SequenceEqual(LegacyMagic);
         bool oldDamage = magic.SequenceEqual(DamageMagic);
         bool oldV4 = magic.SequenceEqual(PreviousMagic);
-        if (!oldPlain && !oldDamage && !oldV4 && !magic.SequenceEqual(Magic) ||
+        bool oldV5 = magic.SequenceEqual(EnchantmentMagic);
+        if (!oldPlain && !oldDamage && !oldV4 && !oldV5 &&
+            !magic.SequenceEqual(Magic) ||
             reader.ReadInt32() != _slots.Length)
             throw new InvalidDataException($"Bad player inventory header in {_path}");
         ItemStack ReadStack()
@@ -373,13 +380,17 @@ public sealed partial class PlayerInventory
             bool unbreakable = !oldPlain && !oldDamage && reader.ReadBoolean();
             int cost = oldPlain || oldDamage ? 0 : reader.ReadInt32();
             string enchantments = oldPlain || oldDamage || oldV4 ? "" : reader.ReadString();
-            if (enchantments.Length > 4096)
-                throw new InvalidDataException("Oversized enchantment component.");
+            string components = oldPlain || oldDamage || oldV4 || oldV5 ? "" :
+                reader.ReadString();
+            if (enchantments.Length > 4096 ||
+                components.Length > ItemStackComponents.MaximumCharacters)
+                throw new InvalidDataException("Oversized inventory component.");
             return new ItemStack(item, count)
             {
                 Damage = damage, Unbreaking = unbreaking, Mending = mending,
                 Unbreakable = unbreakable, RepairCost = cost,
-                EnchantmentData = enchantments.Length == 0 ? null : enchantments
+                EnchantmentData = enchantments.Length == 0 ? null : enchantments,
+                ComponentData = components.Length == 0 ? null : components
             };
         }
         for (int i = 0; i < _slots.Length; i++)
@@ -421,6 +432,7 @@ public sealed partial class PlayerInventory
                     output.Write(slot.Unbreakable);
                     output.Write(slot.RepairCost);
                     output.Write(slot.EnchantmentData ?? "");
+                    output.Write(slot.ComponentData ?? "");
                 }
                 foreach (ItemStack slot in _slots) WriteStack(writer, slot);
                 WriteStack(writer, _cursor);
