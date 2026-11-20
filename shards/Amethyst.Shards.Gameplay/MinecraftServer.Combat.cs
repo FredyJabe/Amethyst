@@ -39,10 +39,20 @@ public sealed partial class MinecraftServer
             _items.TryGetById(weapon.ItemId, out ShardItemDefinition definition)
             ? definition.Identifier : "";
         float raw = CombatRules.MeleeDamage(identifier);
+        var attackEffects = new ShardSkillRuntime();
+        attackEffects.SetNumber("damage", raw);
+        attackEffects.SetNumber("knockback", 0.4);
+        await EnchantmentEventAsync(weapon, "onAttack", ct, attackEffects,
+            targetKind: victim is null ? EnchantmentMobCategory(mob.Kind) : "player",
+            actor: attacker.PlayerUuid);
+        raw = (float)Math.Clamp(attackEffects.Number("damage", raw), 0, 1000);
+        if (raw <= 0) return;
+        double knockbackBonus = Math.Max(0, attackEffects.Number("knockback", 0.4) - 0.4);
         bool hit = false;
         if (victim is not null)
         {
-            hit = await DamagePlayerAsync(victim, raw, attacker, ct);
+            hit = await DamagePlayerAsync(victim, raw, attacker, ct,
+                knockbackBonus: knockbackBonus);
         }
         else if (_livingEntities is not null &&
             _livingEntities.TryDamage(targetEntityId, raw,
@@ -99,7 +109,8 @@ public sealed partial class MinecraftServer
     /// Shields can intercept this call before health loss.</summary>
     internal async Task<bool> DamagePlayerAsync(ConnectedPlayer victim,
         float raw, ConnectedPlayer? attacker, CancellationToken ct,
-        bool projectile = false)
+        bool projectile = false, double knockbackBonus = 0,
+        bool suppressThorns = false)
     {
         if (!victim.Ready || victim.GameMode is PlayerGameMode.Creative or
             PlayerGameMode.Spectator || raw <= 0) return false;
@@ -110,6 +121,17 @@ public sealed partial class MinecraftServer
         ItemStack[] gear = victim.Inventory.Snapshot().Slots;
         float armor = CombatRules.ArmorPoints(gear, _items);
         float damage = CombatRules.Mitigate(raw, armor);
+        var hurt = new ShardSkillRuntime();
+        hurt.SetNumber("damage", damage);
+        for (int slot = 5; slot <= 8; slot++)
+        {
+            if (gear[slot].Count == 0) continue;
+            await EnchantmentEventAsync(gear[slot], "onHurt", ct, hurt,
+                targetKind: "player", damageType: projectile ? "projectile" : "generic",
+                actor: victim.PlayerUuid);
+        }
+        damage = (float)Math.Clamp(hurt.Number("damage", damage), 0, 1000);
+        if (damage <= 0) return false;
         if (!victim.Vitals.TryDamage(damage, Environment.TickCount64,
             out bool killed)) return false;
         int durability = Math.Max(1, (int)Math.Ceiling(raw / 4));
@@ -125,13 +147,19 @@ public sealed partial class MinecraftServer
             victim.EntityId, ct);
         if (attacker is not null && !killed)
         {
-            var (vx, vz) = CombatRules.Knockback(origin, victim.Pose);
+            var (vx, vz) = CombatRules.Knockback(origin, victim.Pose,
+                strength: 0.4 + Math.Clamp(knockbackBonus, 0, 5));
             await CombatProtocol.SendMotionAsync(victim.Connection,
                 victim.EntityId, vx, 0.26, vz, ct);
         }
         if (killed)
             await CombatProtocol.SendDeathAsync(victim.Connection,
                 victim.EntityId, ct);
+        if (!suppressThorns && attacker is not null &&
+            attacker != victim && !killed)
+            foreach (ShardSkillEffect effect in hurt.Effects.Where(e => e.Id == "thorns"))
+                await DamagePlayerAsync(attacker, Math.Max(1, effect.Duration),
+                    victim, ct, suppressThorns: true);
         return true;
     }
 
