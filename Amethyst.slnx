@@ -6,4 +6,5 @@
   <Project Path="shards/Amethyst.Shards.Hello/Amethyst.Shards.Hello.csproj" />
   <Project Path="tests/ShardTests/ShardTests.csproj" />
   <Project Path="tests/BlockTests/BlockTests.csproj" />
+  <Project Path="tests/EnchantmentTests/EnchantmentTests.csproj" />
 </Solution>
