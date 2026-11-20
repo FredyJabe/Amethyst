@@ -23,6 +23,8 @@ public sealed partial class MinecraftServer
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
+    private readonly IShardEnchantmentRegistry? _enchantments;
+    private readonly IShardSkillEngine? _skills;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private readonly Dictionary<Guid, Dictionary<int, ExperienceOrb>> _experienceViews = new();
@@ -34,13 +36,16 @@ public sealed partial class MinecraftServer
 
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
-        IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null)
+        IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
+        IShardEnchantmentRegistry? enchantments = null, IShardSkillEngine? skills = null)
     {
         _options = options;
         _world = world;
         _blocks = blocks;
         _inventoryDirectory = inventoryDirectory;
         _items = items;
+        _enchantments = enchantments;
+        _skills = skills;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers);
         _operators = new OperatorStore(options.OperatorsFile);
@@ -1439,7 +1444,7 @@ public sealed partial class MinecraftServer
     {
         string[] words = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length is < 2 or > 3)
-            return "Usage: enchant <online-player> <unbreaking|mending> [level]";
+            return "Usage: enchant <online-player> <enchantment-id> [level]";
         ConnectedPlayer? target = FindOnline(words[0]);
         if (target is null) return "Player not found or not fully connected.";
         string enchantment = words[1].ToLowerInvariant();
@@ -1448,18 +1453,14 @@ public sealed partial class MinecraftServer
         int level = 1;
         if (words.Length == 3 && !int.TryParse(words[2], out level))
             return "Invalid enchantment level.";
-        if ((enchantment == "mending" && level != 1) ||
-            (enchantment == "unbreaking" && level is < 1 or > 3) ||
-            enchantment is not ("mending" or "unbreaking"))
-            return "Supported enchantments: Mending I and Unbreaking I–III.";
-        ItemStack held = target.Inventory.Held();
-        bool applied = enchantment == "mending"
-            ? target.Inventory.ConfigureHeld(
-                held.Unbreaking, true, held.Unbreakable)
-            : target.Inventory.ConfigureHeld(
-                level, held.Mending, held.Unbreakable);
+        if (_enchantments is null ||
+            !_enchantments.TryGet(enchantment, out var selected) ||
+            level < 1 || level > selected.MaxLevel)
+            return "Unknown enchantment or invalid level; use the enchantments command for the 43 registered vanilla enchantments.";
+        bool applied = target.Inventory.EnchantHeld(
+            selected.Identifier, level, _enchantments);
         if (!applied)
-            return "Target must hold a damageable item; the requested enchantment may already be applied.";
+            return "Item is incompatible, a conflicting enchantment exists, or that level is already present.";
         await InventoryProtocol.SendSlotAsync(target.Connection,
             target.Inventory, target.Inventory.SelectedSlot, ct);
         await ReplyAsync(target,
