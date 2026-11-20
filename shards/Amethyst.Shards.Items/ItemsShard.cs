@@ -54,7 +54,7 @@ public sealed class ItemCatalog : IShardItemRegistry
                 (maxDurability > 0 && max != 1))
                 throw new InvalidDataException($"Invalid vanilla durability for {root}.");
             var item = new ShardItemDefinition(options.ProtocolId.Value, key,
-                max, options.BlockItem.Value) { MaxDurability = maxDurability };
+                max, options.BlockItem.Value) { MaxDurability = maxDurability, Stats = options.Stats };
             if (_byName.ContainsKey(key) || _byName.ContainsKey(root))
                 throw new InvalidDataException($"Duplicate vanilla item {key}.");
             definitions.Add(item);
@@ -241,6 +241,7 @@ public sealed class ItemCatalog : IShardItemRegistry
             Lore = fields.Lore is null ? item.Lore : Array.AsReadOnly(fields.Lore),
             CustomModelData = fields.CustomModelData ?? item.CustomModelData,
             Hidden = fields.Hidden ?? item.Hidden,
+            Stats = fields.Stats ?? item.Stats,
             Components = new ReadOnlyDictionary<string, string>(patch)
         };
     }
@@ -287,6 +288,7 @@ public sealed class ItemCatalog : IShardItemRegistry
         public bool? Glint;
         public bool? Unbreakable;
         public IReadOnlyDictionary<string, string>? Components;
+        public IReadOnlyList<ShardStatModifier>? Stats;
     }
 
     private static IEnumerable<(string Key, ItemFields Fields)> ReadEntries(
@@ -367,6 +369,9 @@ public sealed class ItemCatalog : IShardItemRegistry
                         break;
                     case "unbreakable":
                         fields.Unbreakable = Boolean(field.Value, path, key);
+                        break;
+                    case "stats":
+                        fields.Stats = StatModifiers.Parse(field.Value, key);
                         break;
                     case "components":
                         foreach (var (component, json) in

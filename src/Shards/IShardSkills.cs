@@ -65,6 +65,10 @@ public interface IShardSkillEngine
     IReadOnlyList<ShardSkillInstruction> Definitions { get; }
     bool TryGetSkills(string ownerId, out IReadOnlyList<ShardSkillInstruction> skills);
     Task<bool> DispatchAsync(ShardSkillEvent context, CancellationToken ct = default);
+    /// <summary>Validate named conditions against registered validators at startup.</summary>
+    void ValidateConditions(IReadOnlyList<ShardSkillCondition> conditions);
+    /// <summary>Check Stats conditions with the same evaluators used by Skills.</summary>
+    bool CheckConditions(IReadOnlyList<ShardSkillCondition> conditions, ShardSkillEvent context);
 }
 
 /// <summary>Side-effect capability supplied by Gameplay. Items' dropItem

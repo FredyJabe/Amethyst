@@ -6,7 +6,8 @@ public sealed record ShardEnchantmentDefinition(
     string Identifier, int MaxLevel, int Weight, int AnvilCost,
     IReadOnlyList<string> SupportedItems, IReadOnlyList<string> Conflicts,
     bool Treasure, bool Curse,
-    IReadOnlyList<ShardSkillInstruction> Skills);
+    IReadOnlyList<ShardSkillInstruction> Skills,
+    IReadOnlyList<ShardStatModifier> Stats);
 
 public interface IShardEnchantmentRegistry
 {

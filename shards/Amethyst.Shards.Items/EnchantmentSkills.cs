@@ -24,7 +24,6 @@ public static class EnchantmentSkills
     public static void Register(IShardContext context)
     {
         foreach (string trigger in Triggers) context.RegisterSkillTrigger(trigger);
-        context.RegisterSkillMechanic("modify", ValidateModify, Modify);
         context.RegisterSkillMechanic("setFlag", ValidateFlag, SetFlag);
         context.RegisterSkillMechanic("effect", ValidateEffect, Effect);
         context.RegisterSkillCondition("level", ValidateLevel, Level);
@@ -51,35 +50,6 @@ public static class EnchantmentSkills
             out double number) || !double.IsFinite(number) || Math.Abs(number) > 1_000_000)
             throw new InvalidDataException($"Invalid numeric skill argument {name}={value}.");
         return number;
-    }
-    private static void ValidateModify(ShardSkillInstruction skill)
-    {
-        Allow(skill.Arguments, "stat", "base", "perLevel", "operation");
-        if (!Key.IsMatch(Required(skill.Arguments, "stat")))
-            throw new InvalidDataException("Invalid modify stat.");
-        string operation = skill.Arguments.GetValueOrDefault("operation") ?? "add";
-        if (operation is not ("add" or "multiply" or "set"))
-            throw new InvalidDataException("modify operation must be add/multiply/set.");
-        _ = Number(skill.Arguments, "base");
-        _ = Number(skill.Arguments, "perLevel");
-    }
-    private static ValueTask Modify(ShardSkillInstruction skill, ShardSkillEvent evt,
-        CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        string stat = Required(skill.Arguments, "stat");
-        double amount = Number(skill.Arguments, "base") +
-            evt.EnchantmentLevel * Number(skill.Arguments, "perLevel");
-        double previous = evt.Runtime.Number(stat);
-        string mode = skill.Arguments.GetValueOrDefault("operation") ?? "add";
-        double result = mode switch
-        {
-            "add" => previous + amount,
-            "multiply" => previous * amount,
-            _ => amount
-        };
-        evt.Runtime.SetNumber(stat, result);
-        return ValueTask.CompletedTask;
     }
     private static void ValidateFlag(ShardSkillInstruction skill)
     {

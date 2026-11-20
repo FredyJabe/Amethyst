@@ -260,6 +260,37 @@ public sealed class SkillEngine : IShardSkillEngine
         return true;
     }
 
+    public void ValidateConditions(IReadOnlyList<ShardSkillCondition> conditions)
+    {
+        ArgumentNullException.ThrowIfNull(conditions);
+        ShardSkillConditionValidator[] validators;
+        lock (_gate)
+            validators = conditions.Select(c =>
+                _conditions.TryGetValue(c.Name, out var registered)
+                    ? registered.Validate
+                    : throw new InvalidDataException($"Unregistered condition ?{c.Name}."))
+                .ToArray();
+        for (int i = 0; i < validators.Length; i++)
+            validators[i](conditions[i]);
+    }
+
+    public bool CheckConditions(IReadOnlyList<ShardSkillCondition> conditions,
+        ShardSkillEvent context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ValidateConditions(conditions);
+        ShardSkillConditionEvaluator[] evaluators;
+        lock (_gate)
+            evaluators = conditions.Select(c =>
+                _conditions.TryGetValue(c.Name, out var registered)
+                    ? registered.Evaluate
+                    : throw new InvalidOperationException($"Condition ?{c.Name} was unregistered."))
+                .ToArray();
+        for (int i = 0; i < evaluators.Length; i++)
+            if (!evaluators[i](conditions[i], context)) return false;
+        return true;
+    }
+
     public void Unregister(string owner)
     {
         lock (_gate)

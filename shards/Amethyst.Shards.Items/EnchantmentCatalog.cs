@@ -16,6 +16,7 @@ public sealed class EnchantmentCatalog : IShardEnchantmentRegistry
         public string? Id;
         public int? MaxLevel, Weight, AnvilCost;
         public string[]? SupportedItems, Conflicts, Skills;
+        public IReadOnlyList<ShardStatModifier>? Stats;
         public bool? Treasure, Curse;
     }
 
@@ -31,7 +32,8 @@ public sealed class EnchantmentCatalog : IShardEnchantmentRegistry
         foreach (var (id, fields) in ReadEntries(bundledPath))
         {
             if (fields.Id is null || fields.MaxLevel is null || fields.Weight is null ||
-                fields.AnvilCost is null || fields.SupportedItems is null || fields.Skills is null)
+                fields.AnvilCost is null || fields.SupportedItems is null ||
+                (fields.Skills is null && fields.Stats is null))
                 throw new InvalidDataException($"Incomplete vanilla enchantment '{id}'.");
             // Verify the exact vanilla registry, including the two curses.
             _ = VanillaRegistries.IndexOf("minecraft:enchantment", id);
@@ -146,13 +148,14 @@ public sealed class EnchantmentCatalog : IShardEnchantmentRegistry
         string[] conflicts = (f.Conflicts ?? prior?.Conflicts.ToArray() ?? [])
             .Select(Normalize).ToArray();
         string[] lines = f.Skills ?? prior?.Skills.Select(s => SkillText(s)).ToArray() ?? [];
-        if (lines.Length is < 1 or > 32)
-            throw new InvalidDataException($"Each enchantment needs 1..32 Skills ({id}).");
+        IReadOnlyList<ShardStatModifier> stats = f.Stats ?? prior?.Stats ?? [];
+        if (lines.Length > 32 || (lines.Length == 0 && stats.Count == 0))
+            throw new InvalidDataException($"Each enchantment needs Skills or Stats ({id}).");
         var skills = lines.Select(line => SkillEngine.Parse(id, line)).ToArray();
         return new ShardEnchantmentDefinition(id, max, weight, anvil,
             Array.AsReadOnly(supported), Array.AsReadOnly(conflicts),
             f.Treasure ?? prior?.Treasure ?? false, f.Curse ?? prior?.Curse ?? false,
-            Array.AsReadOnly(skills));
+            Array.AsReadOnly(skills), stats);
     }
 
     // Preserve parsed definitions when a metadata-only override is applied,
@@ -204,6 +207,7 @@ public sealed class EnchantmentCatalog : IShardEnchantmentRegistry
                     case "supporteditems": f.SupportedItems = Sequence(property.Value, path); break;
                     case "conflicts": f.Conflicts = Sequence(property.Value, path); break;
                     case "skills": f.Skills = Sequence(property.Value, path); break;
+                    case "stats": f.Stats = StatModifiers.Parse(property.Value, id); break;
                     case "treasure": f.Treasure = Boolean(property.Value, path); break;
                     case "curse": f.Curse = Boolean(property.Value, path); break;
                     default: throw new InvalidDataException(
