@@ -558,6 +558,16 @@ public sealed partial class MinecraftServer
                 int held = player.Inventory.Held().ItemId;
                 int duration = player.GameMode == PlayerGameMode.Creative ? 0 :
                     MiningRules.RequiredMilliseconds(state, held);
+                if (survival && duration > 0 && duration < int.MaxValue)
+                {
+                    var miningContext = new ShardSkillRuntime();
+                    miningContext.SetNumber("mining_speed", 1);
+                    await EnchantmentEventAsync(player.Inventory.Held(),
+                        "onMine", ct, miningContext, actor: player.PlayerUuid);
+                    double bonus = Math.Clamp(
+                        miningContext.Number("mining_speed", 1), 0.05, 256);
+                    duration = (int)Math.Max(0, Math.Ceiling(duration / bonus));
+                }
                 if (duration == int.MaxValue)
                 {
                     outcome = "unbreakable";
@@ -628,11 +638,31 @@ public sealed partial class MinecraftServer
                 MiningRules.BlockInfo info = MiningRules.ForState(state);
                 if (info.DropItem > 0 && MiningRules.IsHarvestable(info, miningTool))
                 {
-                    // A break produces a world item. The player receives it
-                    // only after touching the item and after its pickup delay.
-                    // The shared 20Hz item ticker handles spawn/pickup packets.
-                    if (_groundItems is null || !_groundItems.TrySpawn(info.DropItem, 1,
-                        action.X + 0.5, action.Y + 0.35, action.Z + 0.5, out _))
+                    var drops = new ShardSkillRuntime();
+                    drops.SetNumber("drop_count", 1);
+                    await EnchantmentEventAsync(player.Inventory.Held(),
+                        "onBlockDrop", ct, drops, actor: player.PlayerUuid);
+                    int count = (int)Math.Clamp(drops.Number("drop_count", 1), 0, 64);
+                    // Fortune changes resource drops, not dropped block items.
+                    if (!drops.HasFlag("silk_touch") &&
+                        _items is not null &&
+                        _items.TryGetById(info.DropItem, out var dropped) &&
+                        dropped.Identifier is "minecraft:coal" or "minecraft:diamond" or
+                        "minecraft:emerald" or "minecraft:lapis_lazuli" or
+                        "minecraft:redstone" or "minecraft:raw_iron" or
+                        "minecraft:raw_gold" or "minecraft:raw_copper" or
+                        "minecraft:quartz")
+                    {
+                        int fortune = (int)Math.Clamp(
+                            drops.Number("fortune_level"), 0, 255);
+                        if (fortune > 0)
+                            count = Math.Min(64, count +
+                                Random.Shared.Next(fortune + 2));
+                    }
+                    // The shared 20Hz item ticker handles world drops and pickups.
+                    if (count > 0 && (_groundItems is null ||
+                        !_groundItems.TrySpawn(info.DropItem, count,
+                            action.X + 0.5, action.Y + 0.35, action.Z + 0.5, out _)))
                         Console.WriteLine($"[items] No capacity to spawn drop {info.DropItem} " +
                             $"at {action.X},{action.Y},{action.Z}");
                 }

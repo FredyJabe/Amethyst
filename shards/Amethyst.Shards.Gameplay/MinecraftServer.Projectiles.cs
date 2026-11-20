@@ -124,11 +124,20 @@ public sealed partial class MinecraftServer
                 item.MaxDurability, 1);
         }
         else return;
+        var projectileEffects = new ShardSkillRuntime();
+        projectileEffects.SetNumber("projectile_damage", damage);
+        projectileEffects.SetNumber("projectile_count", 1);
+        projectileEffects.SetNumber("piercing", 0);
+        await EnchantmentEventAsync(stack, "onProjectileLaunch", ct,
+            projectileEffects, actor: player.PlayerUuid);
+        damage = (float)Math.Clamp(projectileEffects.Number(
+            "projectile_damage", damage), 0, 1000);
         if (_projectiles.Snapshot().Length >= ProjectileWorld.MaximumProjectiles)
             return;
         if (!creative)
         {
-            if (ammoId > 0 && !player.Inventory.TryConsumeItem(ammoId, 1))
+            if (ammoId > 0 && !projectileEffects.HasFlag("infinity") &&
+                !player.Inventory.TryConsumeItem(ammoId, 1))
                 return;
             if (kind == ProjectileKind.Trident &&
                 !player.Inventory.ConsumeSlot(slot, stack.ItemId))
