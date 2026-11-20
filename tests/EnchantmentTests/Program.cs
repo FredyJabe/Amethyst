@@ -169,6 +169,50 @@ try
             .Damage == 10,
         "Actual durability wear uses the configured skill result for every point");
 
+    var mendingItem = enchantedTool with { Mending = true, Damage = 9 };
+    Check(wearSkills.MendingRate(mendingItem) == 2,
+        "Mending repair rate is read from enchantment Stats and Skills");
+
+    string mendingDirectory = Path.Combine(temporary, "mending-override");
+    Directory.CreateDirectory(mendingDirectory);
+    File.WriteAllText(Path.Combine(mendingDirectory, "mending.yml"), """
+        mending:
+          Skills: []
+        """);
+    var disabledMendingCatalog = new EnchantmentCatalog(
+        Path.Combine(path, "enchantments-26.3.yml"), mendingDirectory);
+    var disabledMendingEngine = new SkillEngine();
+    EnchantmentSkills.Register(new TestSkillContext(disabledMendingEngine));
+    disabledMendingEngine.RegisterInstructions("items",
+        disabledMendingCatalog.Instructions);
+    Check(new EnchantmentDurability(items, disabledMendingCatalog,
+        disabledMendingEngine).MendingRate(mendingItem) == 0,
+        "Removing Mending Skills in YAML disables XP-based repair");
+
+    File.WriteAllText(Path.Combine(mendingDirectory, "mending.yml"), """
+        mending:
+          Stats:
+            mending_repair_per_xp:
+              Trigger: onExperiencePickup
+              Base: 4
+        """);
+    var fasterMendingCatalog = new EnchantmentCatalog(
+        Path.Combine(path, "enchantments-26.3.yml"), mendingDirectory);
+    var fasterMendingEngine = new SkillEngine();
+    EnchantmentSkills.Register(new TestSkillContext(fasterMendingEngine));
+    fasterMendingEngine.RegisterInstructions("items",
+        fasterMendingCatalog.Instructions);
+    var fasterMending = new EnchantmentDurability(items, fasterMendingCatalog,
+        fasterMendingEngine);
+    var mendingSlots = new ItemStack[46];
+    mendingSlots[36] = mendingItem;
+    var (xpLeft, didRepair, repairedSlot) = DurabilityRules.ApplyMending(
+        mendingSlots, 36, 4, items, repairPerXp: fasterMending.MendingRate);
+    Check(fasterMending.MendingRate(mendingItem) == 4 &&
+        didRepair && repairedSlot == 36 && xpLeft == 1 &&
+        mendingSlots[36].Damage == 0,
+        "Mending Stats overrides change actual XP cost and repair amount");
+
     string inactiveDir = Path.Combine(temporary, "inactive-unbreaking");
     Directory.CreateDirectory(inactiveDir);
     File.WriteAllText(Path.Combine(inactiveDir, "unbreaking.yml"), """

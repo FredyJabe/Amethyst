@@ -765,6 +765,18 @@ do not change Java protocol component node assignments. As with
 other item aliases, custom alias Stats currently have no separate
 stack identity, so Gameplay applies physical vanilla-item Stats.
 
+### Mending driven by Skills and Stats
+
+Mending's `~onExperiencePickup` skill now activates repair of eligible
+worn equipped items. The `mending_repair_per_xp` numeric Stat (default
+2) controls how many durability points each collected XP restores.
+This is evaluated synchronously during the inventory transaction,
+using Core's skill engine. Setting `Skills: []` disables activation,
+and overriding `Stats` changes the rate without changing compiled
+Gameplay code. Eligible slots remain selected main-hand, offhand and
+armor; the existing legacy Mending logic still provides a fallback
+for unit-test inventories explicitly created without a skill engine.
+
 ### Unbreaking driven by Skills
 
 The bundled Unbreaking definition has two `~onItemDamage` skill rules:

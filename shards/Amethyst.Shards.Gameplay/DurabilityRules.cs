@@ -83,26 +83,30 @@ public static class DurabilityRules
     /// accounting and can credit the remaining XP to the player.</summary>
     public static (int ExperienceLeft, bool Changed, int RepairedSlot) ApplyMending(
         ItemStack[] slots, int selectedSlot, int xp, IShardItemRegistry? items,
-        Random? random = null)
+        Random? random = null, Func<ItemStack, int>? repairPerXp = null)
     {
         if (xp <= 0 || items is null || slots.Length < 46 ||
             selectedSlot is < 36 or > 44) return (xp, false, -1);
-        var candidates = new List<int>();
+        var candidates = new List<(int Slot, int Rate)>();
         foreach (int slot in new[] { selectedSlot, 45, 5, 6, 7, 8 })
         {
             ItemStack stack = slots[slot];
-            if (stack.Count != 1 || stack.Damage <= 0 || !stack.Mending ||
+            if (stack.Count != 1 || stack.Damage <= 0 ||
                 !items.TryGetById(stack.ItemId, out var definition) ||
                 definition.MaxDurability <= 0)
                 continue;
-            candidates.Add(slot);
+            int rate = repairPerXp is null ? (stack.Mending ? 2 : 0) :
+                repairPerXp(stack);
+            if (rate is < 1 or > 64) continue;
+            candidates.Add((slot, rate));
         }
         if (candidates.Count == 0) return (xp, false, -1);
         random ??= Random.Shared;
-        int chosen = candidates[random.Next(candidates.Count)];
+        var (chosen, ratePerXp) = candidates[random.Next(candidates.Count)];
         ItemStack item = slots[chosen];
-        int repair = Math.Min(item.Damage, (int)Math.Min((long)xp * 2, int.MaxValue));
-        int cost = (repair + 1) / 2;
+        int repair = Math.Min(item.Damage,
+            (int)Math.Min((long)xp * ratePerXp, int.MaxValue));
+        int cost = (repair + ratePerXp - 1) / ratePerXp;
         slots[chosen] = item with { Damage = item.Damage - repair };
         return (xp - cost, true, chosen);
     }

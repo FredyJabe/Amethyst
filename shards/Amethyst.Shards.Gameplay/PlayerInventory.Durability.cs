@@ -73,8 +73,10 @@ public sealed partial class PlayerInventory
         lock (_sync)
         {
             ItemStack[] snapshot = (ItemStack[])_slots.Clone();
+            Func<ItemStack, int>? mendingRate = _durabilitySkills is null
+                ? null : _durabilitySkills.MendingRate;
             var (left, changed, slot) = DurabilityRules.ApplyMending(
-                _slots, 36 + _selected, experience, _items, random);
+                _slots, 36 + _selected, experience, _items, random, mendingRate);
             if (!changed) return (experience, -1);
             try { Persist(); _revision++; }
             catch { Array.Copy(snapshot, _slots, _slots.Length); throw; }

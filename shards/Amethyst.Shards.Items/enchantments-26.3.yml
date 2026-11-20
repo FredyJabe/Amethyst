@@ -281,6 +281,10 @@ mending:
   SupportedItems: [breakable]
   Conflicts: [minecraft:infinity]
   Treasure: true
+  Stats:
+    mending_repair_per_xp:
+      Trigger: onExperiencePickup
+      Base: 2
   Skills:
     - "setFlag{name=mending} @self ~onExperiencePickup"
 
