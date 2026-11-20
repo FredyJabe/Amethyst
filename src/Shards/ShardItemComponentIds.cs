@@ -137,6 +137,24 @@ cushion/color
             .ToDictionary(pair => "minecraft:" + pair.name,
                 pair => pair.index, StringComparer.Ordinal);
 
+    /// <summary>Every component type supported by the pinned Java 26.3
+    /// registry, in protocol-ID order. Data formats vary by type.</summary>
+    public static IReadOnlyList<string> All { get; } =
+        Array.AsReadOnly(Names.Select(name => "minecraft:" + name).ToArray());
+
+    public static int Count => Names.Length;
+
+    public static bool TryGetIdentifier(int protocolId, out string identifier)
+    {
+        if ((uint)protocolId < (uint)All.Count)
+        {
+            identifier = All[protocolId];
+            return true;
+        }
+        identifier = string.Empty;
+        return false;
+    }
+
     public static bool TryGetId(string identifier, out int protocolId)
     {
         if (string.IsNullOrWhiteSpace(identifier))
