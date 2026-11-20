@@ -126,6 +126,13 @@ try
     EnchantmentSkills.Register(new TestSkillContext(unbreakingEngine));
     unbreakingEngine.RegisterInstructions("items", catalog.Instructions);
     var wearSkills = new EnchantmentDurability(items, catalog, unbreakingEngine);
+    Check(catalog.TryGet("unbreaking", out var unbreaking) &&
+        unbreaking.Skills.Count == 2 &&
+        unbreaking.Skills.All(s => s.Mechanic.Equals("cancelEvent",
+            StringComparison.OrdinalIgnoreCase)) &&
+        unbreaking.Skills.All(s => s.Conditions.Any(c =>
+            c.Name.Equals("chance", StringComparison.OrdinalIgnoreCase))),
+        "Unbreaking YAML uses cancelEvent guarded by level-sensitive chance");
     Check(items.TryGetByIdentifier("minecraft:diamond_pickaxe", out var pickaxe),
         "Durability test item is registered");
     var enchantedTool = new ItemStack(pickaxe.ProtocolId, 1)
@@ -164,7 +171,7 @@ try
     File.WriteAllText(Path.Combine(inactiveDir, "unbreaking.yml"), """
         unbreaking:
           Skills:
-            - "setFlag{name=prevent_item_damage} @self ~onItemDamage"
+            - "cancelEvent @self ~onItemDamage"
         """);
     var alwaysCatalog = new EnchantmentCatalog(
         Path.Combine(path, "enchantments-26.3.yml"), inactiveDir);
@@ -173,7 +180,61 @@ try
     alwaysEngine.RegisterInstructions("items", alwaysCatalog.Instructions);
     var alwaysWear = new EnchantmentDurability(items, alwaysCatalog, alwaysEngine);
     Check(alwaysWear.PreventsWear(enchantedTool, true, new ConstantRandom(0.99)),
-        "Overriding Unbreaking Skills in YAML immediately changes the wear rule");
+        "Overriding Unbreaking with unconditional cancelEvent prevents wear");
+
+    // A normal flag is not event cancellation. Validate both execution
+    // modes and ensure cancelled events skip later skill instructions.
+    File.WriteAllText(Path.Combine(inactiveDir, "unbreaking.yml"), """
+        unbreaking:
+          Skills:
+            - "setFlag{name=prevent_item_damage} @self ~onItemDamage"
+        """);
+    var flagOnlyCatalog = new EnchantmentCatalog(
+        Path.Combine(path, "enchantments-26.3.yml"), inactiveDir);
+    var flagOnlyEngine = new SkillEngine();
+    EnchantmentSkills.Register(new TestSkillContext(flagOnlyEngine));
+    flagOnlyEngine.RegisterInstructions("items", flagOnlyCatalog.Instructions);
+    Check(!new EnchantmentDurability(items, flagOnlyCatalog, flagOnlyEngine)
+        .PreventsWear(enchantedTool, false, new ConstantRandom(0)),
+        "setFlag cannot cancel a durability event");
+
+    var cancellationEngine = new SkillEngine();
+    EnchantmentSkills.Register(new TestSkillContext(cancellationEngine));
+    cancellationEngine.RegisterInstructions("cancellation-tests", [
+        SkillEngine.Parse("test_cancel", "setFlag{name=before} @self ~onItemDamage"),
+        SkillEngine.Parse("test_cancel",
+            "cancelEvent @self ~onItemDamage ?level{min=2} ?chance{base=1}"),
+        SkillEngine.Parse("test_cancel", "setFlag{name=after} @self ~onItemDamage")
+    ]);
+    var cancelContext = new ShardSkillEvent("test_cancel", "onItemDamage",
+        EnchantmentLevel: 2);
+    Check(cancellationEngine.DispatchImmediate(cancelContext) &&
+        cancelContext.Runtime.IsCancelled &&
+        cancelContext.Runtime.HasFlag("before") &&
+        !cancelContext.Runtime.HasFlag("after"),
+        "cancelEvent stops subsequent synchronous mechanics");
+    var allowedContext = new ShardSkillEvent("test_cancel", "onItemDamage",
+        EnchantmentLevel: 1);
+    Check(cancellationEngine.DispatchImmediate(allowedContext) &&
+        !allowedContext.Runtime.IsCancelled &&
+        allowedContext.Runtime.HasFlag("after"),
+        "Failed cancelEvent condition leaves event running");
+    var asyncContext = new ShardSkillEvent("test_cancel", "onItemDamage",
+        EnchantmentLevel: 2);
+    Check(await cancellationEngine.DispatchAsync(asyncContext) &&
+        asyncContext.Runtime.IsCancelled &&
+        !asyncContext.Runtime.HasFlag("after"),
+        "cancelEvent also stops asynchronous skill dispatch");
+    bool rejectedArgs = false;
+    try
+    {
+        cancellationEngine.RegisterInstructions("invalid-cancel", [
+            SkillEngine.Parse("invalid_cancel",
+                "cancelEvent{something=true} @self ~onItemDamage")
+        ]);
+    }
+    catch (InvalidDataException) { rejectedArgs = true; }
+    Check(rejectedArgs, "cancelEvent rejects unknown parameters at registration");
 
     string componentDir = Path.Combine(temporary, "component-enchantments");
     Directory.CreateDirectory(componentDir);

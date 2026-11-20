@@ -34,12 +34,14 @@ public sealed class EnchantmentDurability(
         runtime.SetFlag(armor ? "armor" : "non_armor");
         foreach (var (id, level) in active)
         {
+            if (runtime.IsCancelled) break;
             if (level <= 0 || !enchantments.TryGet(id, out _)) continue;
             var evt = new ShardSkillEvent(id, "onItemDamage", Random: random,
                 ItemId: stack.ItemId, Count: stack.Count, EnchantmentLevel: level)
                 { Runtime = runtime };
             skills.DispatchImmediate(evt);
         }
-        return runtime.HasFlag("prevent_item_damage");
+        // Cancellation applies only to this single attempted wear point.
+        return runtime.IsCancelled;
     }
 }

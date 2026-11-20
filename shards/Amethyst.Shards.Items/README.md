@@ -705,8 +705,8 @@ in YAML order, before enchantment modifiers; Skills can set flags
 before the enchantment's Stats are evaluated.
 
 Core owns the skill parser, registration, `~triggers` and `?conditions`.
-Items provides `setFlag` and `effect` mechanics and the
-`level`, `target`, `damageType`, `flag`, and `chance`
+Core provides `cancelEvent`; Items provides `setFlag` and `effect`
+mechanics and the `level`, `target`, `damageType`, `flag`, and `chance`
 conditions. Gameplay Shards must publish events and consume the resulting
 numeric values and effect intents; **declaring a stat does not automatically
 implement an unsupported gameplay event**.
@@ -728,13 +728,14 @@ unbreaking:
   AnvilCost: 2
   SupportedItems: [breakable]
   Skills:
-    - "setFlag{name=prevent_item_damage} @self ~onItemDamage ?flag{name=non_armor} ?chance{mode=level_ratio}"
-    - "setFlag{name=prevent_item_damage} @self ~onItemDamage ?flag{name=armor} ?chance{mode=level_ratio;factor=0.4}"
+    - "cancelEvent @self ~onItemDamage ?flag{name=non_armor} ?chance{mode=level_ratio}"
+    - "cancelEvent @self ~onItemDamage ?flag{name=armor} ?chance{mode=level_ratio;factor=0.4}"
 ```
 
 Every attempted durability point dispatches `~onItemDamage` through
-Core's shared skill engine. `prevent_item_damage` prevents that
-individual point of wear, including when it would have broken the item.
+Core's shared skill engine. When `cancelEvent` passes its conditions,
+the current event is cancelled, preventing that individual durability
+point of wear (including one that would have broken the item).
 `?chance{mode=level_ratio}` calculates level / (level + 1);
 `factor=0.4` gives armor its vanilla reduced protection chance.
 `?flag{name=armor}` and `?flag{name=non_armor}` are event context
@@ -750,7 +751,11 @@ Elytra and tridents (including damage on the returned trident stack).
 No configured engine means no enchantment-based wear prevention.
 Skill mechanics on this synchronous durability event must complete
 without awaiting; this avoids asynchronous callbacks while holding
-the inventory transaction lock.
+the inventory transaction lock. `cancelEvent` also stops further skill
+instructions on the cancelled event; publishers of other event types
+must explicitly honor `Runtime.IsCancelled` for it to cancel their
+corresponding gameplay action. A regular `setFlag` does not cancel
+an event.
 
 As with all server-authored enchantments, client-provided item NBT
 cannot substitute for inventory authority. Vanilla item components

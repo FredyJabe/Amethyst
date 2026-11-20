@@ -33,6 +33,25 @@ public sealed class SkillEngine : IShardSkillEngine
     private readonly Dictionary<string, Dictionary<string, IReadOnlyList<ShardSkillInstruction>>>
         _packs = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Core-owned cancelEvent mechanic, available to every shard.
+    /// It cancels the active skill event, not its owner or future events.</summary>
+    public SkillEngine()
+    {
+        RegisterMechanic("amethyst", "cancelEvent",
+            static instruction =>
+            {
+                if (instruction.Arguments.Count != 0)
+                    throw new InvalidDataException(
+                        "cancelEvent does not accept arguments; use ?conditions.");
+            },
+            static (_, evt, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                evt.Runtime.Cancel();
+                return ValueTask.CompletedTask;
+            });
+    }
+
     public int OwnerCount
     {
         get
@@ -231,6 +250,7 @@ public sealed class SkillEngine : IShardSkillEngine
         foreach (var skill in skills)
         {
             ct.ThrowIfCancellationRequested();
+            if (context.Runtime.IsCancelled) break;
             if (!string.Equals(skill.Trigger, context.Trigger, StringComparison.OrdinalIgnoreCase))
                 continue;
             ShardSkillExecutor executor;
@@ -304,6 +324,7 @@ public sealed class SkillEngine : IShardSkillEngine
             return false;
         foreach (var skill in skills)
         {
+            if (context.Runtime.IsCancelled) break;
             if (!string.Equals(skill.Trigger, context.Trigger,
                     StringComparison.OrdinalIgnoreCase))
                 continue;

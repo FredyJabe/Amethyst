@@ -21,6 +21,12 @@ public sealed class ShardSkillRuntime
     private readonly HashSet<string> _flags = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<ShardSkillEffect> _effects = [];
 
+    /// <summary>Whether a mechanic cancelled the current event. The event
+    /// publisher must check this before committing its gameplay action.</summary>
+    public bool IsCancelled { get; private set; }
+    /// <summary>Cancel only this event instance; future events start uncancelled.</summary>
+    public void Cancel() => IsCancelled = true;
+
     public IReadOnlyCollection<string> Flags => _flags;
     public IReadOnlyList<ShardSkillEffect> Effects => _effects;
     public double Number(string key, double fallback = 0) =>
