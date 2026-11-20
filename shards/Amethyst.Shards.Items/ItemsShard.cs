@@ -17,6 +17,9 @@ public sealed class ItemCatalog : IShardItemRegistry
         @"^([a-z0-9_.-]+:)?[a-z0-9_./-]+$", RegexOptions.Compiled |
         RegexOptions.CultureInvariant);
     private readonly ShardItemDefinition[] _byId;
+    private readonly ItemComponentNodeMap _componentNodes;
+
+    public IReadOnlyDictionary<string, string> ComponentNodes => _componentNodes.Nodes;
     private readonly IReadOnlyList<ShardItemDefinition> _all;
     private readonly Dictionary<string, ShardItemDefinition> _byName =
         new(StringComparer.OrdinalIgnoreCase);
@@ -25,11 +28,13 @@ public sealed class ItemCatalog : IShardItemRegistry
     public int Count => _byId.Length;
     public IReadOnlyList<ShardItemDefinition> All => _all;
 
-    public ItemCatalog(string vanillaYamlPath, string? overridesDirectory = null)
+    public ItemCatalog(string vanillaYamlPath, string? overridesDirectory = null,
+        ItemComponentNodeMap? componentNodes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(vanillaYamlPath);
+        _componentNodes = componentNodes ?? new ItemComponentNodeMap();
         var definitions = new List<ShardItemDefinition>();
-        foreach (var (root, options) in ReadEntries(vanillaYamlPath))
+        foreach (var (root, options) in ReadEntries(vanillaYamlPath, _componentNodes))
         {
             if (options.ProtocolId != definitions.Count ||
                 options.Id is null || options.MaxStackSize is null ||
@@ -72,7 +77,7 @@ public sealed class ItemCatalog : IShardItemRegistry
                 .Order(StringComparer.Ordinal).ToArray();
             var touched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string file in files)
-                foreach (var (root, options) in ReadEntries(file))
+                foreach (var (root, options) in ReadEntries(file, _componentNodes))
                     ApplyOverride(root, options, file, touched);
         }
         // Capture a read-only snapshot after YAML overrides have been applied.
@@ -285,7 +290,8 @@ public sealed class ItemCatalog : IShardItemRegistry
         public IReadOnlyDictionary<string, string>? Components;
     }
 
-    private static IEnumerable<(string Key, ItemFields Fields)> ReadEntries(string path)
+    private static IEnumerable<(string Key, ItemFields Fields)> ReadEntries(
+        string path, ItemComponentNodeMap componentNodes)
     {
         var yaml = new YamlStream();
         try
@@ -311,6 +317,22 @@ public sealed class ItemCatalog : IShardItemRegistry
                 throw new InvalidDataException($"Item '{key}' in {path} must have a mapping of properties.");
             var fields = new ItemFields();
             var properties = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void AddComponent(string yamlNode, YamlNode data)
+            {
+                if (!componentNodes.TryResolve(yamlNode, out string component))
+                    throw new InvalidDataException(
+                        $"Unknown item component '{yamlNode}' in '{key}' ({path}).");
+                var patch = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (fields.Components is not null)
+                    foreach (var (previous, value) in fields.Components)
+                        patch.Add(previous, value);
+                if (!patch.TryAdd(component,
+                    ItemComponentConfig.Encode(component, data, $"{key} ({path})")))
+                    throw new InvalidDataException(
+                        $"Duplicate component {component} in '{key}' ({path}).");
+                fields.Components = patch;
+            }
             foreach (var field in node.Children)
             {
                 string fieldName = Scalar(field.Key, path, key);
@@ -348,7 +370,18 @@ public sealed class ItemCatalog : IShardItemRegistry
                         fields.Unbreakable = Boolean(field.Value, path, key);
                         break;
                     case "components":
-                        fields.Components = ItemComponentConfig.Parse(field.Value, key);
+                        foreach (var (component, json) in
+                            ItemComponentConfig.Parse(field.Value, key, componentNodes))
+                        {
+                            var patch = new Dictionary<string, string>(StringComparer.Ordinal);
+                            if (fields.Components is not null)
+                                foreach (var (previous, value) in fields.Components)
+                                    patch.Add(previous, value);
+                            if (!patch.TryAdd(component, json))
+                                throw new InvalidDataException(
+                                    $"Duplicate component {component} in '{key}' ({path}).");
+                            fields.Components = patch;
+                        }
                         break;
                     case "custommodeldata":
                         fields.CustomModelData = Integer(field.Value, path, key);
@@ -387,14 +420,22 @@ public sealed class ItemCatalog : IShardItemRegistry
                                     fields.Hidden = Boolean(option.Value, path, key);
                                     break;
                                 default:
-                                    throw new InvalidDataException(
-                                        $"Unsupported Options.{optionName} in '{key}' ({path}).");
+                                    if (componentNodes.TryResolve(optionName, out _))
+                                        AddComponent(optionName, option.Value);
+                                    else
+                                        throw new InvalidDataException(
+                                            $"Unsupported Options.{optionName} in '{key}' ({path}).");
+                                    break;
                             }
                         }
                         break;
                     default:
-                        throw new InvalidDataException(
-                            $"Unsupported item property '{fieldName}' in '{key}' ({path}).");
+                        if (componentNodes.TryResolve(fieldName, out _))
+                            AddComponent(fieldName, field.Value);
+                        else
+                            throw new InvalidDataException(
+                                $"Unsupported item property '{fieldName}' in '{key}' ({path}).");
+                        break;
                 }
             }
             yield return (key, fields);
@@ -470,7 +511,11 @@ public sealed class ItemsShard : IShard
                 #   Lore:
                 #     - "An alias of the vanilla pickaxe; NOT a new protocol item."
                 """ + Environment.NewLine);
-        var catalog = new ItemCatalog(Path.Combine(directory, "items-26.3.yml"), definitions);
+        string componentNodesPath = Path.Combine(ctx.DataDirectory, "component-nodes.yml");
+        ItemComponentNodeMap.WriteTemplateIfMissing(componentNodesPath);
+        var componentNodes = new ItemComponentNodeMap(componentNodesPath);
+        var catalog = new ItemCatalog(Path.Combine(directory, "items-26.3.yml"),
+            definitions, componentNodes);
         string recipeDirectory = Path.Combine(ctx.DataDirectory, "recipes");
         Directory.CreateDirectory(recipeDirectory);
         string exampleRecipe = Path.Combine(recipeDirectory, "example-recipes.yml");
@@ -534,7 +579,8 @@ public sealed class ItemsShard : IShard
         });
         ctx.Log($"Registered {catalog.Count} vanilla Java {catalog.MinecraftVersion} " +
             $"item definitions and {recipes.RecipeCount} YAML recipes; " +
-            $"item overrides: {definitions}; recipe overrides: {recipeDirectory}.");
+            $"item overrides: {definitions}; component nodes: {componentNodesPath}; " +
+            $"recipe overrides: {recipeDirectory}.");
         return Task.CompletedTask;
     }
 
