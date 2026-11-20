@@ -1,126 +1,113 @@
 using System.Collections.ObjectModel;
-using System.Text;
-using System.Text.RegularExpressions;
 using Amethyst.Shards;
-using YamlDotNet.Core;
-using YamlDotNet.RepresentationModel;
 
 namespace Amethyst.BuiltinShards;
 
-/// <summary>Maps all 122 Java 26.3 item data components to editable
-/// administrator YAML node names. A component may be addressed either by
-/// its full namespaced registry ID or the user-selected node name. Aliases
-/// affect parsing only; the wire always uses pinned component registry IDs.</summary>
+/// <summary>Fixed, source-defined YAML node names for Minecraft Java 26.3
+/// item data components. Only explicitly approved names are assigned:
+/// the remaining registry types have no shorthand YAML node pending a
+/// future decision. Canonical minecraft:component IDs remain usable
+/// inside Components: for protocol compatibility. This is NOT a file
+/// configuration system.</summary>
 public sealed class ItemComponentNodeMap
 {
-    private static readonly Regex NodeName = new(
-        @"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    // These 45 names were explicitly selected for Amethyst's public YAML API.
+    // Do not auto-generate names for unassigned component types.
+    private const string FixedAssignments = """
+minecraft:custom_data: CustomData
+minecraft:max_stack_size: StackSize
+minecraft:max_damage: DurabilityMax
+minecraft:damage: DurabilityDamage
+minecraft:unbreakable: Unbreakable
+minecraft:custom_name: CustomName
+minecraft:minimum_attack_charge: MinimumAttackCharge
+minecraft:damage_type: DamageType
+minecraft:item_name: ItemName
+minecraft:item_model: ItemModel
+minecraft:lore: Lore
+minecraft:rarity: Rarity
+minecraft:enchantments: Enchantments
+minecraft:can_place_on: CanPlaceOn
+minecraft:can_break: CanBreak
+minecraft:attribute_modifiers: AttributesModifiers
+minecraft:custom_model_data: CustomModelData
+minecraft:tooltip_display: TooltipDisplay
+minecraft:repair_cost: RepairCost
+minecraft:creative_slot_lock: CreativeSlotLock
+minecraft:enchantment_glint_override: GlintOverride
+minecraft:food: Food
+minecraft:consumable: Consumable
+minecraft:use_remainder: UseRemainder
+minecraft:use_cooldown: UseCooldown
+minecraft:damage_resistant: DamageResistant
+minecraft:tool: Tool
+minecraft:weapon: Weapon
+minecraft:attack_range: AttackRange
+minecraft:enchantable: Enchantable
+minecraft:equippable: Equippable
+minecraft:repairable: Repairable
+minecraft:glider: Glider
+minecraft:tooltip_style: TooltipStyle
+minecraft:death_protection: DeathProtection
+minecraft:blocks_attacks: BlocksAttacks
+minecraft:piercing_weapon: PiercingWeapon
+minecraft:kinetic_weapon: KineticWeapon
+minecraft:dyed_color: DyedColor
+minecraft:instrument: Instrument
+minecraft:jukebox_playable: JukeboxPlayable
+minecraft:lock: Lock
+minecraft:compostable: Compostable
+minecraft:cooking_fuel: CookingFuel
+minecraft:brewing_fuel: BrewingFuel
+""";
 
     private readonly IReadOnlyDictionary<string, string> _nodes;
     private readonly IReadOnlyDictionary<string, string> _aliases;
 
+    /// <summary>The 45 assigned component-ID -> fixed YAML-node mappings.</summary>
     public IReadOnlyDictionary<string, string> Nodes => _nodes;
+    public int PendingCount => ShardItemComponentIds.Count - _nodes.Count;
 
-    public ItemComponentNodeMap(string? yamlPath = null)
+    public ItemComponentNodeMap()
     {
-        var byComponent = ShardItemComponentIds.All.ToDictionary(
-            identifier => identifier, identifier => DefaultNode(identifier),
-            StringComparer.Ordinal);
-        if (yamlPath is not null && File.Exists(yamlPath))
+        var nodes = new Dictionary<string, string>(StringComparer.Ordinal);
+        var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string line in FixedAssignments.Split('\n',
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            var yaml = new YamlStream();
-            try
-            {
-                using var reader = File.OpenText(yamlPath);
-                yaml.Load(reader);
-            }
-            catch (YamlException ex)
-            {
-                throw new InvalidDataException(
-                    $"Invalid component nodes YAML '{yamlPath}': {ex.Message}", ex);
-            }
-            if (yaml.Documents.Count != 1 ||
-                yaml.Documents[0].RootNode is not YamlMappingNode mapping)
-                throw new InvalidDataException(
-                    $"Component nodes YAML '{yamlPath}' must be a root mapping.");
-
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var pair in mapping.Children)
-            {
-                string component = ReadScalar(pair.Key, yamlPath).Trim().ToLowerInvariant();
-                if (!component.Contains(':')) component = "minecraft:" + component;
-                if (!ShardItemComponentIds.TryGetId(component, out _) ||
-                    !seen.Add(component))
-                    throw new InvalidDataException(
-                        $"Unknown or duplicate component '{component}' in {yamlPath}.");
-                string node = ReadScalar(pair.Value, yamlPath).Trim();
-                if (!NodeName.IsMatch(node))
-                    throw new InvalidDataException(
-                        $"Invalid node '{node}' for {component} in {yamlPath}.");
-                byComponent[component] = node;
-            }
+            int separator = line.LastIndexOf(": ", StringComparison.Ordinal);
+            if (separator < 0)
+                throw new InvalidOperationException($"Invalid fixed node mapping: {line}.");
+            string component = line[..separator];
+            string name = line[(separator + 2)..];
+            if (!ShardItemComponentIds.TryGetId(component, out _) ||
+                string.IsNullOrWhiteSpace(name) ||
+                !nodes.TryAdd(component, name) ||
+                !aliases.TryAdd(name, component))
+                throw new InvalidOperationException(
+                    $"Invalid, unknown or duplicated fixed component node {line}.");
         }
+        if (nodes.Count != 45)
+            throw new InvalidOperationException("Expected exactly 45 approved component node names.");
 
-        var byAlias = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (component, node) in byComponent)
-        {
-            if (!NodeName.IsMatch(node))
-                throw new InvalidDataException(
-                    $"Invalid YAML node name '{node}' for {component}.");
-            if (!byAlias.TryAdd(node, component))
-                throw new InvalidDataException(
-                    $"YAML node '{node}' is assigned to more than one component.");
-            // Canonical IDs must win over administrator aliases. Do not allow
-            // an alias like custom_data to shadow a different component ID.
-            if (ShardItemComponentIds.TryGetId(node, out int resolved) &&
-                ShardItemComponentIds.TryGetId(component, out int actual) &&
-                resolved != actual)
-                throw new InvalidDataException(
-                    $"YAML node '{node}' would shadow a different component.");
-        }
-        _nodes = new ReadOnlyDictionary<string, string>(byComponent);
-        _aliases = new ReadOnlyDictionary<string, string>(byAlias);
+        _nodes = new ReadOnlyDictionary<string, string>(nodes);
+        _aliases = new ReadOnlyDictionary<string, string>(aliases);
     }
 
+    /// <summary>Resolve one of the 45 approved names. Fully qualified
+    /// Minecraft registry IDs are accepted directly for compatibility,
+    /// including unassigned components; short inferred names are not.</summary>
     public bool TryResolve(string yamlNode, out string component)
     {
         component = string.Empty;
         if (string.IsNullOrWhiteSpace(yamlNode)) return false;
-        string normalized = yamlNode.Trim();
-        if (ShardItemComponentIds.TryGetId(normalized.ToLowerInvariant(), out int id))
-            return ShardItemComponentIds.TryGetIdentifier(id, out component);
-        return _aliases.TryGetValue(normalized, out component!);
+        string key = yamlNode.Trim();
+        if (key.StartsWith("minecraft:", StringComparison.OrdinalIgnoreCase))
+        {
+            if (ShardItemComponentIds.TryGetId(key.ToLowerInvariant(), out int id))
+                return ShardItemComponentIds.TryGetIdentifier(id, out component);
+            return false;
+        }
+        return _aliases.TryGetValue(key, out component!);
     }
-
-    /// <summary>Creates the first-startup template, one editable field for
-    /// each registry type, and never overwrites an administrator's changes.</summary>
-    public static void WriteTemplateIfMissing(string path)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        if (File.Exists(path)) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        var text = new StringBuilder();
-        text.AppendLine("# Minecraft Java 26.3 item components: component ID -> YAML node name.");
-        text.AppendLine("# Edit the VALUES to rename nodes under Components: or Options:.");
-        text.AppendLine("# Components may always use their minecraft: registry IDs.");
-        text.AppendLine("# Complex component values use explicit WireHex until a typed codec exists.");
-        text.AppendLine("# Never reorder or rename the minecraft: KEYS.");
-        foreach (string component in ShardItemComponentIds.All)
-            text.AppendLine($"{component}: {DefaultNode(component)}");
-        File.WriteAllText(path, text.ToString());
-    }
-
-    public static string DefaultNode(string identifier)
-    {
-        string raw = identifier[(identifier.IndexOf(':') + 1)..];
-        var words = Regex.Split(raw, "[_/.-]");
-        return string.Concat(words.Select(word =>
-            word.Length == 0 ? "" : char.ToUpperInvariant(word[0]) + word[1..]));
-    }
-
-    private static string ReadScalar(YamlNode node, string path) =>
-        node is YamlScalarNode { Value: { } text } ? text :
-        throw new InvalidDataException(
-            $"Component nodes must be scalar values in '{path}'.");
 }
