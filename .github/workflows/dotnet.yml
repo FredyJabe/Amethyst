@@ -19,3 +19,5 @@ jobs:
         run: dotnet run --project tests/ShardTests/ShardTests.csproj -c Release --no-build
       - name: Block interaction and persistence
         run: dotnet run --project tests/BlockTests/BlockTests.csproj -c Release --no-build
+      - name: Enchantment skill and inventory tests
+        run: dotnet run --project tests/EnchantmentTests/EnchantmentTests.csproj -c Release --no-build
