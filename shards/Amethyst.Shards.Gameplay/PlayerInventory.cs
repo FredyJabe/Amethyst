@@ -165,7 +165,7 @@ public sealed partial class PlayerInventory
         bool enchanted = !string.IsNullOrEmpty(s.EnchantmentData);
         if (enchanted)
         {
-            string[] entries = s.EnchantmentData.Split(';');
+            string[] entries = (s.EnchantmentData ?? "").Split(';');
             if (entries.Length > 32 || entries.Any(e => e.Length > 128) ||
                 !entries.SequenceEqual(entries.Order(StringComparer.Ordinal)))
                 return false;
