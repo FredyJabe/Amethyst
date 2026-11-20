@@ -90,7 +90,7 @@ public sealed partial class PlayerInventory
         if (maximum == 0) return 0;
         bool extra = incoming.Damage > 0 || incoming.Unbreaking > 0 ||
             incoming.Mending || incoming.Unbreakable ||
-            incoming.RepairCost > 0;
+            incoming.RepairCost > 0 || !string.IsNullOrEmpty(incoming.EnchantmentData);
         if (extra && (incoming.Count != 1 ||
             !ValidStack(incoming))) return 0;
         lock (_sync)
@@ -189,6 +189,52 @@ public sealed partial class PlayerInventory
             _slots[slot] = current with { Damage = 0 };
             try { Persist(); _revision++; }
             catch { _slots[slot] = current; throw; }
+            return true;
+        }
+    }
+
+    /// <summary>Server-only enchantment writer. Validates the registered
+    /// enchantment, item type and conflict set before mutating a held stack.
+    /// Existing legacy fields keep their previous persistence semantics.</summary>
+    public bool EnchantHeld(string enchantmentId, int level,
+        IShardEnchantmentRegistry registry)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        if (!registry.TryGet(enchantmentId, out var enchantment) ||
+            level is < 1 or > 255 || level > enchantment.MaxLevel)
+            return false;
+        lock (_sync)
+        {
+            int slot = 36 + _selected;
+            ItemStack old = _slots[slot];
+            if (old.Count != 1 || _items is null ||
+                !_items.TryGetById(old.ItemId, out var item) ||
+                !registry.CanApply(enchantment.Identifier, item))
+                return false;
+            foreach (var (id, existingLevel) in old.AllEnchantments())
+                if (existingLevel > 0 && id != enchantment.Identifier &&
+                    registry.ConflictsWith(id, enchantment.Identifier))
+                    return false;
+            ItemStack next;
+            if (enchantment.Identifier == "minecraft:unbreaking")
+                next = old with { Unbreaking = level };
+            else if (enchantment.Identifier == "minecraft:mending")
+                next = old with { Mending = true };
+            else
+            {
+                var levels = old.AllEnchantments()
+                    .Where(p => p.Id != enchantment.Identifier &&
+                        p.Id is not ("minecraft:unbreaking" or "minecraft:mending"))
+                    .ToDictionary(p => p.Id, p => p.Level, StringComparer.Ordinal);
+                levels[enchantment.Identifier] = level;
+                string encoded = string.Join(";", levels.OrderBy(p => p.Key,
+                    StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value));
+                next = old with { EnchantmentData = encoded };
+            }
+            if (next == old || !ValidStack(next)) return false;
+            _slots[slot] = next;
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = old; throw; }
             return true;
         }
     }

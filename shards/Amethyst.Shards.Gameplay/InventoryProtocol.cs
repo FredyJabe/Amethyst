@@ -15,6 +15,44 @@ public readonly record struct ItemStack(int ItemId, int Count)
     public bool Unbreakable { get; init; }
     /// <summary>Anvil prior-work penalty; retained through item moves.</summary>
     public int RepairCost { get; init; }
+
+    /// <summary>Additional vanilla enchantments in canonical, sorted
+    /// "minecraft:id=level;..." form. Unbreaking/Mending retain their
+    /// legacy fields for compatibility with older inventories.</summary>
+    public string EnchantmentData { get; init; } = "";
+
+    public int EnchantmentLevel(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return 0;
+        id = id.StartsWith("minecraft:", StringComparison.OrdinalIgnoreCase)
+            ? id.ToLowerInvariant() : "minecraft:" + id.ToLowerInvariant();
+        if (id == "minecraft:unbreaking") return Unbreaking;
+        if (id == "minecraft:mending") return Mending ? 1 : 0;
+        foreach (string entry in (EnchantmentData ?? "").Split(';',
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            int sep = entry.LastIndexOf('=');
+            if (sep > 0 && entry.AsSpan(0, sep).Equals(id.AsSpan(),
+                StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(entry.AsSpan(sep + 1), out int level))
+                return level;
+        }
+        return 0;
+    }
+
+    public IEnumerable<(string Id, int Level)> AllEnchantments()
+    {
+        if (Unbreaking > 0) yield return ("minecraft:unbreaking", Unbreaking);
+        if (Mending) yield return ("minecraft:mending", 1);
+        foreach (string entry in (EnchantmentData ?? "").Split(';',
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            int sep = entry.LastIndexOf('=');
+            if (sep <= 0 || !int.TryParse(entry.AsSpan(sep + 1), out int level))
+                continue;
+            yield return (entry[..sep], level);
+        }
+    }
 }
 
 public readonly record struct InventoryClick(int Window, int Revision, int Slot,
@@ -49,23 +87,19 @@ public static class InventoryProtocol
             added[4] = static _ => { }; // 26.3 unit component
             removed.Remove(4);
         }
-        if (stack.Unbreaking > 0 || stack.Mending)
+        var enchants = stack.AllEnchantments()
+            .OrderBy(e => VanillaRegistries.IndexOf("minecraft:enchantment", e.Id))
+            .ToArray();
+        if (enchants.Length > 0)
         {
             added[13] = w =>
             {
-                w.WriteVarInt((stack.Unbreaking > 0 ? 1 : 0) +
-                    (stack.Mending ? 1 : 0));
-                if (stack.Unbreaking > 0)
+                w.WriteVarInt(enchants.Length);
+                foreach (var (id, level) in enchants)
                 {
                     w.WriteVarInt(VanillaRegistries.IndexOf(
-                        "minecraft:enchantment", "minecraft:unbreaking"));
-                    w.WriteVarInt(stack.Unbreaking);
-                }
-                if (stack.Mending)
-                {
-                    w.WriteVarInt(VanillaRegistries.IndexOf(
-                        "minecraft:enchantment", "minecraft:mending"));
-                    w.WriteVarInt(1);
+                        "minecraft:enchantment", id));
+                    w.WriteVarInt(level);
                 }
             };
         }

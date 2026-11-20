@@ -8,7 +8,8 @@ namespace Amethyst;
 /// All edits are persisted atomically under Gameplay's Shard data directory.</summary>
 public sealed partial class PlayerInventory
 {
-    private static readonly byte[] Magic = "AMINV004"u8.ToArray();
+    private static readonly byte[] Magic = "AMINV005"u8.ToArray();
+    private static readonly byte[] PreviousMagic = "AMINV004"u8.ToArray();
     private static readonly byte[] DamageMagic = "AMINV003"u8.ToArray();
     private static readonly byte[] LegacyMagic = "AMINV002"u8.ToArray();
     private readonly object _sync = new();
@@ -98,7 +99,7 @@ public sealed partial class PlayerInventory
             foreach (int index in Enumerable.Range(36, 9).Concat(Enumerable.Range(9, 27)))
             {
                 ItemStack stack = _slots[index];
-                if (stack.ItemId != itemId || stack.Damage != 0 ||
+                if (!SameItemData(stack, new ItemStack(itemId, 1)) ||
                     stack.Count == 0 || stack.Count >= maximum) continue;
                 int delta = Math.Min(maximum - stack.Count, remaining);
                 _slots[index] = stack with { Count = stack.Count + delta };
@@ -161,8 +162,30 @@ public sealed partial class PlayerInventory
     {
         if (s.Damage < 0 || s.Unbreaking is < 0 or > 3 ||
             s.RepairCost is < 0 or > 1_000_000) return false;
+        bool enchanted = !string.IsNullOrEmpty(s.EnchantmentData);
+        if (enchanted)
+        {
+            string[] entries = s.EnchantmentData.Split(';');
+            if (entries.Length > 32 || entries.Any(e => e.Length > 128) ||
+                !entries.SequenceEqual(entries.Order(StringComparer.Ordinal)))
+                return false;
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string entry in entries)
+            {
+                int equal = entry.LastIndexOf('=');
+                if (equal <= 0 || !int.TryParse(entry.AsSpan(equal + 1),
+                        out int level) || level is < 1 or > 255)
+                    return false;
+                string id = entry[..equal];
+                if (!id.StartsWith("minecraft:", StringComparison.Ordinal) ||
+                    id is "minecraft:unbreaking" or "minecraft:mending" ||
+                    !ids.Add(id)) return false;
+                try { _ = VanillaRegistries.IndexOf("minecraft:enchantment", id); }
+                catch (InvalidDataException) { return false; }
+            }
+        }
         bool extra = s.Damage > 0 || s.Unbreaking > 0 || s.Mending ||
-            s.Unbreakable || s.RepairCost > 0;
+            s.Unbreakable || s.RepairCost > 0 || enchanted;
         if (_items is null)
             return !extra && s.Count is >= 0 and <= 64 &&
                 s.ItemId is >= 0 and <= 1657 &&
@@ -170,8 +193,13 @@ public sealed partial class PlayerInventory
         if (!_items.IsValidStack(s.ItemId, s.Count)) return false;
         if (s.Count == 0) return !extra;
         if (!_items.TryGetById(s.ItemId, out var item)) return false;
-        return !extra || (item.MaxDurability > 0 && s.Count == 1 &&
-            s.Damage < item.MaxDurability);
+        if (!extra) return true;
+        if (s.Count != 1) return false;
+        if (item.MaxDurability > 0) return s.Damage < item.MaxDurability;
+        // Books are allowed to hold enchantments without physical wear.
+        return enchanted && s.Damage == 0 && s.Unbreaking == 0 &&
+            !s.Mending && !s.Unbreakable && s.RepairCost == 0 &&
+            item.Identifier is "minecraft:book" or "minecraft:enchanted_book";
     }
 
     private bool ValidSlotStack(int slot, ItemStack item)
@@ -199,7 +227,9 @@ public sealed partial class PlayerInventory
     private static bool SameItemData(ItemStack a, ItemStack b) =>
         a.ItemId == b.ItemId && a.Damage == b.Damage &&
         a.Unbreaking == b.Unbreaking && a.Mending == b.Mending &&
-        a.Unbreakable == b.Unbreakable && a.RepairCost == b.RepairCost;
+        a.Unbreakable == b.Unbreakable && a.RepairCost == b.RepairCost &&
+        string.Equals(a.EnchantmentData ?? "", b.EnchantmentData ?? "",
+            StringComparison.Ordinal);
 
     /// <summary>Execute server-side mouse clicks, hotbar swaps and shift-clicks.
     /// Client-provided item hashes are never trusted to mint items.</summary>
@@ -324,7 +354,8 @@ public sealed partial class PlayerInventory
         byte[] magic = reader.ReadBytes(Magic.Length);
         bool oldPlain = magic.SequenceEqual(LegacyMagic);
         bool oldDamage = magic.SequenceEqual(DamageMagic);
-        if (!oldPlain && !oldDamage && !magic.SequenceEqual(Magic) ||
+        bool oldV4 = magic.SequenceEqual(PreviousMagic);
+        if (!oldPlain && !oldDamage && !oldV4 && !magic.SequenceEqual(Magic) ||
             reader.ReadInt32() != _slots.Length)
             throw new InvalidDataException($"Bad player inventory header in {_path}");
         ItemStack ReadStack()
@@ -335,10 +366,14 @@ public sealed partial class PlayerInventory
             bool mending = !oldPlain && !oldDamage && reader.ReadBoolean();
             bool unbreakable = !oldPlain && !oldDamage && reader.ReadBoolean();
             int cost = oldPlain || oldDamage ? 0 : reader.ReadInt32();
+            string enchantments = oldPlain || oldDamage || oldV4 ? "" : reader.ReadString();
+            if (enchantments.Length > 4096)
+                throw new InvalidDataException("Oversized enchantment component.");
             return new ItemStack(item, count)
             {
                 Damage = damage, Unbreaking = unbreaking, Mending = mending,
-                Unbreakable = unbreakable, RepairCost = cost
+                Unbreakable = unbreakable, RepairCost = cost,
+                EnchantmentData = enchantments
             };
         }
         for (int i = 0; i < _slots.Length; i++)
@@ -379,6 +414,7 @@ public sealed partial class PlayerInventory
                     output.Write(slot.Mending);
                     output.Write(slot.Unbreakable);
                     output.Write(slot.RepairCost);
+                    output.Write(slot.EnchantmentData ?? "");
                 }
                 foreach (ItemStack slot in _slots) WriteStack(writer, slot);
                 WriteStack(writer, _cursor);
