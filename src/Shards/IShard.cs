@@ -23,6 +23,21 @@ public interface IShardContext
     void Log(string message);
     void RegisterPlayPacketHandler(int packetId, ShardPlayPacketHandler handler);
     void RegisterConsoleCommand(string name, ShardConsoleCommand handler);
+    void RegisterSkillTrigger(string trigger);
+    void RegisterSkillMechanic(string name, ShardSkillValidator validator,
+        ShardSkillExecutor executor);
+    void RegisterSkillCondition(string name, ShardSkillConditionValidator validator,
+        ShardSkillConditionEvaluator evaluator);
+    void RegisterSkillDefinitions(string builtInFile, string? overridesDirectory = null);
+    void RegisterSkillInstructions(IEnumerable<ShardSkillInstruction> instructions);
+    /// <summary>Register a new skill trigger understood by Amethyst Core.</summary>
+    void RegisterSkillTrigger(string trigger);
+    /// <summary>Contribute a mechanic, validator and executor to the global skill engine.</summary>
+    void RegisterSkillMechanic(string name, ShardSkillValidator validator,
+        ShardSkillExecutor executor);
+    /// <summary>Load a Shard's bundled skills plus its administrator overrides.
+    /// A root key is an object ID containing a Skills list.</summary>
+    void RegisterSkillDefinitions(string builtInFile, string? overridesDirectory = null);
 }
 
 /// <summary>Safe view of an authenticated Play-state session for Shards.</summary>

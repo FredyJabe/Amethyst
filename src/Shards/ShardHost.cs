@@ -71,8 +71,19 @@ public sealed class ShardHost : IAsyncDisposable, IShardPacketBus
             _host.RegisterPacket(Id, packetId, handler);
         public void RegisterConsoleCommand(string name, ShardConsoleCommand handler) =>
             _host.RegisterConsole(Id, name, handler);
+        public void RegisterSkillTrigger(string trigger) => _host._skills.RegisterTrigger(Id, trigger);
+        public void RegisterSkillMechanic(string name, ShardSkillValidator validator,
+            ShardSkillExecutor executor) => _host._skills.RegisterMechanic(Id, name, validator, executor);
+        public void RegisterSkillDefinitions(string builtInFile, string? overridesDirectory = null) =>
+            _host._skills.RegisterDefinitions(Id, builtInFile, overridesDirectory);
+        public void RegisterSkillCondition(string name, ShardSkillConditionValidator validator,
+            ShardSkillConditionEvaluator evaluator) =>
+            _host._skills.RegisterCondition(Id, name, validator, evaluator);
+        public void RegisterSkillInstructions(IEnumerable<ShardSkillInstruction> instructions) =>
+            _host._skills.RegisterInstructions(Id, instructions);
     }
 
+    private readonly SkillEngine _skills = new();
     private readonly ServerOptions _options;
     private readonly string _directory;
     private readonly string _dataDirectory;
@@ -91,6 +102,7 @@ public sealed class ShardHost : IAsyncDisposable, IShardPacketBus
         _directory = Path.GetFullPath(installedDirectory);
         _dataDirectory = Path.GetFullPath(dataDirectory);
         Register<IShardPacketBus>("amethyst", this);
+        Register<IShardSkillEngine>("amethyst", _skills);
     }
 
     public T? GetService<T>() where T : class
@@ -163,6 +175,7 @@ public sealed class ShardHost : IAsyncDisposable, IShardPacketBus
 
     private void Unregister(string owner)
     {
+        _skills.Unregister(owner);
         lock (_routerLock)
         {
             _packets.RemoveAll(p => p.Owner == owner);
