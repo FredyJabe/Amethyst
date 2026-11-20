@@ -2,23 +2,50 @@
 
 This is the complete **122-entry** `minecraft:data_component_type` registry used by Minecraft Java **26.3 (protocol 777)**, as declared in `src/Shards/ShardItemComponentIds.cs`. Numeric IDs here are **wire indices**, not item IDs and not stable across versions.
 
-**Supported** means an administrator can currently write the field under an Items Shard `Components:` mapping and Amethyst serializes it. **Not yet supported** means the type exists in the Minecraft registry but needs a typed parser/codec and, in some cases, gameplay before it can be safely configured. Do not copy the full table into executable YAML; unimplemented fields deliberately fail startup.
+Every component type is addressable from YAML using the configurable name in `shards/data/items/component-nodes.yml`, or its literal `minecraft:` registry identifier. **Typed** indicates Amethyst validates and writes a normal YAML value. **WireHex / Remove** indicates the component is available through a protocol-byte payload or removal marker, but the complex semantic YAML codec and (where appropriate) server gameplay are not yet implemented. A raw byte payload must use the exact Java 26.3 encoding: invalid bytes can disconnect or crash the client.
 
-## Example YAML
+## YAML node mapping
 
-Write a custom ID as the root key and an existing vanilla item in the `Id` field. The alias uses the vanilla item protocol ID and is **not independently distinguishable on stacks** yet:
+Change the **value** on any of the 122 lines in
+[component-nodes.yml](../../data/items/component-nodes.yml), e.g.:
 
 ```yaml
-legendary_pickaxe:
-  Id: minecraft:diamond_pickaxe
-  ItemModel: amethyst:legendary_pickaxe
-  Display: "<gold>Legendary Pickaxe</gold>"
-  Components:
-    minecraft:rarity: epic
-    minecraft:enchantment_glint_override: true
+minecraft:item_model: MyItemModel
+minecraft:custom_name: NameText
+minecraft:food: FoodSettings
+minecraft:glider: FlightMode
 ```
 
-To actually display these components in inventory today, override the **canonical vanilla root** (e.g. `diamond_pickaxe:`) instead of a custom alias. The `ItemModel` value is a namespaced resource location and requires the corresponding item-model asset in a client resource pack.
+The Items Shard reads this mapping on startup and accepts these names
+in an item's `Components:` or `Options:` mapping. Canonical
+`minecraft:item_model` keys also remain valid. The configured map is
+exposed to other Shards through `IShardItemRegistry.ComponentNodes`.
+Run `componentnodes` in the console to list the effective mapping,
+or `componentnodes food` to filter it.
+
+```yaml
+diamond_pickaxe:
+  Id: minecraft:diamond_pickaxe
+  Options:
+    MyItemModel: amethyst:miners_pickaxe
+    NameText: "<gold>Amethyst Pickaxe</gold>"
+  Components:
+    FlightMode: true
+    FoodSettings:
+      # Example of an advanced, pre-encoded Java 26.3 protocol payload:
+      WireHex: "001122"
+```
+
+The `FoodSettings` example is **not a valid food payload**; it illustrates
+syntax only. Do not use it on a live server. To remove any component
+from the vanilla prototype, write `{ Remove: true }`. For unknown or
+complex component formats, `WireHex` must contain the already encoded
+*value bytes only*, not the component ID or overall Slot packet.
+
+Aliases based on a vanilla material are still not distinct per-stack
+identities: override the canonical vanilla item root to alter all stacks
+of that material. Client-side custom models require the matching
+resource pack.
 
 ## Supported component shapes
 
@@ -36,6 +63,9 @@ To actually display these components in inventory today, override the **canonica
 | `minecraft:max_stack_size` | `16` (vanilla-capacity constraint applies) |
 | `minecraft:custom_model_data` | `{floats: [42.0], flags: [], strings: [], colors: []}` |
 | `minecraft:tooltip_display` | `{hide_tooltip: false, hidden_components: [minecraft:enchantments]}` |
+| `minecraft:max_damage`, `damage`, `enchantable`, `map_id` | `120` (nonnegative integer) |
+| `minecraft:dyed_color` | `16711935` (RGB integer) |
+| `minecraft:creative_slot_lock`, `intangible_projectile`, `glider`, `waxed` | `true` or `false` |
 
 ## Complete component registry
 
@@ -43,144 +73,144 @@ To actually display these components in inventory today, override the **canonica
 
 | Registry ID | Component | YAML serialization |
 | ---: | --- | --- |
-| 0 | `minecraft:custom_data` | Not yet supported |
-| 1 | `minecraft:max_stack_size` | Supported |
-| 2 | `minecraft:max_damage` | Not yet supported |
-| 3 | `minecraft:damage` | Not yet supported |
-| 4 | `minecraft:unbreakable` | Supported |
-| 5 | `minecraft:use_effects` | Not yet supported |
-| 6 | `minecraft:custom_name` | Supported |
-| 7 | `minecraft:minimum_attack_charge` | Not yet supported |
-| 8 | `minecraft:damage_type` | Not yet supported |
-| 9 | `minecraft:item_name` | Supported |
-| 10 | `minecraft:item_model` | Supported |
-| 11 | `minecraft:lore` | Supported |
-| 12 | `minecraft:rarity` | Supported |
-| 13 | `minecraft:enchantments` | Not yet supported |
-| 14 | `minecraft:can_place_on` | Not yet supported |
-| 15 | `minecraft:can_break` | Not yet supported |
-| 16 | `minecraft:attribute_modifiers` | Not yet supported |
-| 17 | `minecraft:custom_model_data` | Supported |
-| 18 | `minecraft:tooltip_display` | Supported |
-| 19 | `minecraft:repair_cost` | Supported |
-| 20 | `minecraft:creative_slot_lock` | Not yet supported |
-| 21 | `minecraft:enchantment_glint_override` | Supported |
-| 22 | `minecraft:intangible_projectile` | Not yet supported |
+| 0 | `minecraft:custom_data` | WireHex / Remove |
+| 1 | `minecraft:max_stack_size` | Typed |
+| 2 | `minecraft:max_damage` | Typed |
+| 3 | `minecraft:damage` | Typed |
+| 4 | `minecraft:unbreakable` | Typed |
+| 5 | `minecraft:use_effects` | WireHex / Remove |
+| 6 | `minecraft:custom_name` | Typed |
+| 7 | `minecraft:minimum_attack_charge` | WireHex / Remove |
+| 8 | `minecraft:damage_type` | WireHex / Remove |
+| 9 | `minecraft:item_name` | Typed |
+| 10 | `minecraft:item_model` | Typed |
+| 11 | `minecraft:lore` | Typed |
+| 12 | `minecraft:rarity` | Typed |
+| 13 | `minecraft:enchantments` | WireHex / Remove |
+| 14 | `minecraft:can_place_on` | WireHex / Remove |
+| 15 | `minecraft:can_break` | WireHex / Remove |
+| 16 | `minecraft:attribute_modifiers` | WireHex / Remove |
+| 17 | `minecraft:custom_model_data` | Typed |
+| 18 | `minecraft:tooltip_display` | Typed |
+| 19 | `minecraft:repair_cost` | Typed |
+| 20 | `minecraft:creative_slot_lock` | Typed |
+| 21 | `minecraft:enchantment_glint_override` | Typed |
+| 22 | `minecraft:intangible_projectile` | Typed |
 
 ### ID 23–45: use, equipment, and interactions
 
 | Registry ID | Component | YAML serialization |
 | ---: | --- | --- |
-| 23 | `minecraft:food` | Not yet supported |
-| 24 | `minecraft:consumable` | Not yet supported |
-| 25 | `minecraft:use_remainder` | Not yet supported |
-| 26 | `minecraft:use_cooldown` | Not yet supported |
-| 27 | `minecraft:damage_resistant` | Not yet supported |
-| 28 | `minecraft:tool` | Not yet supported |
-| 29 | `minecraft:weapon` | Not yet supported |
-| 30 | `minecraft:attack_range` | Not yet supported |
-| 31 | `minecraft:enchantable` | Not yet supported |
-| 32 | `minecraft:equippable` | Not yet supported |
-| 33 | `minecraft:repairable` | Not yet supported |
-| 34 | `minecraft:glider` | Not yet supported |
-| 35 | `minecraft:tooltip_style` | Supported |
-| 36 | `minecraft:death_protection` | Not yet supported |
-| 37 | `minecraft:blocks_attacks` | Not yet supported |
-| 38 | `minecraft:piercing_weapon` | Not yet supported |
-| 39 | `minecraft:kinetic_weapon` | Not yet supported |
-| 40 | `minecraft:attack_animation` | Not yet supported |
-| 41 | `minecraft:interact_animation` | Not yet supported |
-| 42 | `minecraft:additional_trade_cost` | Not yet supported |
-| 43 | `minecraft:block_transformer` | Not yet supported |
-| 44 | `minecraft:villager_food` | Not yet supported |
-| 45 | `minecraft:stored_enchantments` | Not yet supported |
+| 23 | `minecraft:food` | WireHex / Remove |
+| 24 | `minecraft:consumable` | WireHex / Remove |
+| 25 | `minecraft:use_remainder` | WireHex / Remove |
+| 26 | `minecraft:use_cooldown` | WireHex / Remove |
+| 27 | `minecraft:damage_resistant` | WireHex / Remove |
+| 28 | `minecraft:tool` | WireHex / Remove |
+| 29 | `minecraft:weapon` | WireHex / Remove |
+| 30 | `minecraft:attack_range` | WireHex / Remove |
+| 31 | `minecraft:enchantable` | Typed |
+| 32 | `minecraft:equippable` | WireHex / Remove |
+| 33 | `minecraft:repairable` | WireHex / Remove |
+| 34 | `minecraft:glider` | Typed |
+| 35 | `minecraft:tooltip_style` | Typed |
+| 36 | `minecraft:death_protection` | WireHex / Remove |
+| 37 | `minecraft:blocks_attacks` | WireHex / Remove |
+| 38 | `minecraft:piercing_weapon` | WireHex / Remove |
+| 39 | `minecraft:kinetic_weapon` | WireHex / Remove |
+| 40 | `minecraft:attack_animation` | WireHex / Remove |
+| 41 | `minecraft:interact_animation` | WireHex / Remove |
+| 42 | `minecraft:additional_trade_cost` | WireHex / Remove |
+| 43 | `minecraft:block_transformer` | WireHex / Remove |
+| 44 | `minecraft:villager_food` | WireHex / Remove |
+| 45 | `minecraft:stored_enchantments` | WireHex / Remove |
 
 ### ID 46–86: containers, stored data, and content
 
 | Registry ID | Component | YAML serialization |
 | ---: | --- | --- |
-| 46 | `minecraft:dye` | Not yet supported |
-| 47 | `minecraft:dyed_color` | Not yet supported |
-| 48 | `minecraft:map_id` | Not yet supported |
-| 49 | `minecraft:map_decorations` | Not yet supported |
-| 50 | `minecraft:map_post_processing` | Not yet supported |
-| 51 | `minecraft:charged_projectiles` | Not yet supported |
-| 52 | `minecraft:bundle_contents` | Not yet supported |
-| 53 | `minecraft:potion_contents` | Not yet supported |
-| 54 | `minecraft:potion_duration_scale` | Not yet supported |
-| 55 | `minecraft:suspicious_stew_effects` | Not yet supported |
-| 56 | `minecraft:writable_book_content` | Not yet supported |
-| 57 | `minecraft:written_book_content` | Not yet supported |
-| 58 | `minecraft:trim` | Not yet supported |
-| 59 | `minecraft:debug_stick_state` | Not yet supported |
-| 60 | `minecraft:entity_data` | Not yet supported |
-| 61 | `minecraft:bucket_entity_data` | Not yet supported |
-| 62 | `minecraft:block_entity_data` | Not yet supported |
-| 63 | `minecraft:instrument` | Not yet supported |
-| 64 | `minecraft:provides_trim_material` | Not yet supported |
-| 65 | `minecraft:ominous_bottle_amplifier` | Not yet supported |
-| 66 | `minecraft:jukebox_playable` | Not yet supported |
-| 67 | `minecraft:provides_banner_patterns` | Not yet supported |
-| 68 | `minecraft:recipes` | Not yet supported |
-| 69 | `minecraft:lodestone_tracker` | Not yet supported |
-| 70 | `minecraft:firework_explosion` | Not yet supported |
-| 71 | `minecraft:fireworks` | Not yet supported |
-| 72 | `minecraft:profile` | Not yet supported |
-| 73 | `minecraft:note_block_sound` | Not yet supported |
-| 74 | `minecraft:banner_patterns` | Not yet supported |
-| 75 | `minecraft:base_color` | Not yet supported |
-| 76 | `minecraft:pot_decorations` | Not yet supported |
-| 77 | `minecraft:container` | Not yet supported |
-| 78 | `minecraft:block_state` | Not yet supported |
-| 79 | `minecraft:bees` | Not yet supported |
-| 80 | `minecraft:sulfur_cube_content` | Not yet supported |
-| 81 | `minecraft:lock` | Not yet supported |
-| 82 | `minecraft:container_loot` | Not yet supported |
-| 83 | `minecraft:break_sound` | Not yet supported |
-| 84 | `minecraft:compostable` | Not yet supported |
-| 85 | `minecraft:cooking_fuel` | Not yet supported |
-| 86 | `minecraft:brewing_fuel` | Not yet supported |
+| 46 | `minecraft:dye` | WireHex / Remove |
+| 47 | `minecraft:dyed_color` | Typed |
+| 48 | `minecraft:map_id` | Typed |
+| 49 | `minecraft:map_decorations` | WireHex / Remove |
+| 50 | `minecraft:map_post_processing` | WireHex / Remove |
+| 51 | `minecraft:charged_projectiles` | WireHex / Remove |
+| 52 | `minecraft:bundle_contents` | WireHex / Remove |
+| 53 | `minecraft:potion_contents` | WireHex / Remove |
+| 54 | `minecraft:potion_duration_scale` | WireHex / Remove |
+| 55 | `minecraft:suspicious_stew_effects` | WireHex / Remove |
+| 56 | `minecraft:writable_book_content` | WireHex / Remove |
+| 57 | `minecraft:written_book_content` | WireHex / Remove |
+| 58 | `minecraft:trim` | WireHex / Remove |
+| 59 | `minecraft:debug_stick_state` | WireHex / Remove |
+| 60 | `minecraft:entity_data` | WireHex / Remove |
+| 61 | `minecraft:bucket_entity_data` | WireHex / Remove |
+| 62 | `minecraft:block_entity_data` | WireHex / Remove |
+| 63 | `minecraft:instrument` | WireHex / Remove |
+| 64 | `minecraft:provides_trim_material` | WireHex / Remove |
+| 65 | `minecraft:ominous_bottle_amplifier` | WireHex / Remove |
+| 66 | `minecraft:jukebox_playable` | WireHex / Remove |
+| 67 | `minecraft:provides_banner_patterns` | WireHex / Remove |
+| 68 | `minecraft:recipes` | WireHex / Remove |
+| 69 | `minecraft:lodestone_tracker` | WireHex / Remove |
+| 70 | `minecraft:firework_explosion` | WireHex / Remove |
+| 71 | `minecraft:fireworks` | WireHex / Remove |
+| 72 | `minecraft:profile` | WireHex / Remove |
+| 73 | `minecraft:note_block_sound` | WireHex / Remove |
+| 74 | `minecraft:banner_patterns` | WireHex / Remove |
+| 75 | `minecraft:base_color` | WireHex / Remove |
+| 76 | `minecraft:pot_decorations` | WireHex / Remove |
+| 77 | `minecraft:container` | WireHex / Remove |
+| 78 | `minecraft:block_state` | WireHex / Remove |
+| 79 | `minecraft:bees` | WireHex / Remove |
+| 80 | `minecraft:sulfur_cube_content` | WireHex / Remove |
+| 81 | `minecraft:lock` | WireHex / Remove |
+| 82 | `minecraft:container_loot` | WireHex / Remove |
+| 83 | `minecraft:break_sound` | WireHex / Remove |
+| 84 | `minecraft:compostable` | WireHex / Remove |
+| 85 | `minecraft:cooking_fuel` | WireHex / Remove |
+| 86 | `minecraft:brewing_fuel` | WireHex / Remove |
 
 ### ID 87–121: variants and remaining components
 
 | Registry ID | Component | YAML serialization |
 | ---: | --- | --- |
-| 87 | `minecraft:mob_visibility` | Not yet supported |
-| 88 | `minecraft:villager/variant` | Not yet supported |
-| 89 | `minecraft:wolf/variant` | Not yet supported |
-| 90 | `minecraft:wolf/sound_variant` | Not yet supported |
-| 91 | `minecraft:wolf/collar` | Not yet supported |
-| 92 | `minecraft:fox/variant` | Not yet supported |
-| 93 | `minecraft:salmon/size` | Not yet supported |
-| 94 | `minecraft:parrot/variant` | Not yet supported |
-| 95 | `minecraft:tropical_fish/pattern` | Not yet supported |
-| 96 | `minecraft:tropical_fish/base_color` | Not yet supported |
-| 97 | `minecraft:tropical_fish/pattern_color` | Not yet supported |
-| 98 | `minecraft:mooshroom/variant` | Not yet supported |
-| 99 | `minecraft:rabbit/variant` | Not yet supported |
-| 100 | `minecraft:pig/variant` | Not yet supported |
-| 101 | `minecraft:pig/sound_variant` | Not yet supported |
-| 102 | `minecraft:cow/variant` | Not yet supported |
-| 103 | `minecraft:cow/sound_variant` | Not yet supported |
-| 104 | `minecraft:chicken/variant` | Not yet supported |
-| 105 | `minecraft:chicken/sound_variant` | Not yet supported |
-| 106 | `minecraft:zombie_nautilus/variant` | Not yet supported |
-| 107 | `minecraft:frog/variant` | Not yet supported |
-| 108 | `minecraft:horse/variant` | Not yet supported |
-| 109 | `minecraft:painting/variant` | Not yet supported |
-| 110 | `minecraft:llama/variant` | Not yet supported |
-| 111 | `minecraft:axolotl/variant` | Not yet supported |
-| 112 | `minecraft:cat/variant` | Not yet supported |
-| 113 | `minecraft:cat/sound_variant` | Not yet supported |
-| 114 | `minecraft:cat/collar` | Not yet supported |
-| 115 | `minecraft:sheep/color` | Not yet supported |
-| 116 | `minecraft:shulker/color` | Not yet supported |
-| 117 | `minecraft:provides_pottery_pattern` | Not yet supported |
-| 118 | `minecraft:sign_text_front` | Not yet supported |
-| 119 | `minecraft:sign_text_back` | Not yet supported |
-| 120 | `minecraft:waxed` | Not yet supported |
-| 121 | `minecraft:cushion/color` | Not yet supported |
+| 87 | `minecraft:mob_visibility` | WireHex / Remove |
+| 88 | `minecraft:villager/variant` | WireHex / Remove |
+| 89 | `minecraft:wolf/variant` | WireHex / Remove |
+| 90 | `minecraft:wolf/sound_variant` | WireHex / Remove |
+| 91 | `minecraft:wolf/collar` | WireHex / Remove |
+| 92 | `minecraft:fox/variant` | WireHex / Remove |
+| 93 | `minecraft:salmon/size` | WireHex / Remove |
+| 94 | `minecraft:parrot/variant` | WireHex / Remove |
+| 95 | `minecraft:tropical_fish/pattern` | WireHex / Remove |
+| 96 | `minecraft:tropical_fish/base_color` | WireHex / Remove |
+| 97 | `minecraft:tropical_fish/pattern_color` | WireHex / Remove |
+| 98 | `minecraft:mooshroom/variant` | WireHex / Remove |
+| 99 | `minecraft:rabbit/variant` | WireHex / Remove |
+| 100 | `minecraft:pig/variant` | WireHex / Remove |
+| 101 | `minecraft:pig/sound_variant` | WireHex / Remove |
+| 102 | `minecraft:cow/variant` | WireHex / Remove |
+| 103 | `minecraft:cow/sound_variant` | WireHex / Remove |
+| 104 | `minecraft:chicken/variant` | WireHex / Remove |
+| 105 | `minecraft:chicken/sound_variant` | WireHex / Remove |
+| 106 | `minecraft:zombie_nautilus/variant` | WireHex / Remove |
+| 107 | `minecraft:frog/variant` | WireHex / Remove |
+| 108 | `minecraft:horse/variant` | WireHex / Remove |
+| 109 | `minecraft:painting/variant` | WireHex / Remove |
+| 110 | `minecraft:llama/variant` | WireHex / Remove |
+| 111 | `minecraft:axolotl/variant` | WireHex / Remove |
+| 112 | `minecraft:cat/variant` | WireHex / Remove |
+| 113 | `minecraft:cat/sound_variant` | WireHex / Remove |
+| 114 | `minecraft:cat/collar` | WireHex / Remove |
+| 115 | `minecraft:sheep/color` | WireHex / Remove |
+| 116 | `minecraft:shulker/color` | WireHex / Remove |
+| 117 | `minecraft:provides_pottery_pattern` | WireHex / Remove |
+| 118 | `minecraft:sign_text_front` | WireHex / Remove |
+| 119 | `minecraft:sign_text_back` | WireHex / Remove |
+| 120 | `minecraft:waxed` | Typed |
+| 121 | `minecraft:cushion/color` | WireHex / Remove |
 
-**Total: 122 components, 12 with implemented definition codecs.**
+**Total: 122 configurable YAML nodes. 21 typed component codecs; every other registered component can use WireHex or Remove.**
 
 Minecraft reference: [Data component format](https://minecraft.wiki/w/Data_component_format).
