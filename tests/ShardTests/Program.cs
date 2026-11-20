@@ -162,7 +162,9 @@ try
     IShardItemRegistry items = host.GetService<IShardItemRegistry>() ??
         throw new Exception("FAIL: Items Shard service not registered");
     Check(items.MinecraftVersion == "26.3" && items.Count == 1658 &&
-        items.All.Count == 1658,
+        items.All.Count == 1658 && items.ComponentNodes.Count == 122 &&
+        items.ComponentNodes["minecraft:item_model"] == "ModelPath" &&
+        items.ComponentNodes["minecraft:custom_data"] == "DataBlob",
         "Items Shard auto-enabled and complete 26.3 definitions published");
     IShardRecipeRegistry recipes = host.GetService<IShardRecipeRegistry>() ??
         throw new Exception("FAIL: Items Shard recipe provider not registered");
@@ -333,6 +335,9 @@ try
         !items.IsValidStack(pearl.ProtocolId, 17) &&
         !items.IsValidStack(1658, 1),
         "Known item stack caps and unknown-ID rejection come from the Items Shard");
+    Check(host.RegisteredConsoleCommands.Contains("componentnodes") &&
+        await host.TryExecuteConsoleAsync("componentnodes model", CancellationToken.None),
+        "Component node mapping command lists the configured YAML keys");
     Check(host.RegisteredConsoleCommands.Contains("iteminfo") &&
         await host.TryExecuteConsoleAsync("iteminfo 405", CancellationToken.None),
         "iteminfo command is registered by the Items Shard");
@@ -363,7 +368,8 @@ try
     Check(host.GetService<IShardItemRegistry>() is null &&
         host.GetService<IShardRecipeRegistry>() is null &&
         !host.RegisteredConsoleCommands.Contains("recipes") &&
-        !host.RegisteredConsoleCommands.Contains("iteminfo"),
+        !host.RegisteredConsoleCommands.Contains("iteminfo") &&
+        !host.RegisteredConsoleCommands.Contains("componentnodes"),
         "Disabling Items Shard unregisters its definitions and iteminfo command");
     await host.DisableAsync("overworld");
     Check(host.GetService<IShardWorld>() is null, "world service removed");
