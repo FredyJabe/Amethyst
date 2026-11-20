@@ -44,9 +44,10 @@ blueLoot.SetNumber("looting_level", 3);
 await lootEngine.DispatchAsync(new ShardSkillEvent(
     "minecraft:sheep", "onDeath", Random: new Random(12))
     { Runtime = blueLoot });
-Check(items.TryGetByIdentifier("minecraft:blue_wool", out var blueWool) &&
-    items.TryGetByIdentifier("minecraft:mutton", out var mutton) &&
-    blueLoot.Drops.Count == 2 &&
+if (!items.TryGetByIdentifier("minecraft:blue_wool", out var blueWool) ||
+    !items.TryGetByIdentifier("minecraft:mutton", out var mutton))
+    throw new InvalidDataException("Missing vanilla sheep loot items.");
+Check(blueLoot.Drops.Count == 2 &&
     blueLoot.Drops.Single(x => x.ItemId == blueWool.ProtocolId).Count == 1 &&
     blueLoot.Drops.Single(x => x.ItemId == mutton.ProtocolId).Count is >= 1 and <= 5,
     "Sheep loot respects color flags and rolled Looting bonus");
