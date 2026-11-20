@@ -23,6 +23,9 @@ public readonly record struct ShardItemDefinition(
     public IReadOnlyDictionary<string, string>? Components { get; init; }
     /// <summary>Server-authoritative Stats modifiers, separate from Java item components.</summary>
     public IReadOnlyList<ShardStatModifier>? Stats { get; init; }
+    /// <summary>Server-authoritative item event mechanics, distinct from
+    /// Minecraft's data components. Executed by the shared skill engine.</summary>
+    public IReadOnlyList<ShardSkillInstruction>? Skills { get; init; }
     /// <summary>Convenience accessor for the minecraft:item_model component.</summary>
     public string? ItemModel { get; init; }
     /// <summary>Java 26.3 default max damage; zero means non-damageable.

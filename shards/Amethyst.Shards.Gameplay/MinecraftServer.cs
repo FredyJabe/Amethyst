@@ -933,6 +933,33 @@ public sealed partial class MinecraftServer
     internal async Task HandleBlockUseAsync(ConnectedPlayer player,
         BlockUseOn hit, CancellationToken ct)
     {
+        // Item skills run even when they cancel the vanilla right-click.
+        // Do not open menus, place blocks, or consume materials if cancelled.
+        if (hit.ValidHit && player.Ready)
+        {
+            ItemStack held = hit.Hand == 0 ? player.Inventory.Held() :
+                player.Inventory.Snapshot().Slots[45];
+            var evt = await EnchantmentEventAsync(held, "onRightClick", ct,
+                actor: player.PlayerUuid);
+            if (evt.IsCancelled)
+            {
+                if (_blocks is not null && CanEditAt(player, hit.X, hit.Y, hit.Z))
+                    await BlockInteractionProtocol.SendBlockUpdateAsync(
+                        player.Connection, hit.X, hit.Y, hit.Z,
+                        _blocks.GetBlockState(hit.X, hit.Y, hit.Z), ct);
+                var adjacent = BlockInteractionProtocol.Adjacent(hit.X,
+                    hit.Y, hit.Z, hit.Face);
+                if (_blocks is not null && CanEditAt(player,
+                    adjacent.X, adjacent.Y, adjacent.Z))
+                    await BlockInteractionProtocol.SendBlockUpdateAsync(
+                        player.Connection, adjacent.X, adjacent.Y, adjacent.Z,
+                        _blocks.GetBlockState(adjacent.X, adjacent.Y,
+                            adjacent.Z), ct);
+                await BlockInteractionProtocol.SendAckAsync(player.Connection,
+                    hit.Sequence, ct);
+                return;
+            }
+        }
         if (hit.ValidHit && hit.Hand == 0 &&
             CanEditAt(player, hit.X, hit.Y, hit.Z) &&
             WorkstationManager.FromBlockState(

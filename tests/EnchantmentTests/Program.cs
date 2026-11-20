@@ -81,6 +81,9 @@ try
     Directory.CreateDirectory(itemOverrides);
     File.WriteAllText(Path.Combine(itemOverrides, "sword.yml"), """
         diamond_sword:
+          Skills:
+            - "cancelEvent @self ~onRightClick"
+            - "setFlag{name=right_click_done} @self ~onRightClick"
           Stats:
             damage:
               Trigger: onAttack
@@ -133,6 +136,19 @@ try
         unbreaking.Skills.All(s => s.Conditions.Any(c =>
             c.Name.Equals("chance", StringComparison.OrdinalIgnoreCase))),
         "Unbreaking YAML uses cancelEvent guarded by level-sensitive chance");
+    // Items now use the same skill engine as enchantments, with
+    // non-interrupting cancellation of the default right-click action.
+    Check(boosted.Skills is { Count: 2 } &&
+        boosted.Skills.All(skill => skill.Trigger == "onRightClick"),
+        "Item-level Skills parse without being Minecraft components");
+    var itemSkillEngine = new SkillEngine();
+    EnchantmentSkills.Register(new TestSkillContext(itemSkillEngine));
+    itemSkillEngine.RegisterInstructions("item-tests", boosted.Skills ?? []);
+    var rightClick = new ShardSkillEvent(boosted.Identifier, "onRightClick");
+    Check(await itemSkillEngine.DispatchAsync(rightClick) &&
+        rightClick.Runtime.IsCancelled &&
+        rightClick.Runtime.HasFlag("right_click_done"),
+        "cancelEvent on an item suppresses vanilla use but executes later skills");
     Check(items.TryGetByIdentifier("minecraft:diamond_pickaxe", out var pickaxe),
         "Durability test item is registered");
     var enchantedTool = new ItemStack(pickaxe.ProtocolId, 1)

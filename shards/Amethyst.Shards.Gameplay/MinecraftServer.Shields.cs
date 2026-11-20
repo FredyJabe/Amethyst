@@ -8,6 +8,16 @@ public sealed partial class MinecraftServer
         UseItemAction action, CancellationToken ct)
     {
         if (!player.Ready) return;
+        var item = action.Hand == 0 ? player.Inventory.Held() :
+            player.Inventory.Snapshot().Slots[45];
+        var useEvent = await EnchantmentEventAsync(item, "onRightClick", ct,
+            actor: player.PlayerUuid);
+        if (useEvent.IsCancelled)
+        {
+            await BlockInteractionProtocol.SendAckAsync(player.Connection,
+                action.Sequence, ct);
+            return;
+        }
         if (await HandleShieldUseAsync(player, action, ct)) return;
         if (await HandleProjectileUseAsync(player, action, ct)) return;
         if (await HandleFishingUseAsync(player, action, ct)) return;

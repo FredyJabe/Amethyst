@@ -21,6 +21,8 @@ public sealed class ItemCatalog : IShardItemRegistry
 
     public IReadOnlyDictionary<string, string> ComponentNodes => _componentNodes.Nodes;
     private readonly IReadOnlyList<ShardItemDefinition> _all;
+    private readonly List<ShardItemDefinition> _aliases = [];
+    public IReadOnlyList<ShardItemDefinition> Aliases => _aliases.AsReadOnly();
     private readonly Dictionary<string, ShardItemDefinition> _byName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -166,6 +168,7 @@ public sealed class ItemCatalog : IShardItemRegistry
         var alias = ApplyMetadata(material with { Identifier = aliasId }, fields);
         _byName.Add(aliasId, alias);
         if (aliasId != key) _byName.Add(key, alias);
+        _aliases.Add(alias);
     }
 
     private int VanillaMax(int id) => _vanillaMax[id];
@@ -242,6 +245,10 @@ public sealed class ItemCatalog : IShardItemRegistry
             CustomModelData = fields.CustomModelData ?? item.CustomModelData,
             Hidden = fields.Hidden ?? item.Hidden,
             Stats = fields.Stats ?? item.Stats,
+            Skills = fields.Skills is null ? item.Skills :
+                Array.AsReadOnly(fields.Skills
+                    .Select(expression => SkillEngine.Parse(item.Identifier, expression))
+                    .ToArray()),
             Components = new ReadOnlyDictionary<string, string>(patch)
         };
     }
@@ -289,6 +296,7 @@ public sealed class ItemCatalog : IShardItemRegistry
         public bool? Unbreakable;
         public IReadOnlyDictionary<string, string>? Components;
         public IReadOnlyList<ShardStatModifier>? Stats;
+        public string[]? Skills;
     }
 
     private static IEnumerable<(string Key, ItemFields Fields)> ReadEntries(
@@ -372,6 +380,14 @@ public sealed class ItemCatalog : IShardItemRegistry
                         break;
                     case "stats":
                         fields.Stats = StatModifiers.Parse(field.Value, key);
+                        break;
+                    case "skills":
+                        if (field.Value is not YamlSequenceNode skills ||
+                            skills.Children.Count > 32)
+                            throw new InvalidDataException(
+                                $"Skills for '{key}' must be a sequence (max 32).");
+                        fields.Skills = skills.Children
+                            .Select(line => LimitedString(line, path, key)).ToArray();
                         break;
                     case "components":
                         foreach (var (component, json) in
@@ -585,7 +601,11 @@ public sealed class ItemsShard : IShard
             skillEngine.ValidateConditions(stat.Conditions);
         foreach (var stat in enchantments.All.SelectMany(e => e.Stats))
             skillEngine.ValidateConditions(stat.Conditions);
-        ctx.RegisterSkillInstructions(enchantments.Instructions);
+        // Only one skill pack per Shard: item and enchantment skills share
+        // triggers, mechanics, and conditions, but have distinct owner IDs.
+        ctx.RegisterSkillInstructions(enchantments.Instructions
+            .Concat(catalog.All.SelectMany(item => item.Skills ?? []))
+            .Concat(catalog.Aliases.SelectMany(item => item.Skills ?? [])));
         ctx.RegisterService<IShardEnchantmentRegistry>(enchantments);
         ctx.RegisterConsoleCommand("enchantments", (args, token) =>
         {

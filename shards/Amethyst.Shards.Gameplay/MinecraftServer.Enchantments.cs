@@ -25,6 +25,8 @@ public sealed partial class MinecraftServer
                 ActorUuid: actor, ItemId: item.ItemId, Count: item.Count,
                 EnchantmentLevel: 1, TargetKind: targetKind, DamageType: damageType)
                 { Runtime = runtime };
+            if (_skills is not null)
+                await _skills.DispatchAsync(evt, ct);
             foreach (var stat in foundItem.Stats ?? [])
                 stat.Apply(evt, _skills);
         }

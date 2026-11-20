@@ -668,6 +668,30 @@ dotnet run --project tests/BlockTests/BlockTests.csproj -c Release --no-build
 ```
 
 
+## Item Skills and shared triggers
+
+An item YAML root now accepts a `Skills` list alongside `Stats`.
+The shared Core engine validates the mechanics and conditions and
+dispatches them for the applicable item ID. Example:
+
+```yaml
+diamond_sword:
+  Skills:
+    - "cancelEvent @self ~onRightClick ?chance{base=0.25}"
+    - "setFlag{name=custom_action} @self ~onRightClick"
+```
+
+`cancelEvent` never interrupts the remainder of the skill list. Item
+and enchantment Skills are registered into the same Items Shard pack.
+Configured `~onRightClick` skills run on use-item and use-on-block,
+and `~onLeftClick` runs before server-authoritative attacks and mines.
+The publisher checks cancellation before committing vanilla actions.
+Other registered triggers (`onDrop`, `onStackDrop`, `onSwap`,
+`onPickup`, `onEquip`, `onUnequip`) still require their corresponding
+Gameplay event publishers; declaring them alone does not activate them.
+Custom aliases have registered definitions, but physical stacks still
+need separate alias identity before their per-alias skills can fire.
+
 ## Skill-based enchantments (Java 26.3)
 
 The Items Shard registers all **43 vanilla enchantments** from

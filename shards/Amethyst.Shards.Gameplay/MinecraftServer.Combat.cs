@@ -42,6 +42,9 @@ public sealed partial class MinecraftServer
         var attackEffects = new ShardSkillRuntime();
         attackEffects.SetNumber("damage", raw);
         attackEffects.SetNumber("knockback", 0.4);
+        await EnchantmentEventAsync(weapon, "onLeftClick", ct, attackEffects,
+            targetKind: victim is null ? EnchantmentMobCategory(mob.Kind) : "player",
+            actor: attacker.PlayerUuid);
         await EnchantmentEventAsync(weapon, "onAttack", ct, attackEffects,
             targetKind: victim is null ? EnchantmentMobCategory(mob.Kind) : "player",
             actor: attacker.PlayerUuid);
