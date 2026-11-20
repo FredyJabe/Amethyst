@@ -107,12 +107,33 @@ internal static class ItemComponentConfig
             "minecraft:max_stack_size" => JsonSerializer.Serialize(
                 Integer(node, at, 1, 64)),
             "minecraft:custom_model_data" => CustomModelData(node, at),
+            "minecraft:enchantments" => Enchantments(node, at),
             "minecraft:tooltip_display" => TooltipDisplay(node, at),
             _ => throw new InvalidDataException(
                 $"Component '{key}' needs its Java 26.3 encoded payload in {at}. " +
                 "Use { WireHex: '...' } to supply bytes or { Remove: true } " +
                 "to remove the component from the vanilla item defaults.")
         };
+    }
+
+    private static string Enchantments(YamlNode node, string context)
+    {
+        if (node is not YamlMappingNode map || map.Children.Count > 43)
+            throw new InvalidDataException($"Enchantment levels in {context} need a mapping (max 43).");
+        var levels = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var entry in map.Children)
+        {
+            string id = Identifier(entry.Key, context);
+            try { _ = VanillaRegistries.IndexOf("minecraft:enchantment", id); }
+            catch (InvalidDataException ex)
+            {
+                throw new InvalidDataException($"Unknown vanilla enchantment {id} in {context}.", ex);
+            }
+            int level = Integer(entry.Value, context, 1, 255);
+            if (!levels.TryAdd(id, level))
+                throw new InvalidDataException($"Duplicate enchantment {id} in {context}.");
+        }
+        return JsonSerializer.Serialize(levels);
     }
 
     private static string Rarity(YamlNode node, string context)

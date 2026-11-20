@@ -117,6 +117,22 @@ internal static class ItemComponentWire
                         foreach (int entry in colors) w.WriteInt32(entry);
                     };
                     break;
+                case "minecraft:enchantments":
+                    var levels = value.EnumerateObject()
+                        .Select(property => (Id: VanillaRegistries.IndexOf(
+                            "minecraft:enchantment", property.Name),
+                            Level: property.Value.GetInt32()))
+                        .OrderBy(p => p.Id).ToArray();
+                    added[id] = w =>
+                    {
+                        w.WriteVarInt(levels.Length);
+                        foreach (var (enchantmentId, level) in levels)
+                        {
+                            w.WriteVarInt(enchantmentId);
+                            w.WriteVarInt(level);
+                        }
+                    };
+                    break;
                 case "minecraft:tooltip_display":
                     bool hide = value.GetProperty("hide_tooltip").GetBoolean();
                     int[] hidden = value.GetProperty("hidden_components")
