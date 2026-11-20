@@ -16,15 +16,21 @@ public sealed partial class PlayerInventory
     private readonly ItemStack[] _slots = new ItemStack[46];
     private readonly string? _path;
     private readonly IShardItemRegistry? _items;
+    private readonly EnchantmentDurability? _durabilitySkills;
     internal IShardItemRegistry? ItemRegistry => _items;
+    internal bool PreventsDurabilityWear(ItemStack item, bool armor, Random rng) =>
+        _durabilitySkills?.PreventsWear(item, armor, rng) ?? false;
     private ItemStack _cursor;
     private int _selected;
     private int _revision;
 
     public PlayerInventory(string? dataDirectory, Guid player,
-        IShardItemRegistry? items = null)
+        IShardItemRegistry? items = null, IShardEnchantmentRegistry? enchantments = null,
+        IShardSkillEngine? skills = null)
     {
         _items = items;
+        if (items is not null && enchantments is not null && skills is not null)
+            _durabilitySkills = new EnchantmentDurability(items, enchantments, skills);
         if (dataDirectory is null) return;
         string directory = Path.Combine(Path.GetFullPath(dataDirectory), "inventories");
         Directory.CreateDirectory(directory);

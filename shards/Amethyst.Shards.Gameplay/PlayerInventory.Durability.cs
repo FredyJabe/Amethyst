@@ -24,7 +24,8 @@ public sealed partial class PlayerInventory
                 IsDefinitionUnbreakable(item)) return false;
             ItemStack next = DurabilityRules.ApplyWear(old, item.MaxDurability,
                 points, slot is >= 5 and <= 8 &&
-                DurabilityRules.IsArmor(item.Identifier), random);
+                DurabilityRules.IsArmor(item.Identifier), random,
+                PreventsDurabilityWear);
             if (next == old) return false;
             _slots[slot] = next;
             try { Persist(); _revision++; }
@@ -50,7 +51,8 @@ public sealed partial class PlayerInventory
                     item.MaxDurability <= 0 ||
                     IsDefinitionUnbreakable(item)) continue;
                 ItemStack next = DurabilityRules.ApplyWear(old, item.MaxDurability,
-                    points, armor: true, random);
+                    points, armor: true, random: random,
+                    preventsWear: PreventsDurabilityWear);
                 if (next == old) continue;
                 _slots[slot] = next;
                 changed++;

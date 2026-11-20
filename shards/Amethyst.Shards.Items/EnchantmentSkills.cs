@@ -128,13 +128,28 @@ public static class EnchantmentSkills
 
     private static void ValidateChance(ShardSkillCondition c)
     {
-        Allow(c.Arguments, "base", "perLevel");
+        Allow(c.Arguments, "base", "perLevel", "mode", "factor");
+        string mode = c.Arguments.GetValueOrDefault("mode") ?? "linear";
+        if (mode is not ("linear" or "level_ratio"))
+            throw new InvalidDataException("Chance mode must be linear or level_ratio.");
+        if (mode == "level_ratio" &&
+            (c.Arguments.ContainsKey("base") || c.Arguments.ContainsKey("perLevel")))
+            throw new InvalidDataException("level_ratio takes the enchantment level, not Base/PerLevel.");
         double basis = Number(c.Arguments, "base");
         double per = Number(c.Arguments, "perLevel");
-        if (basis is < 0 or > 1 || per is < 0 or > 1)
-            throw new InvalidDataException("Chance must use fractions 0..1.");
+        double factor = Number(c.Arguments, "factor", 1);
+        if (basis is < 0 or > 1 || per is < 0 or > 1 || factor is < 0 or > 1)
+            throw new InvalidDataException("Chance values must use fractions 0..1.");
     }
-    private static bool Chance(ShardSkillCondition c, ShardSkillEvent evt) =>
-        evt.Rng.NextDouble() < Math.Clamp(Number(c.Arguments, "base") +
-            Number(c.Arguments, "perLevel") * evt.EnchantmentLevel, 0, 1);
+    private static bool Chance(ShardSkillCondition c, ShardSkillEvent evt)
+    {
+        string mode = c.Arguments.GetValueOrDefault("mode") ?? "linear";
+        double probability = mode == "level_ratio"
+            ? evt.EnchantmentLevel <= 0 ? 0 :
+                (double)evt.EnchantmentLevel / (evt.EnchantmentLevel + 1)
+            : Math.Clamp(Number(c.Arguments, "base") +
+                Number(c.Arguments, "perLevel") * evt.EnchantmentLevel, 0, 1);
+        probability *= Number(c.Arguments, "factor", 1);
+        return evt.Rng.NextDouble() < probability;
+    }
 }

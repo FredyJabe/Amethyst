@@ -120,8 +120,9 @@ public sealed partial class MinecraftServer
             kind = ProjectileKind.Trident;
             speed = 2.5;
             damage = 8;
-            recoverable = DurabilityRules.ApplyWear(stack,
-                item.MaxDurability, 1);
+            recoverable = creative ? stack : DurabilityRules.ApplyWear(stack,
+                item.MaxDurability, 1,
+                preventsWear: player.Inventory.PreventsDurabilityWear);
         }
         else return;
         var projectileEffects = new ShardSkillRuntime();

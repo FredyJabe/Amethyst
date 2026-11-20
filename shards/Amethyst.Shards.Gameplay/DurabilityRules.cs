@@ -7,11 +7,12 @@ namespace Amethyst;
 /// No client-supplied item components are trusted by these methods.</summary>
 public static class DurabilityRules
 {
-    /// <summary>For each point of attempted wear, Unbreaking prevents it with
-    /// probability level/(level+1) for tools; for armor the chance is only
-    /// 40% * level/(level+1), matching vanilla's armor penalty.</summary>
+    /// <summary>For every point of attempted wear, consult the configured
+    /// ~onItemDamage skill decision. Durability arithmetic contains no
+    /// hard-coded enchantment chance.</summary>
     public static ItemStack ApplyWear(ItemStack stack, int maximum, int points,
-        bool armor = false, Random? random = null)
+        bool armor = false, Random? random = null,
+        Func<ItemStack, bool, Random, bool>? preventsWear = null)
     {
         if (points <= 0 || stack.Count != 1 || maximum <= 0 ||
             stack.Unbreakable || stack.Damage >= maximum)
@@ -20,13 +21,7 @@ public static class DurabilityRules
         int taken = 0;
         for (int i = 0; i < points && taken < maximum; i++)
         {
-            if (stack.Unbreaking > 0)
-            {
-                if (!armor || random.NextDouble() >= 0.6)
-                {
-                    if (random.Next(stack.Unbreaking + 1) > 0) continue;
-                }
-            }
+            if (preventsWear?.Invoke(stack, armor, random) == true) continue;
             taken++;
         }
         if (taken == 0) return stack;

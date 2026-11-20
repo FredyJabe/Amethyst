@@ -65,6 +65,9 @@ public interface IShardSkillEngine
     IReadOnlyList<ShardSkillInstruction> Definitions { get; }
     bool TryGetSkills(string ownerId, out IReadOnlyList<ShardSkillInstruction> skills);
     Task<bool> DispatchAsync(ShardSkillEvent context, CancellationToken ct = default);
+    /// <summary>Dispatch for synchronous transactions such as durability wear.
+    /// Throws if a mechanic cannot complete without awaiting.</summary>
+    bool DispatchImmediate(ShardSkillEvent context);
     /// <summary>Validate named conditions against registered validators at startup.</summary>
     void ValidateConditions(IReadOnlyList<ShardSkillCondition> conditions);
     /// <summary>Check Stats conditions with the same evaluators used by Skills.</summary>

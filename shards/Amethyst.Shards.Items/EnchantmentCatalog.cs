@@ -149,8 +149,10 @@ public sealed class EnchantmentCatalog : IShardEnchantmentRegistry
             .Select(Normalize).ToArray();
         string[] lines = f.Skills ?? prior?.Skills.Select(s => SkillText(s)).ToArray() ?? [];
         IReadOnlyList<ShardStatModifier> stats = f.Stats ?? prior?.Stats ?? [];
-        if (lines.Length > 32 || (lines.Length == 0 && stats.Count == 0))
-            throw new InvalidDataException($"Each enchantment needs Skills or Stats ({id}).");
+        // Administrators may intentionally disable an enchantment's behavior
+        // using Skills: [] and Stats: {} in their overrides.
+        if (lines.Length > 32)
+            throw new InvalidDataException($"Too many Skills for enchantment '{id}'.");
         var skills = lines.Select(line => SkillEngine.Parse(id, line)).ToArray();
         return new ShardEnchantmentDefinition(id, max, weight, anvil,
             Array.AsReadOnly(supported), Array.AsReadOnly(conflicts),

@@ -486,7 +486,9 @@ unbreaking:
   AnvilCost: 2
   SupportedItems: [breakable]
   Skills:
-    - "setFlag{name=unbreaking} @self ~onItemDamage"
+    # Per-point protection: level/(level+1) for tools, 40% of that for armor.
+    - "setFlag{name=prevent_item_damage} @self ~onItemDamage ?flag{name=non_armor} ?chance{mode=level_ratio}"
+    - "setFlag{name=prevent_item_damage} @self ~onItemDamage ?flag{name=armor} ?chance{mode=level_ratio;factor=0.4}"
 
 vanishing_curse:
   Id: minecraft:vanishing_curse

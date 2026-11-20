@@ -144,11 +144,12 @@ public sealed class ConnectedPlayer : IShardPlayer
     }
     public ConnectedPlayer(Guid id, string name, ProfileProperty[] properties, int entityId,
         PacketChannel connection, IShardWorld world, string? inventoryDirectory = null,
-        IShardItemRegistry? items = null)
+        IShardItemRegistry? items = null, IShardEnchantmentRegistry? enchantments = null,
+        IShardSkillEngine? skills = null)
     {
         PlayerUuid = id; Username = name; Properties = properties;
         EntityId = entityId; Connection = connection; View = world.CreateView();
-        Inventory = new PlayerInventory(inventoryDirectory, id, items);
+        Inventory = new PlayerInventory(inventoryDirectory, id, items, enchantments, skills);
         Vitals = new PlayerVitals(inventoryDirectory, id);
         Experience = new PlayerExperience(inventoryDirectory, id);
     }

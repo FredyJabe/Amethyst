@@ -291,6 +291,53 @@ public sealed class SkillEngine : IShardSkillEngine
         return true;
     }
 
+    /// <summary>Dispatch synchronously inside server-authoritative transactions.
+    /// Async mechanics cannot safely suspend while an inventory lock is held.</summary>
+    public bool DispatchImmediate(ShardSkillEvent context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (string.IsNullOrWhiteSpace(context.Trigger))
+            throw new ArgumentException("Skill event needs a trigger.", nameof(context));
+        if (!TryGetSkills(context.OwnerId, out var skills) &&
+            (context.FallbackOwnerId is null ||
+             !TryGetSkills(context.FallbackOwnerId, out skills)))
+            return false;
+        foreach (var skill in skills)
+        {
+            if (!string.Equals(skill.Trigger, context.Trigger,
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+            ShardSkillExecutor execute;
+            ShardSkillConditionEvaluator[] checks;
+            lock (_gate)
+            {
+                if (!_mechanics.TryGetValue(skill.Mechanic, out var mechanic))
+                    throw new InvalidOperationException(
+                        $"Mechanic '{skill.Mechanic}' has been unregistered.");
+                execute = mechanic.Execute;
+                checks = skill.Conditions.Select(c =>
+                    _conditions.TryGetValue(c.Name, out var registered)
+                        ? registered.Evaluate
+                        : throw new InvalidOperationException(
+                            $"Condition '?{c.Name}' has been unregistered.")).ToArray();
+            }
+            bool accepted = true;
+            for (int i = 0; i < checks.Length; i++)
+                if (!checks[i](skill.Conditions[i], context))
+                {
+                    accepted = false;
+                    break;
+                }
+            if (!accepted) continue;
+            ValueTask execution = execute(skill, context, CancellationToken.None);
+            if (!execution.IsCompleted)
+                throw new InvalidOperationException(
+                    $"Mechanic '{skill.Mechanic}' must complete synchronously for ~{context.Trigger}.");
+            execution.GetAwaiter().GetResult();
+        }
+        return true;
+    }
+
     public void Unregister(string owner)
     {
         lock (_gate)

@@ -128,7 +128,8 @@ public sealed partial class MinecraftServer
     public bool TryAdmit(VerifiedProfile profile, PacketChannel channel, int chatMode, out string reason)
     {
         var player = new ConnectedPlayer(profile.Uuid, profile.Username, profile.Properties,
-            _players.AllocateEntityId(), channel, _world, _inventoryDirectory, _items);
+            _players.AllocateEntityId(), channel, _world, _inventoryDirectory,
+            _items, _enchantments, _skills);
         // Set the game mode before SpawnPackets.SendAsync constructs the Join Game
         // packet, player abilities, and the initial tab-list state.
         player.SetGameMode(Enum.Parse<PlayerGameMode>(_options.DefaultGameMode, ignoreCase: true));
