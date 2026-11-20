@@ -87,9 +87,10 @@ public static class InventoryProtocol
             added[4] = static _ => { }; // 26.3 unit component
             removed.Remove(4);
         }
-        var enchants = stack.AllEnchantments()
-            .OrderBy(e => VanillaRegistries.IndexOf("minecraft:enchantment", e.Id))
-            .ToArray();
+        // Preserve the legacy Unbreaking -> Mending write order used by
+        // existing inventory/packet fixtures. Additional levels are already
+        // canonicalized on write by PlayerInventory.
+        var enchants = stack.AllEnchantments().ToArray();
         if (enchants.Length > 0)
         {
             added[13] = w =>
