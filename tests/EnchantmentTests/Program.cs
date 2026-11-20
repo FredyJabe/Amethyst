@@ -94,7 +94,8 @@ try
         """);
     var statItems = new ItemCatalog(Path.Combine(path, "items-26.3.yml"), itemOverrides);
     Check(statItems.TryGetByIdentifier("diamond_sword", out var boosted) &&
-        boosted.Stats?.Count == 3 && boosted.Components?.Count == sword.Components?.Count,
+        boosted.Stats?.Count == 3 &&
+        (boosted.Components?.Count ?? 0) == (sword.Components?.Count ?? 0),
         "Items accept independent Stats without altering item components");
     var itemRuntime = new ShardSkillRuntime();
     itemRuntime.SetNumber("damage", 7);
