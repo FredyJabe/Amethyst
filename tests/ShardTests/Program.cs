@@ -27,14 +27,8 @@ try
         OperatorsFile = Path.Combine(temp, "ops.yaml"),
         WorldPath = Path.Combine(temp, "world")
     };
-    // Override component YAML node aliases without changing registry IDs.
+    // Component node names are fixed in code, not loaded from a YAML mapping.
     string nodesFile = Path.Combine(temp, "shards", "items", "component-nodes.yml");
-    Directory.CreateDirectory(Path.GetDirectoryName(nodesFile)!);
-    File.WriteAllText(nodesFile, """
-        minecraft:item_model: ModelPath
-        minecraft:custom_data: DataBlob
-        minecraft:glider: FlightFlag
-        """);
     // Test administrator YAML loaded through the real ShardHost data path.
     string yamlDir = Path.Combine(temp, "shards", "items", "definitions");
     Directory.CreateDirectory(yamlDir);
@@ -44,15 +38,15 @@ try
           Lore:
             - "Configured before the Shard loads"
           Components:
-            ModelPath: amethyst:workshop_table
-            minecraft:rarity: rare
-            minecraft:enchantment_glint_override: true
-            minecraft:custom_model_data:
+            ItemModel: amethyst:workshop_table
+            Rarity: rare
+            GlintOverride: true
+            CustomModelData:
               floats: [2.5]
               flags: [true]
               strings: [amethyst:workshop]
               colors: [16711935]
-            minecraft:tooltip_display:
+            TooltipDisplay:
               hide_tooltip: false
               hidden_components: [minecraft:enchantments]
         diamond_pickaxe:
@@ -60,8 +54,15 @@ try
           ItemModel: amethyst:eternal_pickaxe
         stone:
           Options:
-            DataBlob: { WireHex: "0A00" }
-            FlightFlag: { Remove: true }
+            CustomData: { WireHex: "0A00" }
+            Glider: { Remove: true }
+        cobblestone:
+          Components:
+            minecraft:use_effects: { Remove: true }
+        obsidian:
+          CustomName: "Fixed custom-name node"
+        brick:
+          StackSize: 16
         """);
     string recipeDir = Path.Combine(temp, "shards", "items", "recipes");
     Directory.CreateDirectory(recipeDir);
@@ -162,10 +163,12 @@ try
     IShardItemRegistry items = host.GetService<IShardItemRegistry>() ??
         throw new Exception("FAIL: Items Shard service not registered");
     Check(items.MinecraftVersion == "26.3" && items.Count == 1658 &&
-        items.All.Count == 1658 && items.ComponentNodes.Count == 122 &&
-        items.ComponentNodes["minecraft:item_model"] == "ModelPath" &&
-        items.ComponentNodes["minecraft:custom_data"] == "DataBlob",
-        "Items Shard auto-enabled and complete 26.3 definitions published");
+        items.All.Count == 1658 && items.ComponentNodes.Count == 45 &&
+        items.ComponentNodes["minecraft:item_model"] == "ItemModel" &&
+        items.ComponentNodes["minecraft:custom_data"] == "CustomData" &&
+        items.ComponentNodes["minecraft:max_stack_size"] == "StackSize" &&
+        !File.Exists(nodesFile),
+        "Items Shard publishes only fixed component names without a YAML node config file");
     IShardRecipeRegistry recipes = host.GetService<IShardRecipeRegistry>() ??
         throw new Exception("FAIL: Items Shard recipe provider not registered");
     Check(recipes.Definitions.Select(d => d.Type).Distinct().Count() ==
@@ -236,10 +239,77 @@ try
         ShardItemComponentIds.All.Count == 122 &&
         ShardItemComponentIds.TryGetIdentifier(121, out var lastComponent) &&
         lastComponent == "minecraft:cushion/color" &&
-        File.ReadAllLines(Path.Combine(root.FullName, "shards", "data",
-            "items", "component-nodes.yml"))
-            .Count(line => line.StartsWith("minecraft:", StringComparison.Ordinal)) == 122,
-        "Editable shipped component-nodes.yml lists all 122 Minecraft 26.3 components");
+        !items.ComponentNodes.ContainsKey("minecraft:cushion/color") &&
+        !items.ComponentNodes.ContainsKey("minecraft:use_effects") &&
+        !File.Exists(Path.Combine(root.FullName, "shards", "data",
+            "items", "component-nodes.yml")),
+        "122 registry IDs remain accessible but 77 unapproved YAML nodes stay unassigned");
+    // Verify every explicitly approved spelling, including uncommon names.
+    var expectedFixedNodes = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["minecraft:custom_data"] = "CustomData",
+        ["minecraft:max_stack_size"] = "StackSize",
+        ["minecraft:max_damage"] = "DurabilityMax",
+        ["minecraft:damage"] = "DurabilityDamage",
+        ["minecraft:unbreakable"] = "Unbreakable",
+        ["minecraft:custom_name"] = "CustomName",
+        ["minecraft:minimum_attack_charge"] = "MinimumAttackCharge",
+        ["minecraft:damage_type"] = "DamageType",
+        ["minecraft:item_name"] = "ItemName",
+        ["minecraft:item_model"] = "ItemModel",
+        ["minecraft:lore"] = "Lore",
+        ["minecraft:rarity"] = "Rarity",
+        ["minecraft:enchantments"] = "Enchantments",
+        ["minecraft:can_place_on"] = "CanPlaceOn",
+        ["minecraft:can_break"] = "CanBreak",
+        ["minecraft:attribute_modifiers"] = "AttributesModifiers",
+        ["minecraft:custom_model_data"] = "CustomModelData",
+        ["minecraft:tooltip_display"] = "TooltipDisplay",
+        ["minecraft:repair_cost"] = "RepairCost",
+        ["minecraft:creative_slot_lock"] = "CreativeSlotLock",
+        ["minecraft:enchantment_glint_override"] = "GlintOverride",
+        ["minecraft:food"] = "Food",
+        ["minecraft:consumable"] = "Consumable",
+        ["minecraft:use_remainder"] = "UseRemainder",
+        ["minecraft:use_cooldown"] = "UseCooldown",
+        ["minecraft:damage_resistant"] = "DamageResistant",
+        ["minecraft:tool"] = "Tool",
+        ["minecraft:weapon"] = "Weapon",
+        ["minecraft:attack_range"] = "AttackRange",
+        ["minecraft:enchantable"] = "Enchantable",
+        ["minecraft:equippable"] = "Equippable",
+        ["minecraft:repairable"] = "Repairable",
+        ["minecraft:glider"] = "Glider",
+        ["minecraft:tooltip_style"] = "TooltipStyle",
+        ["minecraft:death_protection"] = "DeathProtection",
+        ["minecraft:blocks_attacks"] = "BlocksAttacks",
+        ["minecraft:piercing_weapon"] = "PiercingWeapon",
+        ["minecraft:kinetic_weapon"] = "KineticWeapon",
+        ["minecraft:dyed_color"] = "DyedColor",
+        ["minecraft:instrument"] = "Instrument",
+        ["minecraft:jukebox_playable"] = "JukeboxPlayable",
+        ["minecraft:lock"] = "Lock",
+        ["minecraft:compostable"] = "Compostable",
+        ["minecraft:cooking_fuel"] = "CookingFuel",
+        ["minecraft:brewing_fuel"] = "BrewingFuel",
+    };
+    Check(expectedFixedNodes.Count == 45 &&
+        expectedFixedNodes.All(pair =>
+            items.ComponentNodes.TryGetValue(pair.Key, out string? actual) &&
+            actual == pair.Value) &&
+        items.ComponentNodes.Count == expectedFixedNodes.Count,
+        "All 45 requested fixed component node names match exactly");
+    Check(items.TryGetByIdentifier("obsidian", out var namedObsidian) &&
+        namedObsidian.Components is not null &&
+        namedObsidian.Components.ContainsKey("minecraft:custom_name") &&
+        items.TryGetByIdentifier("brick", out var limitedBrick) &&
+        limitedBrick.MaxStackSize == 16 &&
+        items.IsValidStack(limitedBrick.ProtocolId, 16) &&
+        !items.IsValidStack(limitedBrick.ProtocolId, 17) &&
+        items.TryGetByIdentifier("cobblestone", out var pendingCobbles) &&
+        pendingCobbles.Components?.ContainsKey("minecraft:use_effects") == true,
+        "CustomName and StackSize work; unassigned components require canonical minecraft: ID");
+
     Check(table.ItemModel == "amethyst:workshop_table" &&
         table.Components is { Count: 7 } &&
         table.Components.ContainsKey("minecraft:custom_name") &&
@@ -287,7 +357,7 @@ try
         stone.Components is { Count: 2 } &&
         stone.Components.ContainsKey("minecraft:custom_data") &&
         stone.Components.ContainsKey("minecraft:glider"),
-        "Custom YAML node names map Options values to two canonical components");
+        "Fixed YAML node names map Options values to canonical components");
     var blobWriter = new PacketWriter();
     InventoryProtocol.WriteStack(blobWriter, new ItemStack(stone.ProtocolId, 1), items);
     var blobReader = new PacketReader(blobWriter.ToArray());
@@ -337,7 +407,7 @@ try
         "Known item stack caps and unknown-ID rejection come from the Items Shard");
     Check(host.RegisteredConsoleCommands.Contains("componentnodes") &&
         await host.TryExecuteConsoleAsync("componentnodes model", CancellationToken.None),
-        "Component node mapping command lists the configured YAML keys");
+        "componentnodes console command lists fixed names and pending registry IDs");
     Check(host.RegisteredConsoleCommands.Contains("iteminfo") &&
         await host.TryExecuteConsoleAsync("iteminfo 405", CancellationToken.None),
         "iteminfo command is registered by the Items Shard");
