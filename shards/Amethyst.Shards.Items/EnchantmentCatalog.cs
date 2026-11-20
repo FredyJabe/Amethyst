@@ -178,6 +178,7 @@ public sealed class EnchantmentCatalog : IShardEnchantmentRegistry
         {
             throw new InvalidDataException($"Invalid enchantment YAML {path}: {ex.Message}", ex);
         }
+        if (yaml.Documents.Count == 0) yield break; // Comment-only examples.
         if (yaml.Documents.Count != 1 ||
             yaml.Documents[0].RootNode is not YamlMappingNode root)
             throw new InvalidDataException($"Enchantment YAML needs one root mapping ({path}).");
