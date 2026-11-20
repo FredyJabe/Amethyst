@@ -722,6 +722,15 @@ public sealed partial class MinecraftServer
                             action.X + 0.5, action.Y + 0.35, action.Z + 0.5, out _)))
                         Console.WriteLine($"[items] No capacity to spawn drop {info.DropItem} " +
                             $"at {action.X},{action.Y},{action.Z}");
+                    // Explicit dropItem skills are independent of the vanilla
+                    // block drop. cancelEvent suppresses only the default,
+                    // never the subsequent skills in the configured list.
+                    if (_groundItems is not null)
+                        foreach (ShardItemDrop drop in drops.Drops)
+                            if (!_groundItems.TrySpawn(drop.ItemId, drop.Count,
+                                action.X + 0.5, action.Y + 0.35,
+                                action.Z + 0.5, out _))
+                                Console.WriteLine($"[items] No capacity for skill drop {drop.ItemId}.");
                 }
                 int wear = MiningRules.DurabilityCostForBlock(state, miningTool, _items);
                 toolWearChanged = wear > 0 &&

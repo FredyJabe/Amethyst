@@ -58,6 +58,13 @@ internal static class FishingFeatureTests
                 fishing.TryReel(player, out FishingReel miss, now + 5300) &&
                 !miss.Caught && !fishing.TryReel(player, out _),
                 "Reeling too early cannot mint fish or duplicate a catch");
+            Check(fishing.TryCast(player, 120, pose, out _,
+                    waitReductionSeconds: 5) &&
+                fishing.Tick(world, now + 6000,
+                    new PredictableRandom()).Single().BiteAtMs == now + 7000 &&
+                fishing.Cancel(player),
+                "Lure Stats can reduce the simulated bite delay to one second");
+
             var (item, xp) = FishingWorld.RollLoot(new PredictableRandom());
             Check(item == "minecraft:cod" && xp == 1,
                 "Fishing loot selects a version-pinned fish and bounded XP");

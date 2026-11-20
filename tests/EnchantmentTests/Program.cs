@@ -29,9 +29,10 @@ Check(catalog.ConflictsWith("sharpness", "smite") &&
     "Mutual exclusion and independent effects");
 // The Items Shard owns entity loot, expressed entirely as normal skills.
 var loot = new LootCatalog(Path.Combine(path, "loot-26.3.yml"));
-Check(loot.Count == 1 && loot.HasDefinition("minecraft:sheep") &&
-    loot.Instructions.Count == 17,
-    "Sheep meat and all 16 wool colors are defined in YAML");
+Check(loot.Count == 2 && loot.HasDefinition("minecraft:sheep") &&
+    loot.HasDefinition("minecraft:fishing") &&
+    loot.Instructions.Count == 23,
+    "Sheep loot and six fishing catch options are defined in YAML");
 var lootEngine = new SkillEngine();
 var lootContext = new TestSkillContext(lootEngine);
 EnchantmentSkills.Register(lootContext);
@@ -51,6 +52,21 @@ Check(blueLoot.Drops.Count == 2 &&
     blueLoot.Drops.Single(x => x.ItemId == blueWool.ProtocolId).Count == 1 &&
     blueLoot.Drops.Single(x => x.ItemId == mutton.ProtocolId).Count is >= 1 and <= 5,
     "Sheep loot respects color flags and rolled Looting bonus");
+var fishRoll = new ShardSkillRuntime();
+fishRoll.SetNumber("loot_roll", 97);
+await lootEngine.DispatchAsync(new ShardSkillEvent(
+    "minecraft:fishing", "onFishing") { Runtime = fishRoll });
+Check(items.TryGetByIdentifier("minecraft:bowl", out var bowl) &&
+    fishRoll.Drops.Count == 1 && fishRoll.Drops[0].ItemId == bowl.ProtocolId,
+    "Fishing loot resolves exactly one YAML-selected catch");
+var fishTreasure = new ShardSkillRuntime();
+fishTreasure.SetNumber("loot_roll", 99);
+await lootEngine.DispatchAsync(new ShardSkillEvent(
+    "minecraft:fishing", "onFishing") { Runtime = fishTreasure });
+Check(items.TryGetByIdentifier("minecraft:nautilus_shell", out var nautilus) &&
+    fishTreasure.Drops.Count == 1 &&
+    fishTreasure.Drops[0].ItemId == nautilus.ProtocolId,
+    "Fishing loot roll condition selects treasure without hardcoded item IDs");
 var shearedLoot = new ShardSkillRuntime();
 shearedLoot.SetFlag("color_blue");
 await lootEngine.DispatchAsync(new ShardSkillEvent(

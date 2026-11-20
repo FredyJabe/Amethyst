@@ -24,14 +24,48 @@ public sealed partial class MinecraftServer
         {
             if (reel.Caught)
             {
-                var (loot, xp) = FishingWorld.RollLoot();
-                if (_groundItems is not null &&
-                    _items.TryGetByIdentifier(loot, out var reward))
-                    _groundItems.TrySpawn(reward.ProtocolId, 1,
+                var fishingEffects = await EnchantmentEventAsync(held,
+                    "onFishing", ct, actor: player.PlayerUuid);
+                if (_loot?.HasDefinition("minecraft:fishing") == true &&
+                    _skills is not null)
+                {
+                    int roll = Random.Shared.Next(100);
+                    // A bounded initial Luck of the Sea bonus. Full vanilla
+                    // treasure/junk tables and weighted functions are pending.
+                    double luck = Math.Clamp(
+                        fishingEffects.Number("fishing_luck"), 0, 3);
+                    if (luck > 0 &&
+                        Random.Shared.NextDouble() < luck * 0.02)
+                        roll = 98 + Random.Shared.Next(2);
+                    fishingEffects.SetNumber("loot_roll", roll);
+                    await _skills.DispatchAsync(new ShardSkillEvent(
+                        "minecraft:fishing", "onFishing", reel.Bobber.X,
+                        reel.Bobber.Y, reel.Bobber.Z,
+                        ActorUuid: player.PlayerUuid)
+                        { Runtime = fishingEffects }, ct);
+                    if (_groundItems is not null)
+                        foreach (ShardItemDrop drop in fishingEffects.Drops)
+                            _groundItems.TrySpawn(drop.ItemId, drop.Count,
+                                reel.Bobber.X, reel.Bobber.Y + 0.4,
+                                reel.Bobber.Z, out _);
+                }
+                else if (!fishingEffects.IsCancelled)
+                {
+                    // Compatibility for Gameplay tests without the Items
+                    // loot registry. Live catches use the YAML skill pack.
+                    var (loot, _) = FishingWorld.RollLoot();
+                    if (_groundItems is not null &&
+                        _items.TryGetByIdentifier(loot, out var reward))
+                        _groundItems.TrySpawn(reward.ProtocolId, 1,
+                            reel.Bobber.X, reel.Bobber.Y + 0.4,
+                            reel.Bobber.Z, out _);
+                }
+                // XP is the vanilla fishing action, not an explicit
+                // dropItem intent; cancelling it does not skip other skills.
+                if (!fishingEffects.IsCancelled)
+                    _experienceOrbs?.TrySpawn(Random.Shared.Next(1, 7),
                         reel.Bobber.X, reel.Bobber.Y + 0.4,
                         reel.Bobber.Z, out _);
-                _experienceOrbs?.TrySpawn(xp, reel.Bobber.X,
-                    reel.Bobber.Y + 0.4, reel.Bobber.Z, out _);
             }
             foreach (ConnectedPlayer viewer in _players.Snapshot()
                 .Where(x => x.Ready))
@@ -46,8 +80,16 @@ public sealed partial class MinecraftServer
                 await InventoryProtocol.SendSlotAsync(player.Connection,
                     player.Inventory, slot, ct);
         }
-        else _fishing.TryCast(player.PlayerUuid, player.EntityId,
-            player.Pose, out _);
+        else
+        {
+            var castEffects = await EnchantmentEventAsync(held,
+                "onFishing", ct, actor: player.PlayerUuid);
+            if (!castEffects.IsCancelled)
+                _fishing.TryCast(player.PlayerUuid, player.EntityId,
+                    player.Pose, out _,
+                    waitReductionSeconds: (int)Math.Clamp(
+                        -castEffects.Number("fishing_wait"), 0, 30));
+        }
         await BlockInteractionProtocol.SendAckAsync(player.Connection,
             action.Sequence, ct);
         return true;

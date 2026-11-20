@@ -726,7 +726,14 @@ modify drop rolls. `Skills: []` in an override disables that entity's
 bundled drops (it does not restore hardcoded defaults).
 
 Currently the shipped loot YAML covers **sheep**, the only persistent
-living mob implemented in Gameplay. This is a data-driven foundation,
+living mob implemented in Gameplay, plus a starter `minecraft:fishing`
+loot pack. Fishing uses six mutually exclusive `?range{name=loot_roll;
+min=...;max=...}` conditions for catches. Gameplay applies the rod's
+`~onFishing` Stats: Lure reduces the bobber wait interval, and a
+bounded Luck of the Sea adjustment increases the current starter
+treasure chance. These formulas are initial behavior, **not** fully
+verified vanilla 26.3 fishing weights. Server-default fishing loot
+without an Items loot registry remains available for isolated tests. This is a data-driven foundation,
 **not** a complete vanilla loot table importer: other entities, block
 loot predicates, burning-state cooked drops, complex vanilla loot
 functions and other item interactions are pending. The old built-in

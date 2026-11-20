@@ -32,6 +32,7 @@ public static class EnchantmentSkills
         context.RegisterSkillCondition("damageType", ValidateDamageType, DamageType);
         context.RegisterSkillCondition("flag", ValidateFlagCondition, Flag);
         context.RegisterSkillCondition("chance", ValidateChance, Chance);
+        context.RegisterSkillCondition("range", ValidateRange, Range);
     }
     private static string Required(IReadOnlyDictionary<string, string> args, string name) =>
         args.TryGetValue(name, out string? value) && value.Length > 0 ? value :
@@ -126,6 +127,25 @@ public static class EnchantmentSkills
     }
     private static bool Flag(ShardSkillCondition c, ShardSkillEvent evt) =>
         evt.Runtime.HasFlag(Required(c.Arguments, "name"));
+
+    /// <summary>Check an event-local numeric value within an inclusive
+    /// interval; useful for non-overlapping YAML loot probabilities.</summary>
+    private static void ValidateRange(ShardSkillCondition c)
+    {
+        Allow(c.Arguments, "name", "min", "max");
+        if (!Key.IsMatch(Required(c.Arguments, "name")) ||
+            !c.Arguments.ContainsKey("min") ||
+            !c.Arguments.ContainsKey("max") ||
+            Number(c.Arguments, "min") > Number(c.Arguments, "max"))
+            throw new InvalidDataException("Invalid ?range{name;min;max} condition.");
+    }
+    private static bool Range(ShardSkillCondition c, ShardSkillEvent evt)
+    {
+        double observed = evt.Runtime.Number(Required(c.Arguments, "name"),
+            double.NaN);
+        return observed >= Number(c.Arguments, "min") &&
+            observed <= Number(c.Arguments, "max");
+    }
 
     private static void ValidateChance(ShardSkillCondition c)
     {

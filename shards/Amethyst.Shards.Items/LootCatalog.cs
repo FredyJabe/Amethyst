@@ -7,7 +7,8 @@ using YamlDotNet.RepresentationModel;
 namespace Amethyst.BuiltinShards;
 
 /// <summary>Declarative loot definitions owned by Items. Each root is a
-/// minecraft:entity identifier with an ordered Skills sequence. User
+/// minecraft:entity identifier (or minecraft:fishing) with an ordered
+/// Skills sequence. User
 /// definitions replace bundled packs by owner ID, including Skills: [].</summary>
 public sealed class LootCatalog : IShardLootRegistry
 {
@@ -85,9 +86,11 @@ public sealed class LootCatalog : IShardLootRegistry
                 if (line is not YamlScalarNode { Value: { } expression })
                     throw new InvalidDataException($"Invalid skill in loot {owner}.");
                 ShardSkillInstruction skill = SkillEngine.Parse(owner, expression, file);
-                if (skill.Trigger != "onDeath")
+                string expected = owner == "minecraft:fishing" ?
+                    "onFishing" : "onDeath";
+                if (skill.Trigger != expected)
                     throw new InvalidDataException(
-                        $"Loot {owner} supports only ~onDeath; got ~{skill.Trigger}.");
+                        $"Loot {owner} supports only ~{expected}; got ~{skill.Trigger}.");
                 skills.Add(skill);
             }
             yield return (owner, Array.AsReadOnly(skills.ToArray()));

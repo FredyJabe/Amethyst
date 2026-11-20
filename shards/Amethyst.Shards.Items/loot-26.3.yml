@@ -22,3 +22,14 @@ minecraft:sheep:
     - "dropItem{item=minecraft:green_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_green}"
     - "dropItem{item=minecraft:red_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_red}"
     - "dropItem{item=minecraft:black_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_black}"
+
+minecraft:fishing:
+  Skills:
+    # Starter fishing distribution matches the prior server behavior.
+    # Exact vanilla treasure/junk tables and biome predicates are pending.
+    - "dropItem{item=minecraft:cod;amount=1} @self ~onFishing ?range{name=loot_roll;min=0;max=54}"
+    - "dropItem{item=minecraft:salmon;amount=1} @self ~onFishing ?range{name=loot_roll;min=55;max=79}"
+    - "dropItem{item=minecraft:pufferfish;amount=1} @self ~onFishing ?range{name=loot_roll;min=80;max=88}"
+    - "dropItem{item=minecraft:tropical_fish;amount=1} @self ~onFishing ?range{name=loot_roll;min=89;max=94}"
+    - "dropItem{item=minecraft:bowl;amount=1} @self ~onFishing ?range{name=loot_roll;min=95;max=97}"
+    - "dropItem{item=minecraft:nautilus_shell;amount=1} @self ~onFishing ?range{name=loot_roll;min=98;max=99}"

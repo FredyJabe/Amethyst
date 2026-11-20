@@ -6,7 +6,12 @@ public readonly record struct FishingBobber(
     int EntityId, Guid Uuid, Guid Owner, int OwnerEntityId,
     double X, double Y, double Z, double Vx, double Vy, double Vz,
     bool InWater, bool Biting, long BiteAtMs, long BiteUntilMs,
-    int AgeTicks);
+    int AgeTicks)
+{
+    /// <summary>Seconds deducted from each bite wait by the rod's Lure
+    /// Stats, bounded to preserve a positive bite interval.</summary>
+    public int WaitReductionSeconds { get; init; }
+}
 
 public readonly record struct FishingReel(bool Caught, bool WasInWater,
     FishingBobber Bobber);
@@ -34,7 +39,7 @@ public sealed class FishingWorld
     }
 
     public bool TryCast(Guid owner, int ownerEntityId, PlayerPose pos,
-        out FishingBobber bobber)
+        out FishingBobber bobber, int waitReductionSeconds = 0)
     {
         bobber = default;
         lock (_gate)
@@ -49,7 +54,8 @@ public sealed class FishingWorld
                 owner, ownerEntityId, pos.X + forwardX * 0.5,
                 pos.Y + 1.45, pos.Z + forwardZ * 0.5,
                 forwardX * 0.65, forwardY * 0.65 + 0.05,
-                forwardZ * 0.65, false, false, 0, 0, 0);
+                forwardZ * 0.65, false, false, 0, 0, 0)
+                { WaitReductionSeconds = Math.Clamp(waitReductionSeconds, 0, 30) };
             _hooks.Add(owner, bobber);
             return true;
         }
@@ -101,7 +107,8 @@ public sealed class FishingWorld
                     long biteAt = bobber.BiteAtMs;
                     long biteUntil = bobber.BiteUntilMs;
                     bool biting = bobber.Biting;
-                    if (biteAt == 0) biteAt = now + random.Next(5000, 16001);
+                    if (biteAt == 0) biteAt = now + Math.Max(1000,
+                        random.Next(5000, 16001) - bobber.WaitReductionSeconds * 1000);
                     if (now >= biteAt && !biting)
                     {
                         biting = true;
@@ -110,7 +117,8 @@ public sealed class FishingWorld
                     if (biting && now > biteUntil)
                     {
                         biting = false;
-                        biteAt = now + random.Next(5000, 16001);
+                        biteAt = now + Math.Max(1000,
+                            random.Next(5000, 16001) - bobber.WaitReductionSeconds * 1000);
                     }
                     bobber = bobber with
                     {
