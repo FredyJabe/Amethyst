@@ -662,7 +662,7 @@ public sealed partial class MinecraftServer
                     int count = drops.IsCancelled ? 0 :
                         (int)Math.Clamp(drops.Number("drop_count", 1), 0, 64);
                     // Fortune changes resource drops, not dropped block items.
-                    if (!drops.HasFlag("silk_touch") &&
+                    if (!drops.IsCancelled && !drops.HasFlag("silk_touch") &&
                         _items is not null &&
                         _items.TryGetById(info.DropItem, out var dropped) &&
                         dropped.Identifier is "minecraft:coal" or "minecraft:diamond" or
