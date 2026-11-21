@@ -306,9 +306,10 @@ internal static class CombatFeatureTests
                 SkillEngine.Parse("minecraft:zombie",
                     "dropItem{item=minecraft:emerald;amount=1} @self ~onDeath")
             ]);
+            ShardEntityInstance cancelledZombie = default;
             Check(items.TryGetByIdentifier("minecraft:emerald",
                     out var emeraldCancel) &&
-                managedMobs.TrySpawn("zombie", 1, 80, 0, out var cancelledZombie),
+                managedMobs.TrySpawn("zombie", 1, 80, 0, out cancelledZombie),
                 "Prepare cancellable vanilla zombie death with later custom reward");
             int xpBeforeCancelled = server.ExperienceOrbsForTests.Length;
             int nativeBeforeCancelled = nativeMobLoot.Contexts.Count;
