@@ -26,7 +26,7 @@ public sealed class VanillaLootTags
     private IReadOnlyList<string> ResolveCore(string registry, string name,
         HashSet<string> visiting)
     {
-        if (!new[] { "item", "enchantment", "entity_type", "instrument" }.Contains(
+        if (!new[] { "item", "enchantment", "entity_type", "instrument", "damage_type" }.Contains(
             registry, StringComparer.Ordinal) ||
             !name.StartsWith("minecraft:", StringComparison.Ordinal))
             throw new NotSupportedException(
