@@ -312,15 +312,15 @@ internal static class ItemComponentWire
         // Preserve the translation key as NBT instead of displaying its raw
         // JSON or treating the untranslated key as a literal item name.
         if (value.StartsWith("{", StringComparison.Ordinal) &&
-            (value.Contains("\\"translate\\"", StringComparison.Ordinal) ||
-             value.Contains("\\"text\\"", StringComparison.Ordinal)))
+            (value.Contains("translate", StringComparison.Ordinal) ||
+             value.Contains("text", StringComparison.Ordinal)))
         {
             using var document = JsonDocument.Parse(value);
             JsonElement component = document.RootElement;
             if (component.ValueKind == JsonValueKind.Object &&
                 component.EnumerateObject().Count() == 1)
             {
-                string field = component.TryGetProperty("translate", out var translated)
+                string field = component.TryGetProperty("translate", out _)
                     ? "translate" : "text";
                 if (component.TryGetProperty(field, out var content) &&
                     content.ValueKind == JsonValueKind.String &&
