@@ -6,13 +6,14 @@ Amethyst is now organized into a **network kernel** and independently compiled *
 
 | Project | Responsibility |
 | --- | --- |
-| `src/Amethyst.csproj` | TCP listener, status/ping, protocol framing, Mojang authentication, encryption, login/configuration, connection lifetime, Shard loader, operator console host |
+| `src/Amethyst.csproj` | Network kernel, login/configuration, Shard loader, operator console, **global skill parser/registry/dispatcher**, and Shard extension contracts |
 | `shards/Amethyst.Shards.Overworld` | Terrain/biomes, chunks, lighting, save files, chunk preparation and streaming |
-| `shards/Amethyst.Shards.Items` | YAML-based item definitions and recipe registry: 1,658 vanilla item IDs, stacking rules, shaped/shapeless crafting and cooking recipes |
-| `shards/Amethyst.Shards.Gameplay` | Play-state packets, players, movement, game modes, inventory, crafting stations, chat, day/night clock; consumes Items and World services |
+| `shards/Amethyst.Shards.Items` | YAML-based item definitions, recipes, and triggered item skills (`dropItem` on `~onDeath`) for Java 26.3 |
+| `shards/Amethyst.Shards.Entities` | YAML-configured registry of 161 vanilla Java 26.3 entity types and in-memory runtime for spawned entities |
+| `shards/Amethyst.Shards.Gameplay` | Play-state packets, players, movement, game modes, inventory, crafting stations, chat, day/night clock; dispatches Core skills and provides world-item effect sink |
 | `shards/Amethyst.Shards.Hello` | Disabled-by-default example: a `hello` console command and a Play packet observer |
 
-Core deliberately does **not** reference either built-in Shard assembly. The protocol API (e.g., `PacketChannel`, `PacketReader`, `PacketWriter`) and Shard contracts (`Amethyst.Shards`) are available from the core project. Existing generator versions **1–7** and the `.mc26` chunk save format are unchanged.
+Core deliberately does **not** reference any built-in Shard assembly. The protocol API (e.g., `PacketChannel`, `PacketReader`, `PacketWriter`) and Shard contracts (`Amethyst.Shards`) are available from the core project. Existing generator versions **1–7** and the `.mc26` chunk save format are unchanged.
 
 ## Items Shard (item definition ownership)
 
@@ -26,7 +27,7 @@ item pickups, persisted stacks, and furnace/crafting slot transactions. For
 example, swords and pickaxes can no longer stack to 64; an ender pearl can
 stack to 16. The Items Shard also owns the **recipe definitions and matching**;
 Gameplay owns crafting windows, ingredient consumption, furnace ticks, block
-placement, mining and entity physics. Core still handles only networking.
+placement, mining and entity physics. Core additionally hosts the generic skill orchestration framework, but item-specific effects remain in Shards.
 
 A Shard that consumes item definitions declares `requires: [items]`
 and resolves the service in `OnEnableAsync`:
@@ -99,6 +100,164 @@ recipe formats, precedence rules, version provenance and examples. Vanilla proto
 cannot be replaced with arbitrary modded item IDs without client registry,
 asset and protocol support.
 
+## Entities Shard (entity type and instance ownership)
+
+The built-in `entities` capability exposes `IShardEntityRegistry` (161 Java
+26.3 / protocol 777 entity types) and `IShardEntityManager` (spawn, lookup,
+movement, optional configured health/damage and removal). Both live outside
+the network kernel. Gameplay uses the manager's shared entity ID allocator
+for player and dropped-item network IDs and replicates registered instances
+to nearby clients with loaded chunks.
+
+The full immutable client registry is bundled at
+`shards/Amethyst.Shards.Entities/entities-26.3.yml`. Configure types with
+root-keyed `*.yml` or `*.yaml` files in
+`shards/data/entities/definitions/` (or the configured shard data directory).
+For example:
+
+```yaml
+cow:
+  Health: 30
+  Display: "Farm Cow"
+
+guardian_cow:
+  Id: minecraft:cow
+  Health: 50
+  Options:
+    Invulnerable: true
+    Spawnable: true
+```
+
+Vanilla IDs and hitbox sizes cannot be changed by YAML, because Java clients
+know the base entity registry. An alias points to a vanilla type but retains
+its own server-side definition. The supported configurable fields are
+`Display`, `Health`, `Spawnable` and `Invulnerable`, with the last three also
+accepted under `Options`. `Display` is definition metadata and is not
+yet rendered as a custom name. `Health` affects manager-driven damage, not
+vanilla combat packets; types without configured health currently have no
+health/damage model. Item, player and other special protocol entity types are
+non-spawnable by default.
+
+Commands in the **server terminal**: `entityinfo cow`,
+`entityspawn cow 0 80 0`, `entities`, and `entityremove <runtime-id>`.
+Entity positions are static unless another system calls `TryTeleport`.
+There is no autonomous AI, mob pathfinding, natural spawning, automated
+drops, mob persistence, or complete combat yet. Existing dropped item pickup
+and physics remain in Gameplay; spawned entity instances are transient.
+
+See [the Entities Shard guide](shards/Amethyst.Shards.Entities/README.md)
+for the exact YAML schema, C# service API, examples and limitations.
+
+## Core skill engine (shared by all Shards)
+
+The global `Amethyst.Shards.SkillEngine` runs **inside Amethyst Core**.
+Every Shard gets the same `IShardSkillEngine` through
+`context.GetRequiredService<IShardSkillEngine>()`.
+Core owns skill YAML parsing, validation, registry merging, event
+dispatch and cleanup on Shard disable. It does **not** know how to
+spawn items, damage entities or perform other gameplay mechanics.
+
+Shards can contribute independent mechanics, event triggers and
+YAML packs through `IShardContext`:
+
+```csharp
+context.RegisterSkillTrigger("onInteract"); // once, by the event provider
+context.RegisterSkillMechanic("myAction", ValidateMyAction, ExecuteMyAction);
+context.RegisterSkillDefinitions(bundledYamlPath, customYamlDirectory);
+
+// Anywhere with access to the Core skill engine:
+IShardSkillEngine engine = context.GetRequiredService<IShardSkillEngine>();
+await engine.DispatchAsync(new ShardSkillEvent(
+    "minecraft:cow", "onInteract", 2, 70, 3), ct);
+```
+
+`ValidateMyAction(ShardSkillInstruction skill)` checks action
+parameters at load time; `ExecuteMyAction(ShardSkillInstruction skill,
+ShardSkillEvent evt, CancellationToken ct)` returns `ValueTask`.
+A Shard may register its own mechanic and can also use mechanics
+registered by other enabled Shards. Each Shard's user YAML overrides
+its bundled YAML; different Shards' skill lists for the same root
+**combine**, rather than overwrite one another. An explicit
+`Skills: []` suppresses vanilla fallback for a custom alias.
+Core manages registrations by Shard ID and removes the owning
+Shard's mechanics, triggers, and definitions during disable.
+
+`onDeath` is a built-in trigger in Core's initial trigger registry.
+Other triggers can be registered by Shards that emit them.
+Unregistered mechanics/triggers and invalid YAML fail validation.
+
+### Items `dropItem` mechanic on `~onDeath`
+
+The Items Shard contributes the `dropItem` action, validates item
+IDs/chances/counts, and owns starter definitions in
+`skills-26.3.yml` with overrides at
+`shards/data/items/skills/*.yml` / `*.yaml`:
+
+```yaml
+cow:
+  Skills:
+    - 'dropItem{item=minecraft:beef;amount=1-3} ~onDeath'
+    - 'dropItem{item=minecraft:leather;amount=0-2;chance=0.5} @self ~onDeath'
+```
+
+`item` names an item from the Items registry; `amount` is an
+inclusive integer or `min-max` (0–64), and `chance` ranges 0–1.
+Short aliases `i`, `a`, and `c` are accepted. The Items mechanic
+uses `IShardItemDropSink` provided by Gameplay for physical spawning.
+
+The Entities manager queues one-time death events after lethal
+`TryDamage` or `entitykill`. Gameplay dispatches `onDeath`
+through Core, passing an optional vanilla fallback for custom
+entities. Gameplay owns ground-item physics/pickup/persistence;
+`entityremove` never dispatches a death event. Use `skillinfo cow`
+to inspect the combined registered skills.
+
+The Entities Shard now registers `~onMilk` and `~onShear` in Core
+and exposes `IShardEntityInteractions`. Gameplay validates the Java
+26.3 `interact` packet (0x1A), reach and main-hand item before
+applying the interaction. Cows, goats and mooshrooms convert a held
+empty bucket into a milk bucket (including safe stacked-bucket
+inventory handling). Sheep are sheared only once per spawn; their
+wool comes from the Items Shard's `dropItem` skill:
+
+```yaml
+sheep:
+  Skills:
+    - 'dropItem{item=minecraft:mutton;amount=1-2} ~onDeath'
+    - 'dropItem{item=minecraft:white_wool;amount=1-3} ~onShear'
+```
+
+Both triggers can be used by any Shard's skills. For example,
+an administrator could add `dropItem{item=minecraft:emerald;amount=1}`
+with `~onMilk` to the cow skills, creating an additional reward.
+The built-in physical actions do not require a skill definition;
+the skill dispatcher runs **after a successful interaction**.
+
+The Items Shard additionally registers `~onLeftClick`,
+`~onRightClick`, `~onDrop`, `~onStackDrop`, `~onPickup`,
+`~onSwap`, `~onEquip`, and `~onUnequip`. Gameplay dispatches
+item skills on validated block left-click, block/entity right-click,
+real Q/Ctrl+Q world-item drops, and successful item-entity pickup.
+Core includes authoritative `ActorUuid`, `ItemId`, and `Count`
+on item events. Full-stack Ctrl+Q fires both `~onDrop` and
+`~onStackDrop`. Offhand swapping and armor equipment are not yet
+implemented, so their trigger names are registered but not fired.
+Inventory-screen dropping and clicking empty air are also pending.
+
+The initial implementation has the `dropItem` mechanic plus
+`~onDeath`, `~onMilk` and `~onShear` triggers.
+Other mechanics and triggers can be added by enabled Shards;
+there is no full MythicMobs runtime or advanced Minecraft loot
+condition/enchantment support yet. Sheep wool colour, visual
+sheared-flag metadata, grazing/regrowth, mooshroom transformations,
+and shears durability on this interaction remain future work.
+
+Old experimental `items/loot/*.yml` files with active `Drops:`
+entries require manual migration to `Skills:` under
+`items/skills/`. The Items Shard fails startup with an explicit
+message rather than silently ignoring them. See the
+[Items Shard guide](shards/Amethyst.Shards.Items/README.md).
+
 ## Build / run
 
 ```bash
@@ -109,7 +268,7 @@ dotnet run --no-build --project src/Amethyst.csproj -- server.yaml
 
 On Linux, `./run.sh` does both steps automatically. **Do not run only `dotnet run --project src/Amethyst.csproj` on a fresh checkout**: it builds only the network kernel, not the Shard assemblies.
 
-`shards/installed/` and `shards/data/` are ignored by Git. Configure their paths through `shardsDirectory` and `shardsDataDirectory` in `server.yaml`. The build targets always copy Shard DLLs. Gameplay and Items refresh their manifests on each build so new required/provided capabilities are available on existing installations. Overworld and Hello preserve existing installed manifests; local `enabled` edits to those providers survive rebuilds. The Items manifest's `enabled` setting is reset to its shipped default during builds and can be edited after building if needed. Shard-specific writable data belongs in `shards/data/<shard-id>/`; saves and operators remain at their existing paths.
+`shards/installed/` and `shards/data/` are ignored by Git. Configure their paths through `shardsDirectory` and `shardsDataDirectory` in `server.yaml`. The build targets always copy Shard DLLs. Gameplay, Items and Entities refresh their manifests on each build so new required/provided capabilities are available on existing installations. Overworld and Hello preserve existing installed manifests; local `enabled` edits to those providers survive rebuilds. The Items and Entities manifests' `enabled` settings are reset to their shipped defaults during builds and can be edited after building if needed. Shard-specific writable data belongs in `shards/data/<shard-id>/`; saves and operators remain at their existing paths.
 
 ## Shard manifest
 
@@ -138,7 +297,7 @@ Manifest fields:
 - `requires`: capabilities that must have exactly one enabled provider
 - `dependsOn`: explicit Shard IDs (for non-substitutable dependencies)
 
-A dependency cycle, missing required provider, duplicate ID, incompatible API version, missing DLL, or invalid manifest causes a clear startup error. The Gameplay Shard requires the `world` and `items` capabilities rather than referring directly to `overworld` or the built-in Items implementation; alternative providers can be substituted **without changing the gameplay binary**.
+A dependency cycle, missing required provider, duplicate ID, incompatible API version, missing DLL, or invalid manifest causes a clear startup error. The Gameplay Shard requires the `world`, `items`, `recipes`, `skills` and `entities` capabilities rather than referring directly to `overworld` or the built-in Items implementation; alternative providers can be substituted **without changing the gameplay binary**.
 
 To replace the built-in world provider, set `enabled: false` on the installed `overworld/shard.yaml`, install a trusted Shard that declares `provides: [world]`, and set `enabled: true` on that Shard. Its enable hook must register one `IShardWorld` service. Keep the same world save only if the new provider is actually save-format and generator compatible; otherwise choose a new `worldPath`.
 
@@ -151,7 +310,7 @@ To replace the built-in world provider, set `enabled: false` on the installed `o
 
 Each Shard has its own noncollectible assembly load context and resolves private dependencies from its installation directory (include its dependency DLLs and `.deps.json` when distributing third-party Shards). The shared Amethyst API assembly is never loaded twice.
 
-**Enable/disable does not unload .NET assemblies.** DLL replacement or code updates require a process restart. The Gameplay Shard refuses to disable while players are connected. World and Items providers cannot disable while an enabled Gameplay Shard depends on them.
+**Enable/disable does not unload .NET assemblies.** DLL replacement or code updates require a process restart. The Gameplay Shard refuses to disable while players are connected. World, Items and Entities providers cannot disable while an enabled Gameplay Shard depends on them.
 
 Console commands:
 
@@ -162,9 +321,15 @@ hello World
 shard disable hello
 shard disable gameplay
 shard disable items
+shard disable entities
 shard disable overworld
-shard enable gameplay   # automatically enables world + items providers
+shard enable gameplay   # automatically enables world, items, recipes and entities
+skillinfo cow
+entitykill 1
 iteminfo minecraft:diamond_pickaxe
+entityinfo minecraft:cow
+entityspawn cow 0 80 0
+entities
 ```
 
 Other commands (`op`, `deop`, `kick`, `say`, `perf`) continue to come from the Gameplay Shard. `stop` is owned by Core.

@@ -11,6 +11,8 @@ public static class EntityInteractionProtocol
     public const int ServerboundInteract = 0x1A;
     public static EntityInteraction Read(Packet packet)
     {
+        if (packet.Id != ServerboundInteract)
+            throw new InvalidDataException("Expected entity-interact packet.");
         var r = packet.Reader();
         int entityId = r.ReadVarInt();
         int hand = r.ReadVarInt();

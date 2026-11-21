@@ -18,6 +18,7 @@ The Amethyst server implementation is independently written in C# / .NET.
   [RosegoldMC/minecraft-data.cr](https://github.com/RosegoldMC/minecraft-data.cr)
   `data/26.3/items.json` and `data/26.3/blocks.json`. The source dataset
   and its upstream notices should be consulted when updating protocol versions.
+- **Entity type catalog:** the 161 vanilla Java 26.3 entity names, registry IDs, dimensions and categories in `shards/Amethyst.Shards.Entities/entities-26.3.yml` were derived from [mj41/mc26-data](https://github.com/mj41/mc26-data/tree/mc-26.3) `entities.json`, extracted from Mojang's version-pinned server. Review its source and license when updating.
 - **YamlDotNet:** external NuGet dependency; see
   [YamlDotNet](https://github.com/aaubry/YamlDotNet) for its license.
 

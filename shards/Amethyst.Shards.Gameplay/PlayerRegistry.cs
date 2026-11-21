@@ -160,8 +160,14 @@ public sealed class PlayerRegistry
     private readonly object _sync = new();
     private readonly int _maxPlayers;
     private int _nextEntityId;
-    public PlayerRegistry(int maxPlayers) => _maxPlayers = maxPlayers;
-    public int AllocateEntityId() => Interlocked.Increment(ref _nextEntityId);
+    private readonly Func<int>? _externalAllocator;
+    public PlayerRegistry(int maxPlayers, Func<int>? allocateEntityId = null)
+    {
+        _maxPlayers = maxPlayers;
+        _externalAllocator = allocateEntityId;
+    }
+    public int AllocateEntityId() => _externalAllocator?.Invoke() ??
+        Interlocked.Increment(ref _nextEntityId);
     public bool TryAdd(ConnectedPlayer player, out string reason)
     {
         lock (_sync)

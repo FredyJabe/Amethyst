@@ -5,7 +5,7 @@ namespace Amethyst;
 
 /// <summary>Gameplay runtime supplied by the gameplay Shard. Network listener,
 /// login authentication and configuration are handled by AmethystNetworkServer.</summary>
-public sealed partial class MinecraftServer
+public sealed partial class MinecraftServer : IShardItemDropSink
 {
     private static readonly bool TraceMining =
         Environment.GetEnvironmentVariable("AMETHYST_TRACE_MINING") == "1";
@@ -23,26 +23,39 @@ public sealed partial class MinecraftServer
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
+    private readonly IShardEntityManager? _entities;
+    private readonly IShardSkillEngine? _skills;
+    private readonly IShardEntityRegistry? _entityTypes;
+    private readonly IShardEntityInteractions? _interactions;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private readonly Dictionary<Guid, Dictionary<int, ExperienceOrb>> _experienceViews = new();
+    private readonly Dictionary<Guid, Dictionary<int, ShardEntityInstance>> _entityViews = new();
     private CancellationTokenSource? _clockLifetime;
     private Task? _clockSync;
     private Task? _itemsSync;
+    private Task? _entitiesSync;
     private Task? _positionSync;
     private Task? _stationSync;
 
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
-        IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null)
+        IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
+        IShardEntityManager? entities = null, IShardSkillEngine? skills = null,
+        IShardEntityRegistry? entityTypes = null,
+        IShardEntityInteractions? interactions = null)
     {
         _options = options;
         _world = world;
         _blocks = blocks;
         _inventoryDirectory = inventoryDirectory;
         _items = items;
+        _entities = entities;
+        _skills = skills;
+        _entityTypes = entityTypes;
+        _interactions = interactions;
         _packetBus = packetBus;
-        _players = new PlayerRegistry(options.MaxPlayers);
+        _players = new PlayerRegistry(options.MaxPlayers, entities is null ? null : entities.AllocateEntityId);
         _operators = new OperatorStore(options.OperatorsFile);
         _clock = new WorldClock(options);
         _positions = new PlayerPositionStore(inventoryDirectory, options.WorldPath, world);
@@ -78,6 +91,8 @@ public sealed partial class MinecraftServer
         _clockSync = BroadcastWorldTimeAsync(_clockLifetime.Token);
         if (_groundItems is not null)
             _itemsSync = RunGroundItemsAsync(_clockLifetime.Token);
+        if (_entities is not null)
+            _entitiesSync = RunEntitiesAsync(_clockLifetime.Token);
         if (_positions.Enabled)
             _positionSync = SavePositionsPeriodicallyAsync(_clockLifetime.Token);
         if (_blocks is not null)
@@ -97,6 +112,8 @@ public sealed partial class MinecraftServer
                 try { await _clockSync; } catch (OperationCanceledException) { }
             if (_itemsSync is not null)
                 try { await _itemsSync; } catch (OperationCanceledException) { }
+            if (_entitiesSync is not null)
+                try { await _entitiesSync; } catch (OperationCanceledException) { }
             if (_positionSync is not null)
                 try { await _positionSync; } catch (OperationCanceledException) { }
             if (_stationSync is not null)
@@ -110,7 +127,9 @@ public sealed partial class MinecraftServer
             _fishingViews.Clear();
             _itemViews.Clear();
             _experienceViews.Clear();
+            _entityViews.Clear();
             _itemsSync = null;
+            _entitiesSync = null;
             _positionSync = null;
             _stationSync = null;
             _clockLifetime.Dispose();
@@ -272,6 +291,9 @@ public sealed partial class MinecraftServer
                             EntityInteractionProtocol.Read(packet.Value);
                         await HandleEntityInteractAsync(player, interaction,
                             lifetime.Token);
+                        if (player.Ready && _entities is not null)
+                            await HandleEntityInteractionAsync(player, interaction,
+                                lifetime.Token);
                         break;
                     }
                     case 0x1C: // KeepAlive reply
@@ -456,7 +478,7 @@ public sealed partial class MinecraftServer
                         break;
                     }
                     default:
-                        // Other inventory, entity interactions and abilities are not yet implemented.
+                        // Unimplemented inventory, combat, and abilities packets.
                         break;
                 }
                 if (teleportConfirmed && playerLoaded && !player.Ready)
@@ -505,6 +527,24 @@ public sealed partial class MinecraftServer
         return dx * dx + dy * dy + dz * dz <= 36; // Creative interaction range
     }
 
+    /// <summary>Dispatch an item skill by the canonical identity of the
+    /// authoritative stack. Never use a client-provided item ID as the owner.
+    /// Coordinates come from the server player pose unless an event specifies
+    /// the actual world-item position.</summary>
+    private Task DispatchItemSkillAsync(ConnectedPlayer player, int itemId,
+        string trigger, CancellationToken ct, int count = 1,
+        double? x = null, double? y = null, double? z = null)
+    {
+        if (_skills is null || _items is null || !player.Ready ||
+            itemId <= 0 || count <= 0 ||
+            !_items.TryGetById(itemId, out ShardItemDefinition definition))
+            return Task.CompletedTask;
+        PlayerPose pose = player.Pose;
+        return _skills.DispatchAsync(new ShardSkillEvent(definition.Identifier,
+            trigger, x ?? pose.X, y ?? pose.Y, z ?? pose.Z,
+            ActorUuid: player.PlayerUuid, ItemId: itemId, Count: count), ct);
+    }
+
     internal async Task HandleBlockActionAsync(ConnectedPlayer player,
         PlayerBlockAction action, CancellationToken ct)
     {
@@ -524,8 +564,38 @@ public sealed partial class MinecraftServer
         if (action.Status is BlockInteractionProtocol.DropAllItems
             or BlockInteractionProtocol.DropItem)
         {
-            // Drop actions have no item entities yet. Resynchronize instead of
-            // letting the client invent a dropped item or lose inventory.
+            if (player.Ready && _groundItems is not null)
+            {
+                ItemStack held = player.Inventory.Held();
+                int count = action.Status == BlockInteractionProtocol.DropAllItems
+                    ? held.Count : Math.Min(held.Count, 1);
+                if (held.ItemId > 0 && count > 0)
+                {
+                    PlayerPose pose = player.Pose;
+                    if (_groundItems.TrySpawn(held.ItemId, count,
+                        pose.X, pose.Y + 1.2, pose.Z, out GroundItem ground))
+                    {
+                        bool committed;
+                        try { committed = player.Inventory.TryTakeHeld(held.ItemId, count); }
+                        catch
+                        {
+                            _groundItems.TryRemove(ground.EntityId);
+                            throw;
+                        }
+                        if (committed)
+                        {
+                            await DispatchItemSkillAsync(player, held.ItemId,
+                                "onDrop", ct, count, ground.X, ground.Y, ground.Z);
+                            if (action.Status == BlockInteractionProtocol.DropAllItems)
+                                await DispatchItemSkillAsync(player, held.ItemId,
+                                    "onStackDrop", ct, count, ground.X, ground.Y, ground.Z);
+                        }
+                        else _groundItems.TryRemove(ground.EntityId);
+                    }
+                }
+            }
+            // Always reconcile the client, including empty slots, full ground
+            // item stores and creative inventories with modified hotbar items.
             await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
             return;
         }
@@ -536,6 +606,9 @@ public sealed partial class MinecraftServer
         bool valid = action.Face is >= 0 and <= 5 &&
             CanEditAt(player, action.X, action.Y, action.Z);
         ushort state = valid ? _blocks!.GetBlockState(action.X, action.Y, action.Z) : (ushort)0;
+        if (valid && state != 0 && action.Status == BlockInteractionProtocol.StartDestroyBlock)
+            await DispatchItemSkillAsync(player, player.Inventory.Held().ItemId,
+                "onLeftClick", ct);
         bool changed = false;
         bool toolWearChanged = false;
         bool survival = player.GameMode == PlayerGameMode.Survival;
@@ -871,9 +944,69 @@ public sealed partial class MinecraftServer
         }
     }
 
+    /// <summary>Handle Java 26.3 entity right-clicks. The client-supplied EID
+    /// is checked against the authoritative Entities manager, reach distance,
+    /// and the held stack. Entities owns species and sheared state; Gameplay
+    /// owns inventory transactions and physical drops; Core dispatches events.</summary>
+    internal async Task HandleEntityInteractionAsync(ConnectedPlayer player,
+        EntityInteraction hit, CancellationToken ct)
+    {
+        if (!player.Ready || _entities is null || _interactions is null ||
+            _items is null || _skills is null || hit.Hand != 0)
+            return; // Offhand items are not represented by PlayerInventory yet.
+        ShardEntityInstance entity = default;
+        bool found = false;
+        foreach (ShardEntityInstance next in _entities.Snapshot())
+            if (next.EntityId == hit.EntityId)
+            {
+                entity = next;
+                found = true;
+                break;
+            }
+        if (!found) return;
+        PlayerPose pose = player.Pose;
+        double dx = entity.X - pose.X, dz = entity.Z - pose.Z;
+        double dy = entity.Y + 0.8 - (pose.Y + 1.62);
+        if (dx * dx + dy * dy + dz * dz > 25) return;
+        ItemStack held = player.Inventory.Held();
+        if (held.Count < 1) return;
+        await DispatchItemSkillAsync(player, held.ItemId, "onRightClick", ct);
+        string? trigger = null;
+        if (_items.TryGetByIdentifier("minecraft:bucket", out var bucket) &&
+            _items.TryGetByIdentifier("minecraft:milk_bucket", out var milk) &&
+            held.ItemId == bucket.ProtocolId &&
+            _interactions.TryMilk(hit.EntityId, out var milked) &&
+            player.Inventory.TryConvertHeld(bucket.ProtocolId, milk.ProtocolId))
+        {
+            entity = milked;
+            trigger = "onMilk";
+        }
+        else if (_groundItems is not null &&
+            _items.TryGetByIdentifier("minecraft:shears", out var shears) &&
+            held.ItemId == shears.ProtocolId &&
+            _interactions.TryShear(hit.EntityId, out var sheared))
+        {
+            entity = sheared;
+            // Reward items are entirely Items skills (dropItem ~onShear).
+            // Entities only changes sheep state and exposes the trigger.
+            trigger = "onShear";
+        }
+        if (trigger is null) return;
+        await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+        string? fallback = _entityTypes is not null &&
+            _entityTypes.TryGetById(entity.ProtocolId, out var vanilla)
+            ? vanilla.Identifier : null;
+        await _skills.DispatchAsync(new ShardSkillEvent(entity.DefinitionId,
+            trigger, entity.X, entity.Y, entity.Z, entity.EntityId, fallback), ct);
+    }
+
     internal async Task HandleBlockUseAsync(ConnectedPlayer player,
         BlockUseOn hit, CancellationToken ct)
     {
+        if (hit.Hand == 0 && hit.ValidHit &&
+            CanEditAt(player, hit.X, hit.Y, hit.Z))
+            await DispatchItemSkillAsync(player, player.Inventory.Held().ItemId,
+                "onRightClick", ct);
         if (hit.ValidHit && hit.Hand == 0 &&
             CanEditAt(player, hit.X, hit.Y, hit.Z) &&
             WorkstationManager.FromBlockState(
@@ -1008,6 +1141,83 @@ public sealed partial class MinecraftServer
         }
     }
 
+    private async Task RunEntitiesAsync(CancellationToken ct)
+    {
+        using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
+        while (await ticker.WaitForNextTickAsync(ct))
+            await TickEntitiesAsync(ct);
+    }
+
+    /// <summary>Replicate Entities Shard instances to loaded, nearby players.
+    /// The manager is authoritative; this loop owns only per-viewer state.</summary>
+    internal async Task TickEntitiesAsync(CancellationToken ct)
+    {
+        if (_entities is null) return;
+        // The Entities Shard reports death exactly once; Core dispatches
+        // the trigger to registered mechanics without understanding item IDs.
+        // The Items Shard owns dropItem and calls Gameplay's world-item sink.
+        if (_skills is not null)
+        {
+            foreach (ShardEntityInstance dead in _entities.DrainDeaths())
+            {
+                string? fallback = _entityTypes is not null &&
+                    _entityTypes.TryGetById(dead.ProtocolId, out var vanilla)
+                        ? vanilla.Identifier : null;
+                await _skills.DispatchAsync(new ShardSkillEvent(
+                    dead.DefinitionId, "onDeath", dead.X, dead.Y, dead.Z,
+                    dead.EntityId, fallback), ct);
+            }
+        }
+        ShardEntityInstance[] instances = _entities.Snapshot();
+        ConnectedPlayer[] viewers = _players.Snapshot().Where(p => p.Ready).ToArray();
+        var online = viewers.Select(p => p.ConnectionId).ToHashSet();
+        foreach (Guid id in _entityViews.Keys.ToArray())
+            if (!online.Contains(id)) _entityViews.Remove(id);
+
+        foreach (ConnectedPlayer viewer in viewers)
+        {
+            if (!_entityViews.TryGetValue(viewer.ConnectionId,
+                out Dictionary<int, ShardEntityInstance>? seen))
+            {
+                seen = new Dictionary<int, ShardEntityInstance>();
+                _entityViews.Add(viewer.ConnectionId, seen);
+            }
+            var visible = new HashSet<int>();
+            PlayerPose pose = viewer.Pose;
+            foreach (ShardEntityInstance entity in instances)
+            {
+                double dx = entity.X - pose.X, dz = entity.Z - pose.Z;
+                if (dx * dx + dz * dz > 48 * 48 || Math.Abs(entity.Y - pose.Y) > 48)
+                    continue;
+                int cx = (int)Math.Floor(entity.X / 16.0);
+                int cz = (int)Math.Floor(entity.Z / 16.0);
+                if (viewer.View is IShardChunkSubscriptions chunks &&
+                    !await chunks.HasLoadedChunkAsync(cx, cz, ct)) continue;
+                visible.Add(entity.EntityId);
+                try
+                {
+                    if (!seen.TryGetValue(entity.EntityId, out ShardEntityInstance previous))
+                        await EntityProtocol.SendSpawnAsync(viewer.Connection, entity, ct);
+                    else if (previous.X != entity.X || previous.Y != entity.Y ||
+                             previous.Z != entity.Z || previous.Yaw != entity.Yaw ||
+                             previous.Pitch != entity.Pitch)
+                        await EntityProtocol.SendTeleportAsync(viewer.Connection, entity, ct);
+                    seen[entity.EntityId] = entity;
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+            }
+            foreach (int entityId in seen.Keys.ToArray())
+            {
+                if (visible.Contains(entityId)) continue;
+                try { await EntityProtocol.SendRemoveAsync(viewer.Connection, entityId, ct); }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+                seen.Remove(entityId);
+            }
+        }
+    }
+
     private async Task RunGroundItemsAsync(CancellationToken ct)
     {
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
@@ -1126,6 +1336,8 @@ public sealed partial class MinecraftServer
                 }
                 catch (IOException) { }
                 catch (ObjectDisposedException) { }
+                await DispatchItemSkillAsync(collector, item.ItemId, "onPickup", ct,
+                    count, item.X, item.Y, item.Z);
                 if (remaining.Count == 0) break;
             }
         }
@@ -1698,5 +1910,11 @@ public sealed partial class MinecraftServer
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
     }
+
+    /// <summary>World item effect for Core skill executors. The Gameplay
+    /// Shard continues to own dropped-item physics, pickup and persistence.</summary>
+    public bool TryDropItem(int itemId, int count, double x, double y, double z) =>
+        _groundItems is not null && _groundItems.TrySpawn(itemId, count,
+            x, y, z, out _);
 
 }
