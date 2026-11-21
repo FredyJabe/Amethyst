@@ -611,8 +611,13 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             ItemStack held = player.Inventory.Held();
             if (held.Count <= 0) return;
             bool stackDrop = action.Status == BlockInteractionProtocol.DropAllItems;
+            // Ctrl+Q is a regular drop AND a whole-stack drop. Both sets
+            // of skills run and share one cancellation decision.
             var evt = await EnchantmentEventAsync(held,
-                stackDrop ? "onStackDrop" : "onDrop", ct, actor: player.PlayerUuid);
+                "onDrop", ct, actor: player.PlayerUuid);
+            if (stackDrop)
+                await EnchantmentEventAsync(held, "onStackDrop", ct,
+                    evt, actor: player.PlayerUuid);
             if (!evt.IsCancelled)
             {
                 int amount = stackDrop ? held.Count : 1;
