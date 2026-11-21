@@ -10,9 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - name: Audit Java 26.3 loot-table format coverage
+        run: python3 tests/audit_vanilla_loot.py
       - name: Build entire solution
         run: dotnet build Amethyst.slnx -c Release --nologo
       - name: Shard lifecycle
@@ -21,3 +25,5 @@ jobs:
         run: dotnet run --project tests/EntityTests/EntityTests.csproj -c Release --no-build
       - name: Block interaction and persistence
         run: dotnet run --project tests/BlockTests/BlockTests.csproj -c Release --no-build
+      - name: Enchantment skill and inventory tests
+        run: dotnet run --project tests/EnchantmentTests/EnchantmentTests.csproj -c Release --no-build

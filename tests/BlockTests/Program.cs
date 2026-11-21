@@ -151,10 +151,13 @@ finally
 }
 
 await DurabilityFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await ConsumableFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await CombatFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await ShieldFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await ProjectileFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await EntityInteractionFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await EquipmentFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await BucketFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await FishingFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await ElytraFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 
@@ -754,7 +757,7 @@ try
         player.MarkReady();
         player.SetGameMode(PlayerGameMode.Survival);
         // The handler does not use the packet bus when invoked directly.
-        var game = new MinecraftServer(settings, world, null!, world,
+        var game = TestServerFactory.Create(settings, world, null!, world,
             items: itemsCatalog, recipes: recipesCatalog);
 
         for (int x = 1; x <= 2; x++)
@@ -1166,7 +1169,7 @@ try
         using (var wire = new MemoryStream())
         using (var channel = new PacketChannel(wire))
         {
-            var game = new MinecraftServer(config, world, null!, world, dataRoot,
+            var game = TestServerFactory.Create(config, world, null!, world, dataRoot,
                 itemsCatalog, recipesCatalog);
             Check(game.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
@@ -1187,7 +1190,7 @@ try
 
             // Recreate Gameplay as if the process restarted: admission must
             // use the saved coordinates rather than a hard-coded spawn.
-            var restarted = new MinecraftServer(config, world, null!, world, dataRoot,
+            var restarted = TestServerFactory.Create(config, world, null!, world, dataRoot,
                 itemsCatalog, recipesCatalog);
             Check(restarted.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
@@ -1251,7 +1254,7 @@ try
 
         using var fallbackWire = new MemoryStream();
         using var fallbackChannel = new PacketChannel(fallbackWire);
-        var fallbackGame = new MinecraftServer(config, world, null!, world, dataRoot,
+        var fallbackGame = TestServerFactory.Create(config, world, null!, world, dataRoot,
                 itemsCatalog, recipesCatalog);
         Check(fallbackGame.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), fallbackChannel, 0, out _),
@@ -1470,7 +1473,7 @@ try
             Array.Empty<ProfileProperty>(), 77, gameplayChannel,
             stationWorld, null, itemsCatalog);
         stationPlayer.MarkReady();
-        var gameplay = new MinecraftServer(settings, stationWorld, null!,
+        var gameplay = TestServerFactory.Create(settings, stationWorld, null!,
             stationWorld, Path.Combine(stationsRoot, "gameplay-integration"),
             itemsCatalog, recipesCatalog);
         int seq = 1;
@@ -1513,6 +1516,15 @@ try
     MinecraftServer? lootGame = null;
     var dropItem = new DropItemSkillMechanic(itemsCatalog, () => lootGame);
     deathSkills.RegisterMechanic("items", "dropItem", dropItem.Validate, dropItem.ExecuteAsync);
+    deathSkills.RegisterCondition("items", "flag",
+        condition =>
+        {
+            if (condition.Arguments.Count != 1 ||
+                !condition.Arguments.ContainsKey("name"))
+                throw new InvalidDataException("flag requires name.");
+        },
+        (condition, evt) =>
+            evt.Runtime.HasFlag(condition.Arguments["name"]));
     deathSkills.RegisterTrigger("entities", "onMilk");
     deathSkills.RegisterTrigger("entities", "onShear");
     foreach (string trigger in new[]
@@ -1523,9 +1535,9 @@ try
         deathSkills.RegisterTrigger("items", trigger);
     deathSkills.RegisterDefinitions("items", Path.Combine(solutionRoot.FullName,
         "shards", "Amethyst.Shards.Items", "skills-26.3.yml"));
-    lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
+    lootGame = TestServerFactory.Create(settings, stationWorld, null!, stationWorld,
         Path.Combine(stationsRoot, "loot-gameplay"), itemsCatalog, recipesCatalog,
-        lootWorld, deathSkills, lootTypes, lootWorld);
+        lootWorld, lootTypes, lootWorld, skills: deathSkills);
     Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var testCow) &&
         lootWorld.TryKill(testCow.EntityId, out _),
         "Prepare an entity death for the Gameplay loot pipeline");
@@ -1602,7 +1614,7 @@ try
             farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 1, true) &&
             lootWorld.TrySpawn("cow", 11, 80, 12, out milkTarget),
             "Prepare cow and bucket for interactive milking");
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Held() == new ItemStack(fullBucket.ProtocolId, 1),
             "Right-clicking a cow turns an empty bucket into a milk bucket");
@@ -1615,7 +1627,7 @@ try
             "Successful milking dispatches custom cross-Shard ~onMilk skills");
         Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 2, true),
             "Set up a stacked-bucket milking transaction");
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         var (milkSlots, _, _) = farmer.Inventory.Snapshot();
         Check(milkSlots[36] == new ItemStack(bucket.ProtocolId, 1) &&
@@ -1623,7 +1635,7 @@ try
             "Milking stacked buckets preserves the remaining empties and inserts filled milk");
         var beforeFar = farmer.Inventory.Snapshot().Slots;
         farmer.SetPose(new PlayerPose(40, 80, 40, 0, 0, true));
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(beforeFar),
             "Server enforces interaction reach to prevent remote item duplication");
@@ -1644,7 +1656,7 @@ try
         var lockedInventory = farmer.Inventory.Snapshot().Slots;
         int milkRewardsBefore = lootGame.GroundItemsForTests.Count(
             d => d.ItemId == milkReward.ProtocolId);
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(lockedInventory) &&
             lootGame.GroundItemsForTests.Count(d =>
@@ -1658,17 +1670,36 @@ try
             lootWorld.TrySpawn("sheep", 11, 80, 12, out shearTarget),
             "Prepare sheep and shears for triggered shearing");
         int beforeWool = lootGame.GroundItemsForTests.Length;
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(shearTarget.EntityId, 0, false), CancellationToken.None);
         var shearedWool = lootGame.GroundItemsForTests;
         Check(lootWorld.IsSheared(shearTarget.EntityId) &&
             shearedWool.Length > beforeWool &&
             shearedWool.Any(d => d.ItemId == wool.ProtocolId && d.Count is >= 1 and <= 3),
             "~onShear dispatches YAML dropItem mechanic to create real wool drops");
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(shearTarget.EntityId, 0, false), CancellationToken.None);
         Check(lootGame.GroundItemsForTests.Length == shearedWool.Length,
             "Repeated shearing cannot duplicate wool rewards");
+
+        // The Entities Shard owns sheep color, and Items YAML chooses the
+        // matching wool material through the ?flag skill condition.
+        ShardItemDefinition redWool = default;
+        Check(lootWorld.TrySpawnSheep(11, 80, 12,
+                out LivingEntity redSheep, color: 14) &&
+            itemsCatalog.TryGetByIdentifier("minecraft:red_wool", out redWool),
+            "Spawn a colored native sheep through the Entities Shard");
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
+            new EntityInteraction(redSheep.EntityId, 0, false),
+            CancellationToken.None);
+        GroundItem[] coloredDrops = lootGame.GroundItemsForTests
+            .Where(d => !shearedWool.Any(old => old.EntityId == d.EntityId))
+            .ToArray();
+        Check(lootWorld.TryGet(redSheep.EntityId, out LivingEntity coloredState) &&
+            coloredState.Sheared && coloredState.Color == 14 &&
+            coloredDrops.Length == 1 &&
+            coloredDrops[0].ItemId == redWool.ProtocolId,
+            "Shearing an Entities-owned red sheep executes the red-wool YAML skill");
 
         // Click triggers are item-owner skills, separate from entity events.
         Check(stationWorld.TrySetBlockState(11, 80, 12, 9, out _),

@@ -1,0 +1,515 @@
+# Minecraft Java 26.3 - all 43 vanilla enchantments.
+# Keys are vanilla registry identifiers. Numeric bonuses are Stats, not skill mechanics.
+# Skills execute actions via Core's shared SkillEngine; Stats apply on matching events.
+# Copy individual keys into shards/data/items/enchantments/*.yml to override them.
+# Runtime hooks supply event context; effects without a producer/sink remain declarative.
+
+aqua_affinity:
+  Id: minecraft:aqua_affinity
+  MaxLevel: 1
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [helmet]
+  Stats:
+    mining_speed:
+      Trigger: onMine
+      Operation: multiply
+      Base: 1
+      PerLevel: 1
+      Conditions: ["flag{name=underwater}"]
+
+bane_of_arthropods:
+  Id: minecraft:bane_of_arthropods
+  MaxLevel: 5
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [weapon]
+  Conflicts: [minecraft:sharpness, minecraft:smite]
+  Stats:
+    damage:
+      Trigger: onAttack
+      PerLevel: 2.5
+      Conditions: ["target{type=arthropod}"]
+
+binding_curse:
+  Id: minecraft:binding_curse
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [armor]
+  Curse: true
+  Skills:
+    - "setFlag{name=binding_curse} @self ~onUnequip"
+
+blast_protection:
+  Id: minecraft:blast_protection
+  MaxLevel: 4
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [armor]
+  Conflicts: [minecraft:protection, minecraft:fire_protection, minecraft:projectile_protection]
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.08
+      Conditions: ["damageType{type=explosion}"]
+
+breach:
+  Id: minecraft:breach
+  MaxLevel: 4
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [mace]
+  Conflicts: [minecraft:density, minecraft:smite, minecraft:bane_of_arthropods]
+  Stats:
+    armor_reduction:
+      Trigger: onAttack
+      PerLevel: 0.15
+
+channeling:
+  Id: minecraft:channeling
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [trident]
+  Conflicts: [minecraft:riptide]
+  Skills:
+    - "effect{id=lightning;duration=0} @target ~onProjectileHit ?flag{name=thundering}"
+
+density:
+  Id: minecraft:density
+  MaxLevel: 5
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [mace]
+  Conflicts: [minecraft:breach, minecraft:smite, minecraft:bane_of_arthropods]
+  Stats:
+    damage:
+      Trigger: onSmash
+      PerLevel: 0.5
+
+depth_strider:
+  Id: minecraft:depth_strider
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [boots]
+  Conflicts: [minecraft:frost_walker]
+  Stats:
+    movement_speed:
+      Trigger: onMove
+      PerLevel: 0.18
+      Conditions: ["flag{name=underwater}"]
+
+efficiency:
+  Id: minecraft:efficiency
+  MaxLevel: 5
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [tool]
+  Stats:
+    mining_speed:
+      Trigger: onMine
+      PerLevel: 2
+
+feather_falling:
+  Id: minecraft:feather_falling
+  MaxLevel: 4
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [boots]
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.12
+      Conditions: ["damageType{type=fall}"]
+
+fire_aspect:
+  Id: minecraft:fire_aspect
+  MaxLevel: 2
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [weapon]
+  Skills:
+    - "effect{id=fire;duration=4;perLevel=4} @target ~onAttack"
+
+fire_protection:
+  Id: minecraft:fire_protection
+  MaxLevel: 4
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [armor]
+  Conflicts: [minecraft:protection, minecraft:blast_protection, minecraft:projectile_protection]
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.08
+      Conditions: ["damageType{type=fire}"]
+
+flame:
+  Id: minecraft:flame
+  MaxLevel: 1
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [bow]
+  Skills:
+    - "effect{id=fire;duration=5} @target ~onProjectileHit"
+
+fortune:
+  Id: minecraft:fortune
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [tool]
+  Conflicts: [minecraft:silk_touch]
+  Stats:
+    fortune_level:
+      Trigger: onBlockDrop
+      PerLevel: 1
+
+frost_walker:
+  Id: minecraft:frost_walker
+  MaxLevel: 2
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [boots]
+  Conflicts: [minecraft:depth_strider]
+  Treasure: true
+  Skills:
+    - "effect{id=freeze_water;duration=5;perLevel=1} @self ~onMove ?flag{name=on_ground}"
+
+impaling:
+  Id: minecraft:impaling
+  MaxLevel: 5
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [trident]
+  Stats:
+    damage:
+      Trigger: onProjectileHit
+      PerLevel: 2.5
+      Conditions: ["flag{name=wet_target}"]
+
+infinity:
+  Id: minecraft:infinity
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [bow]
+  Conflicts: [minecraft:mending]
+  Skills:
+    - "setFlag{name=infinity} @self ~onProjectileLaunch"
+
+knockback:
+  Id: minecraft:knockback
+  MaxLevel: 2
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [weapon]
+  Stats:
+    knockback:
+      Trigger: onAttack
+      PerLevel: 0.5
+
+looting:
+  Id: minecraft:looting
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [weapon]
+  Stats:
+    looting_level:
+      Trigger: onEntityDrop
+      PerLevel: 1
+
+loyalty:
+  Id: minecraft:loyalty
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [trident]
+  Conflicts: [minecraft:riptide]
+  Stats:
+    loyalty_level:
+      Trigger: onProjectileReturn
+      PerLevel: 1
+
+luck_of_the_sea:
+  Id: minecraft:luck_of_the_sea
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [fishing_rod]
+  Stats:
+    fishing_luck:
+      Trigger: onFishing
+      PerLevel: 1
+
+lunge:
+  Id: minecraft:lunge
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [spear]
+  Stats:
+    lunge_strength:
+      Trigger: onSpearAttack
+      PerLevel: 1
+
+lure:
+  Id: minecraft:lure
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [fishing_rod]
+  Stats:
+    fishing_wait:
+      Trigger: onFishing
+      PerLevel: -5
+
+mending:
+  Id: minecraft:mending
+  MaxLevel: 1
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [breakable]
+  Conflicts: [minecraft:infinity]
+  Treasure: true
+  Stats:
+    mending_repair_per_xp:
+      Trigger: onExperiencePickup
+      Base: 2
+  Skills:
+    - "setFlag{name=mending} @self ~onExperiencePickup"
+
+multishot:
+  Id: minecraft:multishot
+  MaxLevel: 1
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [crossbow]
+  Conflicts: [minecraft:piercing]
+  Stats:
+    projectile_count:
+      Trigger: onProjectileLaunch
+      Base: 1
+      PerLevel: 2
+
+piercing:
+  Id: minecraft:piercing
+  MaxLevel: 4
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [crossbow]
+  Conflicts: [minecraft:multishot]
+  Stats:
+    piercing:
+      Trigger: onProjectileLaunch
+      PerLevel: 1
+
+power:
+  Id: minecraft:power
+  MaxLevel: 5
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [bow]
+  Stats:
+    projectile_damage:
+      Trigger: onProjectileLaunch
+      Base: 0.5
+      PerLevel: 0.5
+
+projectile_protection:
+  Id: minecraft:projectile_protection
+  MaxLevel: 4
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [armor]
+  Conflicts: [minecraft:protection, minecraft:fire_protection, minecraft:blast_protection]
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.08
+      Conditions: ["damageType{type=projectile}"]
+
+protection:
+  Id: minecraft:protection
+  MaxLevel: 4
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [armor]
+  Conflicts: [minecraft:fire_protection, minecraft:blast_protection, minecraft:projectile_protection]
+  Stats:
+    damage:
+      Trigger: onHurt
+      Operation: multiply
+      Base: 1
+      PerLevel: -0.04
+
+punch:
+  Id: minecraft:punch
+  MaxLevel: 2
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [bow]
+  Stats:
+    knockback:
+      Trigger: onProjectileHit
+      PerLevel: 1
+
+quick_charge:
+  Id: minecraft:quick_charge
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [crossbow]
+  Stats:
+    charge_ticks:
+      Trigger: onProjectileCharge
+      PerLevel: -5
+
+respiration:
+  Id: minecraft:respiration
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [helmet]
+  Stats:
+    air_ticks:
+      Trigger: onAirTick
+      PerLevel: 15
+      Conditions: ["flag{name=underwater}"]
+
+riptide:
+  Id: minecraft:riptide
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [trident]
+  Conflicts: [minecraft:loyalty, minecraft:channeling]
+  Stats:
+    riptide_force:
+      Trigger: onProjectileLaunch
+      PerLevel: 1
+      Conditions: ["flag{name=wet_caster}"]
+
+sharpness:
+  Id: minecraft:sharpness
+  MaxLevel: 5
+  Weight: 10
+  AnvilCost: 1
+  SupportedItems: [weapon]
+  Conflicts: [minecraft:smite, minecraft:bane_of_arthropods]
+  Stats:
+    damage:
+      Trigger: onAttack
+      Base: 0.5
+      PerLevel: 0.5
+
+silk_touch:
+  Id: minecraft:silk_touch
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [tool]
+  Conflicts: [minecraft:fortune]
+  Skills:
+    - "setFlag{name=silk_touch} @self ~onBlockDrop"
+
+smite:
+  Id: minecraft:smite
+  MaxLevel: 5
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [weapon]
+  Conflicts: [minecraft:sharpness, minecraft:bane_of_arthropods]
+  Stats:
+    damage:
+      Trigger: onAttack
+      PerLevel: 2.5
+      Conditions: ["target{type=undead}"]
+
+soul_speed:
+  Id: minecraft:soul_speed
+  MaxLevel: 3
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [boots]
+  Treasure: true
+  Stats:
+    movement_speed:
+      Trigger: onMove
+      PerLevel: 0.15
+      Conditions: ["flag{name=soul_ground}"]
+
+sweeping_edge:
+  Id: minecraft:sweeping_edge
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [sword]
+  Stats:
+    sweep_damage:
+      Trigger: onSweep
+      PerLevel: 0.25
+
+swift_sneak:
+  Id: minecraft:swift_sneak
+  MaxLevel: 3
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [leggings]
+  Treasure: true
+  Stats:
+    movement_speed:
+      Trigger: onMove
+      PerLevel: 0.15
+      Conditions: ["flag{name=sneaking}"]
+
+thorns:
+  Id: minecraft:thorns
+  MaxLevel: 3
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [armor]
+  Skills:
+    - "effect{id=thorns;duration=0;perLevel=1} @attacker ~onHurt ?chance{base=0;perLevel=0.15}"
+
+unbreaking:
+  Id: minecraft:unbreaking
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [breakable]
+  Skills:
+    # Per-point protection: level/(level+1) for tools, 40% of that for armor.
+    - "cancelEvent @self ~onItemDamage ?flag{name=non_armor} ?chance{mode=level_ratio}"
+    - "cancelEvent @self ~onItemDamage ?flag{name=armor} ?chance{mode=level_ratio;factor=0.4}"
+
+vanishing_curse:
+  Id: minecraft:vanishing_curse
+  MaxLevel: 1
+  Weight: 1
+  AnvilCost: 8
+  SupportedItems: [breakable]
+  Curse: true
+  Skills:
+    - "setFlag{name=vanish_on_death} @self ~onDeath"
+
+wind_burst:
+  Id: minecraft:wind_burst
+  MaxLevel: 3
+  Weight: 2
+  AnvilCost: 4
+  SupportedItems: [mace]
+  Treasure: true
+  Skills:
+    - "effect{id=wind_burst;duration=0;perLevel=1} @self ~onSmash"

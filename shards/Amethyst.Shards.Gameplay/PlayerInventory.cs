@@ -6,24 +6,32 @@ namespace Amethyst;
 /// <summary>Simple server-authoritative player inventory. Supports main slots
 /// 9..35 and hotbar 36..44; armor/crafting/offhand are reserved for later.
 /// All edits are persisted atomically under Gameplay's Shard data directory.</summary>
-public sealed partial class PlayerInventory
+public sealed partial class PlayerInventory : IShardPickupInventory
 {
-    private static readonly byte[] Magic = "AMINV004"u8.ToArray();
+    private static readonly byte[] Magic = "AMINV006"u8.ToArray();
+    private static readonly byte[] EnchantmentMagic = "AMINV005"u8.ToArray();
+    private static readonly byte[] PreviousMagic = "AMINV004"u8.ToArray();
     private static readonly byte[] DamageMagic = "AMINV003"u8.ToArray();
     private static readonly byte[] LegacyMagic = "AMINV002"u8.ToArray();
     private readonly object _sync = new();
     private readonly ItemStack[] _slots = new ItemStack[46];
     private readonly string? _path;
     private readonly IShardItemRegistry? _items;
+    private readonly EnchantmentDurability? _durabilitySkills;
     internal IShardItemRegistry? ItemRegistry => _items;
+    internal bool PreventsDurabilityWear(ItemStack item, bool armor, Random rng) =>
+        _durabilitySkills?.PreventsWear(item, armor, rng) ?? false;
     private ItemStack _cursor;
     private int _selected;
     private int _revision;
 
     public PlayerInventory(string? dataDirectory, Guid player,
-        IShardItemRegistry? items = null)
+        IShardItemRegistry? items = null, IShardEnchantmentRegistry? enchantments = null,
+        IShardSkillEngine? skills = null)
     {
         _items = items;
+        if (items is not null && enchantments is not null && skills is not null)
+            _durabilitySkills = new EnchantmentDurability(items, enchantments, skills);
         if (dataDirectory is null) return;
         string directory = Path.Combine(Path.GetFullPath(dataDirectory), "inventories");
         Directory.CreateDirectory(directory);
@@ -40,6 +48,33 @@ public sealed partial class PlayerInventory
     {
         if (index is < 0 or > 8) return;
         lock (_sync) _selected = index;
+    }
+
+    /// <summary>Protocol 777 F-key transaction: swap the full selected
+    /// stack with the offhand atomically, preserving per-instance components.
+    /// Spectators are rejected by Gameplay before calling this method.</summary>
+    public bool TrySwapOffhand()
+    {
+        lock (_sync)
+        {
+            int main = 36 + _selected;
+            ItemStack originalMain = _slots[main];
+            ItemStack originalOffhand = _slots[45];
+            if (!ValidSlotStack(45, originalMain) ||
+                !ValidSlotStack(main, originalOffhand) ||
+                originalMain == originalOffhand)
+                return false;
+            _slots[main] = originalOffhand;
+            _slots[45] = originalMain;
+            try { Persist(); _revision++; }
+            catch
+            {
+                _slots[main] = originalMain;
+                _slots[45] = originalOffhand;
+                throw;
+            }
+            return true;
+        }
     }
 
     public int SelectedSlot { get { lock (_sync) return 36 + _selected; } }
@@ -117,7 +152,7 @@ public sealed partial class PlayerInventory
             foreach (int index in Enumerable.Range(36, 9).Concat(Enumerable.Range(9, 27)))
             {
                 ItemStack stack = _slots[index];
-                if (stack.ItemId != itemId || stack.Damage != 0 ||
+                if (!SameItemData(stack, new ItemStack(itemId, 1)) ||
                     stack.Count == 0 || stack.Count >= maximum) continue;
                 int delta = Math.Min(maximum - stack.Count, remaining);
                 _slots[index] = stack with { Count = stack.Count + delta };
@@ -144,12 +179,19 @@ public sealed partial class PlayerInventory
     /// When buckets are stacked, insert the filled result elsewhere in the
     /// inventory; refuse the interaction if the result has nowhere to go.
     /// This prevents item duplication or loss when the inventory is full.</summary>
-    public bool TryConvertHeld(int expectedItem, int outputItem)
+    public bool TryConvertHeld(int expectedItem, int outputItem) =>
+        TryConvertSlot(SelectedSlot, expectedItem, outputItem);
+
+    /// <summary>Atomic mainhand or offhand container conversion. A stack of
+    /// empty buckets keeps its remainder in the original hand while its
+    /// filled output moves to a free main inventory slot.</summary>
+    public bool TryConvertSlot(int sourceSlot, int expectedItem, int outputItem)
     {
-        if (expectedItem <= 0 || MaxStack(outputItem) < 1) return false;
+        if (sourceSlot is < 9 or > 45 ||
+            expectedItem <= 0 || MaxStack(outputItem) < 1) return false;
         lock (_sync)
         {
-            int selected = 36 + _selected;
+            int selected = sourceSlot;
             ItemStack held = _slots[selected];
             if (held.ItemId != expectedItem || held.Count < 1) return false;
             var before = (ItemStack[])_slots.Clone();
@@ -221,10 +263,34 @@ public sealed partial class PlayerInventory
 
     private bool ValidStack(ItemStack s)
     {
+        if (!ItemStackComponents.IsValid(s.ComponentData)) return false;
+        if (s.Count == 0 && !string.IsNullOrEmpty(s.ComponentData)) return false;
         if (s.Damage < 0 || s.Unbreaking is < 0 or > 3 ||
             s.RepairCost is < 0 or > 1_000_000) return false;
+        bool enchanted = !string.IsNullOrEmpty(s.EnchantmentData);
+        if (enchanted)
+        {
+            string[] entries = (s.EnchantmentData ?? "").Split(';');
+            if (entries.Length > 32 || entries.Any(e => e.Length > 128) ||
+                !entries.SequenceEqual(entries.Order(StringComparer.Ordinal)))
+                return false;
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string entry in entries)
+            {
+                int equal = entry.LastIndexOf('=');
+                if (equal <= 0 || !int.TryParse(entry.AsSpan(equal + 1),
+                        out int level) || level is < 1 or > 255)
+                    return false;
+                string id = entry[..equal];
+                if (!id.StartsWith("minecraft:", StringComparison.Ordinal) ||
+                    id is "minecraft:unbreaking" or "minecraft:mending" ||
+                    !ids.Add(id)) return false;
+                try { _ = VanillaRegistries.IndexOf("minecraft:enchantment", id); }
+                catch (InvalidDataException) { return false; }
+            }
+        }
         bool extra = s.Damage > 0 || s.Unbreaking > 0 || s.Mending ||
-            s.Unbreakable || s.RepairCost > 0;
+            s.Unbreakable || s.RepairCost > 0 || enchanted;
         if (_items is null)
             return !extra && s.Count is >= 0 and <= 64 &&
                 s.ItemId is >= 0 and <= 1657 &&
@@ -232,8 +298,13 @@ public sealed partial class PlayerInventory
         if (!_items.IsValidStack(s.ItemId, s.Count)) return false;
         if (s.Count == 0) return !extra;
         if (!_items.TryGetById(s.ItemId, out var item)) return false;
-        return !extra || (item.MaxDurability > 0 && s.Count == 1 &&
-            s.Damage < item.MaxDurability);
+        if (!extra) return true;
+        if (s.Count != 1) return false;
+        if (item.MaxDurability > 0) return s.Damage < item.MaxDurability;
+        // Books are allowed to hold enchantments without physical wear.
+        return enchanted && s.Damage == 0 && s.Unbreaking == 0 &&
+            !s.Mending && !s.Unbreakable && s.RepairCost == 0 &&
+            item.Identifier is "minecraft:book" or "minecraft:enchanted_book";
     }
 
     private bool ValidSlotStack(int slot, ItemStack item)
@@ -261,7 +332,11 @@ public sealed partial class PlayerInventory
     private static bool SameItemData(ItemStack a, ItemStack b) =>
         a.ItemId == b.ItemId && a.Damage == b.Damage &&
         a.Unbreaking == b.Unbreaking && a.Mending == b.Mending &&
-        a.Unbreakable == b.Unbreakable && a.RepairCost == b.RepairCost;
+        a.Unbreakable == b.Unbreakable && a.RepairCost == b.RepairCost &&
+        string.Equals(a.EnchantmentData ?? "", b.EnchantmentData ?? "",
+            StringComparison.Ordinal) &&
+        string.Equals(a.ComponentData ?? "", b.ComponentData ?? "",
+            StringComparison.Ordinal);
 
     /// <summary>Execute server-side mouse clicks, hotbar swaps and shift-clicks.
     /// Client-provided item hashes are never trusted to mint items.</summary>
@@ -386,7 +461,10 @@ public sealed partial class PlayerInventory
         byte[] magic = reader.ReadBytes(Magic.Length);
         bool oldPlain = magic.SequenceEqual(LegacyMagic);
         bool oldDamage = magic.SequenceEqual(DamageMagic);
-        if (!oldPlain && !oldDamage && !magic.SequenceEqual(Magic) ||
+        bool oldV4 = magic.SequenceEqual(PreviousMagic);
+        bool oldV5 = magic.SequenceEqual(EnchantmentMagic);
+        if (!oldPlain && !oldDamage && !oldV4 && !oldV5 &&
+            !magic.SequenceEqual(Magic) ||
             reader.ReadInt32() != _slots.Length)
             throw new InvalidDataException($"Bad player inventory header in {_path}");
         ItemStack ReadStack()
@@ -397,10 +475,18 @@ public sealed partial class PlayerInventory
             bool mending = !oldPlain && !oldDamage && reader.ReadBoolean();
             bool unbreakable = !oldPlain && !oldDamage && reader.ReadBoolean();
             int cost = oldPlain || oldDamage ? 0 : reader.ReadInt32();
+            string enchantments = oldPlain || oldDamage || oldV4 ? "" : reader.ReadString();
+            string components = oldPlain || oldDamage || oldV4 || oldV5 ? "" :
+                reader.ReadString();
+            if (enchantments.Length > 4096 ||
+                components.Length > ItemStackComponents.MaximumCharacters)
+                throw new InvalidDataException("Oversized inventory component.");
             return new ItemStack(item, count)
             {
                 Damage = damage, Unbreaking = unbreaking, Mending = mending,
-                Unbreakable = unbreakable, RepairCost = cost
+                Unbreakable = unbreakable, RepairCost = cost,
+                EnchantmentData = enchantments.Length == 0 ? null : enchantments,
+                ComponentData = components.Length == 0 ? null : components
             };
         }
         for (int i = 0; i < _slots.Length; i++)
@@ -441,6 +527,8 @@ public sealed partial class PlayerInventory
                     output.Write(slot.Mending);
                     output.Write(slot.Unbreakable);
                     output.Write(slot.RepairCost);
+                    output.Write(slot.EnchantmentData ?? "");
+                    output.Write(slot.ComponentData ?? "");
                 }
                 foreach (ItemStack slot in _slots) WriteStack(writer, slot);
                 WriteStack(writer, _cursor);

@@ -24,7 +24,8 @@ public sealed partial class PlayerInventory
                 IsDefinitionUnbreakable(item)) return false;
             ItemStack next = DurabilityRules.ApplyWear(old, item.MaxDurability,
                 points, slot is >= 5 and <= 8 &&
-                DurabilityRules.IsArmor(item.Identifier), random);
+                DurabilityRules.IsArmor(item.Identifier), random,
+                PreventsDurabilityWear);
             if (next == old) return false;
             _slots[slot] = next;
             try { Persist(); _revision++; }
@@ -50,7 +51,8 @@ public sealed partial class PlayerInventory
                     item.MaxDurability <= 0 ||
                     IsDefinitionUnbreakable(item)) continue;
                 ItemStack next = DurabilityRules.ApplyWear(old, item.MaxDurability,
-                    points, armor: true, random);
+                    points, armor: true, random: random,
+                    preventsWear: PreventsDurabilityWear);
                 if (next == old) continue;
                 _slots[slot] = next;
                 changed++;
@@ -71,8 +73,10 @@ public sealed partial class PlayerInventory
         lock (_sync)
         {
             ItemStack[] snapshot = (ItemStack[])_slots.Clone();
+            Func<ItemStack, int>? mendingRate = _durabilitySkills is null
+                ? null : _durabilitySkills.MendingRate;
             var (left, changed, slot) = DurabilityRules.ApplyMending(
-                _slots, 36 + _selected, experience, _items, random);
+                _slots, 36 + _selected, experience, _items, random, mendingRate);
             if (!changed) return (experience, -1);
             try { Persist(); _revision++; }
             catch { Array.Copy(snapshot, _slots, _slots.Length); throw; }
@@ -90,9 +94,8 @@ public sealed partial class PlayerInventory
         if (maximum == 0) return 0;
         bool extra = incoming.Damage > 0 || incoming.Unbreaking > 0 ||
             incoming.Mending || incoming.Unbreakable ||
-            incoming.RepairCost > 0;
-        if (extra && (incoming.Count != 1 ||
-            !ValidStack(incoming))) return 0;
+            incoming.RepairCost > 0 || !string.IsNullOrEmpty(incoming.EnchantmentData);
+        if ((extra && incoming.Count != 1) || !ValidStack(incoming)) return 0;
         lock (_sync)
         {
             ItemStack[] previous = (ItemStack[])_slots.Clone();
@@ -121,6 +124,26 @@ public sealed partial class PlayerInventory
             try { Persist(); _revision++; }
             catch { Array.Copy(previous, _slots, _slots.Length); throw; }
             return incoming.Count - remaining;
+        }
+    }
+
+    /// <summary>Consume the exact authoritative held stack after a validated
+    /// ground drop has been created. Revision and persistence are transaction-
+    /// protected, and a mismatch never removes a different item.</summary>
+    public bool TryDropHeld(ItemStack expected, int count)
+    {
+        if (expected.Count <= 0 || count is < 1 || count > expected.Count)
+            return false;
+        lock (_sync)
+        {
+            int slot = SelectedSlot;
+            ItemStack current = _slots[slot];
+            if (current != expected) return false;
+            _slots[slot] = current.Count == count ? ItemStack.Empty :
+                current with { Count = current.Count - count };
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = current; throw; }
+            return true;
         }
     }
 
@@ -159,6 +182,23 @@ public sealed partial class PlayerInventory
             .Sum(s => s.ItemId == itemId ? s.Count : 0) >= count;
     }
 
+    /// <summary>Consume an item only if it is still exactly the stack
+    /// which began the use animation. Includes component patches, so moving
+    /// or replacing food cannot duplicate or consume unrelated inventory.</summary>
+    public bool TryConsumeExactSlot(int slot, ItemStack expected)
+    {
+        if (slot is < 36 or > 45 || expected.Count <= 0) return false;
+        lock (_sync)
+        {
+            if (_slots[slot] != expected) return false;
+            _slots[slot] = expected.Count == 1 ? ItemStack.Empty :
+                expected with { Count = expected.Count - 1 };
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = expected; throw; }
+            return true;
+        }
+    }
+
     /// <summary>Consume an expected stack from a particular hand/offhand.
     /// Used when throwing a trident, pearl, egg or snowball.</summary>
     public bool ConsumeSlot(int slot, int itemId, bool creative = false)
@@ -189,6 +229,52 @@ public sealed partial class PlayerInventory
             _slots[slot] = current with { Damage = 0 };
             try { Persist(); _revision++; }
             catch { _slots[slot] = current; throw; }
+            return true;
+        }
+    }
+
+    /// <summary>Server-only enchantment writer. Validates the registered
+    /// enchantment, item type and conflict set before mutating a held stack.
+    /// Existing legacy fields keep their previous persistence semantics.</summary>
+    public bool EnchantHeld(string enchantmentId, int level,
+        IShardEnchantmentRegistry registry)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        if (!registry.TryGet(enchantmentId, out var enchantment) ||
+            level is < 1 or > 255 || level > enchantment.MaxLevel)
+            return false;
+        lock (_sync)
+        {
+            int slot = 36 + _selected;
+            ItemStack old = _slots[slot];
+            if (old.Count != 1 || _items is null ||
+                !_items.TryGetById(old.ItemId, out var item) ||
+                !registry.CanApply(enchantment.Identifier, item))
+                return false;
+            foreach (var (id, existingLevel) in old.AllEnchantments())
+                if (existingLevel > 0 && id != enchantment.Identifier &&
+                    registry.ConflictsWith(id, enchantment.Identifier))
+                    return false;
+            ItemStack next;
+            if (enchantment.Identifier == "minecraft:unbreaking")
+                next = old with { Unbreaking = level };
+            else if (enchantment.Identifier == "minecraft:mending")
+                next = old with { Mending = true };
+            else
+            {
+                var levels = old.AllEnchantments()
+                    .Where(p => p.Id != enchantment.Identifier &&
+                        p.Id is not ("minecraft:unbreaking" or "minecraft:mending"))
+                    .ToDictionary(p => p.Id, p => p.Level, StringComparer.Ordinal);
+                levels[enchantment.Identifier] = level;
+                string encoded = string.Join(";", levels.OrderBy(p => p.Key,
+                    StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value));
+                next = old with { EnchantmentData = encoded };
+            }
+            if (next == old || !ValidStack(next)) return false;
+            _slots[slot] = next;
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = old; throw; }
             return true;
         }
     }

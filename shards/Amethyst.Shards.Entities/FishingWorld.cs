@@ -1,20 +1,13 @@
 using Amethyst.Shards;
 
-namespace Amethyst;
+using Amethyst;
 
-public readonly record struct FishingBobber(
-    int EntityId, Guid Uuid, Guid Owner, int OwnerEntityId,
-    double X, double Y, double Z, double Vx, double Vy, double Vz,
-    bool InWater, bool Biting, long BiteAtMs, long BiteUntilMs,
-    int AgeTicks);
-
-public readonly record struct FishingReel(bool Caught, bool WasInWater,
-    FishingBobber Bobber);
+namespace Amethyst.BuiltinShards;
 
 /// <summary>Server-authoritative one-bobber-per-player fishing state.
 /// Casts have physical trajectories and bite windows. Reeling only
 /// awards loot when the bobber is biting in water.</summary>
-public sealed class FishingWorld
+public sealed class FishingWorld : IShardFishingWorld
 {
     private readonly object _gate = new();
     private readonly Func<int> _allocate;
@@ -22,6 +15,12 @@ public sealed class FishingWorld
     public const int MaximumAgeTicks = 20 * 120;
 
     public FishingWorld(Func<int> allocateId) => _allocate = allocateId;
+    public bool CheckOpenWater(IShardBlockWorld world, FishingBobber bobber) =>
+        IsOpenWater(world, bobber);
+
+    public (string Item, int Xp) RollStarterLoot(Random? random = null) =>
+        RollLoot(random);
+
 
     public FishingBobber[] Snapshot()
     {
@@ -34,7 +33,7 @@ public sealed class FishingWorld
     }
 
     public bool TryCast(Guid owner, int ownerEntityId, PlayerPose pos,
-        out FishingBobber bobber)
+        out FishingBobber bobber, int waitReductionSeconds = 0)
     {
         bobber = default;
         lock (_gate)
@@ -49,7 +48,8 @@ public sealed class FishingWorld
                 owner, ownerEntityId, pos.X + forwardX * 0.5,
                 pos.Y + 1.45, pos.Z + forwardZ * 0.5,
                 forwardX * 0.65, forwardY * 0.65 + 0.05,
-                forwardZ * 0.65, false, false, 0, 0, 0);
+                forwardZ * 0.65, false, false, 0, 0, 0)
+                { WaitReductionSeconds = Math.Clamp(waitReductionSeconds, 0, 30) };
             _hooks.Add(owner, bobber);
             return true;
         }
@@ -101,7 +101,8 @@ public sealed class FishingWorld
                     long biteAt = bobber.BiteAtMs;
                     long biteUntil = bobber.BiteUntilMs;
                     bool biting = bobber.Biting;
-                    if (biteAt == 0) biteAt = now + random.Next(5000, 16001);
+                    if (biteAt == 0) biteAt = now + Math.Max(1000,
+                        random.Next(5000, 16001) - bobber.WaitReductionSeconds * 1000);
                     if (now >= biteAt && !biting)
                     {
                         biting = true;
@@ -110,7 +111,8 @@ public sealed class FishingWorld
                     if (biting && now > biteUntil)
                     {
                         biting = false;
-                        biteAt = now + random.Next(5000, 16001);
+                        biteAt = now + Math.Max(1000,
+                            random.Next(5000, 16001) - bobber.WaitReductionSeconds * 1000);
                     }
                     bobber = bobber with
                     {
@@ -159,6 +161,28 @@ public sealed class FishingWorld
             }
             return _hooks.Values.OrderBy(x => x.EntityId).ToArray();
         }
+    }
+
+    /// <summary>Conservative 5x5 open-water check for the native fishing
+    /// table's treasure predicate. A complete vanilla check also accounts
+    /// for fluid-state properties and allowed surface vegetation.</summary>
+    public static bool IsOpenWater(IShardBlockWorld world, FishingBobber bobber)
+    {
+        int centerX = (int)Math.Floor(bobber.X);
+        int centerY = (int)Math.Floor(bobber.Y);
+        int centerZ = (int)Math.Floor(bobber.Z);
+        if (centerY is < -62 or > 317) return false;
+        for (int x = centerX - 2; x <= centerX + 2; x++)
+        for (int z = centerZ - 2; z <= centerZ + 2; z++)
+        {
+            for (int y = centerY - 1; y <= centerY; y++)
+                if (world.GetBlockState(x, y, z) is < 89 or > 104)
+                    return false;
+            for (int y = centerY + 1; y <= centerY + 2; y++)
+                if (world.GetBlockState(x, y, z) != 0)
+                    return false;
+        }
+        return true;
     }
 
     public static (string Item, int Xp) RollLoot(Random? random = null)

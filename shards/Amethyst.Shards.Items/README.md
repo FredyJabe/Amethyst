@@ -81,9 +81,9 @@ bucket:
 | `~onDrop` | **Live:** a successful Q or Ctrl+Q world-item drop |
 | `~onStackDrop` | **Live:** additional event for a successful Ctrl+Q full-stack drop |
 | `~onPickup` | **Live:** successful world-item pickup; fires only for the number actually inserted into inventory |
-| `~onSwap` | Registered; pending offhand swap support (F key) |
-| `~onEquip` | Registered; pending armor/equipment slot transactions |
-| `~onUnequip` | Registered; pending armor/equipment slot transactions |
+| `~onSwap` | **Live:** validated F-key mainhand/offhand exchange; cancellable before mutation |
+| `~onEquip` | **Live:** accepted offhand/armor equip transactions, including creative and window clicks |
+| `~onUnequip` | **Live:** accepted offhand/armor removal; not re-fired on durability-only changes |
 
 Core now passes the server-authoritative item ID, count, and
 actor UUID in `ShardSkillEvent` (`ItemId`, `Count`,
@@ -98,8 +98,9 @@ The server persists the drop and removes the matching inventory
 amount before dispatching the event; failed or stale transactions
 roll back the new world stack. `~onDrop` always fires on successful
 drops, and `~onStackDrop` fires additionally on full-stack drops.
-Inventory-window Q/Ctrl+Q actions, offhand (F), armor, air-only
-use-item packets, and left-clicking entities are **not yet wired**.
+Inventory-window Q/Ctrl+Q and left-click item triggers for entities
+remain pending. F-key, offhand and armor-slot interactions are now
+validated and emitted by their Gameplay publishers.
 Only successfully processed interactions emit triggers; unknown
 mechanics and unregistered trigger names still fail YAML validation.
 
@@ -108,9 +109,11 @@ provides validated species and sheared-state interactions. Gameplay
 handles bucket-to-milk conversion and dispatches `~onMilk`; when
 a sheep is sheared, Gameplay dispatches `~onShear`, which runs
 the configured Items `dropItem` skill to spawn wool. Each sheep
-can be sheared once until regrowth is implemented. The vanilla
-starter sheep skill emits white wool; sheep colours and shears
-durability are not yet represented by the current item/entity data.
+can be sheared once until timed wool regrowth. The Entities Shard owns
+all 16 sheep colours, persisted sheared state and regrowth; Items YAML
+selects the matching wool, and Gameplay applies shears durability.
+Both `~onShear` and `~onMilk` now run before mutation, so
+`cancelEvent` can prevent the default action without skipping later skills.
 
 The Entities Shard emits a one-time death event on `TryKill` or
 lethal `TryDamage`. Gameplay dispatches `~onDeath` via
@@ -118,9 +121,9 @@ Core's shared `IShardSkillEngine`; the Items-owned `dropItem` mechanic
 calls Gameplay's `IShardItemDropSink` to spawn physical, pickable items.
 `entityremove` does not trigger skills. This is a starter
 event/skill engine, **not** a complete MythicMobs implementation:
-other registered game-specific triggers and mechanics, target selectors, AI, Minecraft loot conditions,
-Looting enchantments, cooking by fire, XP and rare-drop functions
-are not yet supported.
+some additional game-specific triggers and target selectors, full mob
+AI, and environment-specific loot contexts remain pending. Looting,
+fire-smelting and player-kill XP are partially integrated already.
 
 **Migration from earlier experimental Drops YAML:** Files in
 `shards/data/items/loot/` using `Drops:` are not loaded. If they
@@ -273,6 +276,26 @@ Incorrect bytes can cause client disconnections.
 names, 21 typed value codecs and all 122 registry IDs accessible by
 canonical ID. The remaining complex codecs and game-side mechanics
 such as consumption, combat and equipping still require implementation.
+
+### Per-stack component patches (incremental support)
+
+Gameplay now supports a canonical, authoritative `ItemStack.ComponentData`
+JSON patch and an `ItemStack.WithComponents` helper. Use
+`ItemStackComponents.Encode` with a map of **canonical**
+`minecraft:` component identifiers to values already encoded as JSON by
+the Items Shard. No new YAML shorthand names were introduced.
+Per-stack patches override bundled item-definition components,
+including removals. The server validates registry IDs and serializable
+values before accepting them and preserves patches through
+stack merging, inventory persistence, ground drops and workstation
+storage. Durability and enchantment fields continue to take precedence.
+
+The new file versions `AMINV006`, `AMDROP03`, and `AMSTAT04`
+accept older persisted formats. These additions do **not** implement
+all 122 typed codecs: unsupported structured values still require
+explicit `WireHex`, and the remaining consumable/equipment/etc.
+behavior has separate Gameplay work ahead. Arbitrary client-supplied
+components are never trusted during inventory clicks.
 
 **Mythic-style top-level fields** and the explicit `Components` map
 can be used in your item definition YAML:
@@ -771,3 +794,336 @@ dotnet build Amethyst.slnx -c Release
 dotnet run --project tests/ShardTests/ShardTests.csproj -c Release --no-build
 dotnet run --project tests/BlockTests/BlockTests.csproj -c Release --no-build
 ```
+
+
+## Item Skills and shared triggers
+
+An item YAML root now accepts a `Skills` list alongside `Stats`.
+The shared Core engine validates the mechanics and conditions and
+dispatches them for the applicable item ID. Example:
+
+```yaml
+diamond_sword:
+  Skills:
+    - "cancelEvent @self ~onRightClick ?chance{base=0.25}"
+    - "setFlag{name=custom_action} @self ~onRightClick"
+```
+
+`cancelEvent` never interrupts the remainder of the skill list. Item
+and enchantment Skills are registered into the same Items Shard pack.
+Configured `~onRightClick` skills run on use-item and use-on-block,
+and `~onLeftClick` runs before server-authoritative attacks and mines.
+The publisher checks cancellation before committing vanilla actions.
+Gameplay also publishes `~onDrop`, `~onStackDrop` (Q vs Ctrl-Q), and
+`~onPickup`: cancellation of these events prevents respectively the
+ground drop or inventory pickup, while subsequent Skills still execute.
+Dropping stages the physical ground entity and rolls it back if the
+inventory transaction cannot consume the exact held stack. F-key
+`onSwap`, armor/offhand `onEquip` and `onUnequip` now publish on
+validated transactions. Durability-only changes update visible
+equipment without faking an equip transition.
+Custom aliases have registered definitions, but physical stacks still
+need separate alias identity before their per-alias skills can fire.
+
+## Pinned official 26.3 loot-table inputs
+
+`vendor/minecraft-26.3-data` is a read-only Git submodule at
+`mj41/mc26-data` commit `d48a84ec43b97f41a01244bf0b6ab1d7a6b97bc6`,
+extracted from Mojang's Java **26.3 / protocol 777** server jar.
+The submodule carries **1,447** `data/minecraft/loot_table/**/*.json`
+files plus `blocks.json` mapping every numeric block state to its
+canonical block and properties, and 883 vanilla data-pack tags
+(including the item, enchantment and entity-type tags used by loot).
+The Items Shard installs these assets
+and registers `IShardVanillaLootTables` and
+`IShardVanillaBlockStates`. A normal `./run.sh` checkout initializes
+the submodule once. For an alternate checkout, run
+`git submodule update --init --recursive` before building.
+The upstream dataset is credited under its accompanying MIT license.
+
+Live mob deaths prefer the original JSON loot table, including nested
+sheep-color lookups, count providers, Looting bonuses, smelting and
+explicit conditions. Live Survival block breaks prefer the actual
+`minecraft:blocks/<block>` JSON using the real block-state report,
+with Fortune, Silk Touch and shear-tool context. Explicit user YAML
+loot overrides **take precedence** over the vanilla mob tables.
+Item-defined `~onBlockDrop` skills still run and can replace vanilla
+drops with `cancelEvent` followed by `dropItem`.
+
+**Important correctness boundary:** merely loading all 1,447 files
+does not mean that every loot function and predicate is implemented.
+The current evaluator supports common item, alternatives, group,
+sequence, nested-table entries and common conditions, weighted pools,
+set-count, ore Fortune, Looting count increase, explosion decay, item
+damage, simple potion components and furnace smelting. It also handles
+`match_block`, `match_tool` with pinned item tags,
+`random_chance_with_enchanted_bonus`, simple block-entity
+`copy_components` when an authoritative component source exists,
+`copy_state`, `set_components`, `set_enchantments`,
+`enchant_randomly` (for supported items), `set_stew_effect`,
+`set_ominous_bottle_amplifier`, and inline loot tables.
+The item/entity tag resolver handles nested `#minecraft:...` tags.
+The evaluator preflights native results for supported component codecs
+before spawning anything, preventing partially spawned invalid loot.
+Some 26.3
+specialized entry types, predicate trees and modifier types still
+raise a named `NotSupportedException`. Gameplay logs these and uses
+the existing explicitly approximate drop fallback. This behavior is
+not yet **complete vanilla parity**. The pinned dataset is the
+authoritative source for implementing and testing the remaining
+function families instead of guessing hard-coded results.
+
+## Consumables, server food, and status effects
+
+`consumables-26.3.yml` contains 42 version-pinned item use profiles
+(40 foods plus milk and potion), with nutrition, **absolute** saturation,
+a timed consumption duration, `AlwaysEdible`, item remainders, and
+optional effects. Overrides under `shards/data/items/consumables/*.yml`
+replace individual entries; all material names resolve through the
+Items Shard's item registry, independently of the 45 approved
+component alias names.
+
+Gameplay validates the original held stack through the use animation,
+does not consume food before the configured use duration, cancels on
+early release, and atomically decrements exactly that held stack.
+Successful consumption updates persisted hunger and saturation and
+returns bowls or bottles through inventory or as physical dropped
+items if full. Hunger exhaustion is persisted with backwards-readable
+`AMHP0002`. A server-side active-effects store synchronizes
+`update_mob_effect` and `remove_mob_effect` packets to Java 26.3,
+with the first periodic hooks for regeneration, poison and hunger.
+The food event `~onConsume` can be cancelled by an item skill.
+
+The built-in Java 26.3 potion (46) and mob-effect (40) network IDs
+are pinned exactly via `VanillaBuiltinIds`; effect IDs are **zero-based**.
+`minecraft:potion_contents`, `minecraft:potion_duration_scale`, and
+`minecraft:suspicious_stew_effects` have typed stack network codecs.
+Gameplay reads those per-stack values after the held-use duration to
+apply potion presets/custom effects and restore the glass bottle or bowl.
+Active effects persist in an `AMEFF001` save file, are re-sent on
+login, and are cleared on respawn. Resistance and Absorption now
+modify real combat damage after the invulnerability-frame check.
+
+**This remains partial Phase 4:** the general `minecraft:consumable`
+and `minecraft:food` per-stack overrides, vanilla-exact food and potion
+timing, all status effects (speed, invisibility, environment effects),
+full collision and fluid physics, and specialized item interactions
+are incomplete. Chorus fruit now uses conservative loaded-chunk
+collision checks, and splash potions retain custom per-stack effects.
+Basic source-water/lava bucket filling and placement are implemented;
+waterlogging, fish buckets, powder snow, maps, books, archaeology
+sherds, vehicles and specialized equipment still need work. Some loot
+tables require unimplemented exploration maps, decorated-pot dynamic
+context, biomes or block-entity services. None of this is a claim of
+full vanilla parity.
+
+## YAML loot drops and `dropItem` (Phase 4)
+
+`shards/Amethyst.Shards.Items/loot-26.3.yml` bundles initial
+entity loot rules. The Items Shard installs this file alongside item,
+recipe and enchantment YAML. Server operators can replace entity loot
+packs by writing `*.yml` files to
+`shards/data/items/loot/`, with one root per entity ID.
+
+```yaml
+minecraft:sheep:
+  Skills:
+    - "dropItem{item=minecraft:mutton;min=1;max=2;bonus=looting} @self ~onDeath"
+    - "dropItem{item=minecraft:white_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_white}"
+```
+
+Each `dropItem` mechanic validates its `item` against the registered
+vanilla item catalog at startup. Specify either `amount` or `min` and
+`max` (1..64); optional `bonus=looting` adds a uniformly rolled
+0..Looting-level count. Items are produced as runtime drop intents.
+Gameplay commits them to ground entities **after all skills execute**.
+They do not short-circuit on `cancelEvent`.
+
+Sheep's 16 wool colors are chosen by `?flag{name=color_<color>}`;
+`not_sheared` prevents wool from sheared sheep. The killer's
+`~onEntityDrop` Stats are applied first, allowing Looting YAML to
+modify drop rolls. `Skills: []` in an override disables that entity's
+bundled drops (it does not restore hardcoded defaults).
+
+The bundled YAML skills cover **sheep** and a compatibility
+`minecraft:fishing` loot pack. With the pinned vanilla dataset installed,
+fishing now first evaluates the actual
+`minecraft:gameplay/fishing` table and its weighted fish, junk, and
+treasure pools, with the rod's `fishing_luck` Stats as the luck parameter.
+Treasure eligibility uses a conservative 5x5 water-volume test with
+clear air above the bobber; complete 26.3 fluid-state rules and weather
+modifiers still need to be implemented. Unknown specialized loot
+modifiers trigger a logged fallback to the bundled fishing YAML.
+
+The six mutually exclusive `?range{name=loot_roll;min=...;max=...}`
+rules are retained as that fallback and for isolated tests. Explicit
+user `minecraft:fishing` YAML overrides always take precedence. Lure
+continues to reduce the fishing wait interval. This is a data-driven
+foundation, **not** complete vanilla loot-function coverage; many
+specialized tables still need interpreters and world context.
+
+## Skill-based enchantments (Java 26.3)
+
+The Items Shard registers all **43 vanilla enchantments** from
+`enchantments-26.3.yml` as source-validated registry entries and exposes
+`IShardEnchantmentRegistry`. Administrators override individual keys in
+`shards/data/items/enchantments/*.yml` (or the installed Items shard's data directory).
+An override replaces only the keys it supplies. `Stats` replaces
+the complete stat-modifier list for that enchantment; `Skills` replaces
+the skill list independently. The server rejects unknown vanilla IDs,
+duplicate overrides, invalid max levels, unknown conditions and mechanics.
+
+### Stats (items and enchantments)
+
+Use a top-level `Stats` list to assign or modify numeric values.
+The preferred syntax works in both item definitions
+(`shards/data/items/definitions/*.yml`) and enchantment overrides
+(`shards/data/items/enchantments/*.yml`):
+
+```yaml
+wooden_axe:
+  Id: minecraft:wooden_axe
+  Stats:
+    - damage 50       # SET damage to exactly 50
+    - damage +10      # ADD 10 damage
+    - damage -5       # SUBTRACT 5 damage
+    - damage *1.5     # MULTIPLY damage by 1.5
+    - attack_speed 2  # SET attack_speed to exactly 2
+```
+
+Each entry is `- stat_name value`, with an optional operator directly
+before the number:
+
+| Syntax | Operation | Example |
+| --- | --- | --- |
+| `damage 50` | `set` | Replaces damage with 50 |
+| `damage +10` | `add` | Adds 10 to existing damage |
+| `damage -5` | `add` with a negative value | Subtracts 5 |
+| `damage *1.5` | `multiply` | Multiplies damage by 1.5 |
+| `damage =-5` | `set` | Explicitly sets a negative value |
+
+**Entries execute in YAML order**, even when the same stat appears
+multiple times. In the example above, final damage is
+`((50 + 10 - 5) * 1.5) = 82.5`. The `+`, `-`, and `*` operators
+are not event triggers; they apply when the shared stat pipeline
+evaluates the item.
+
+Stat values use invariant-culture floating-point numbers with a
+maximum absolute input magnitude of 1,000,000. Names are
+case-insensitive, normalized to lowercase, and must match
+`[a-z][a-z0-9_]*` (up to 64 characters). A list can contain at
+most 64 entries. `Stats: []` removes previously configured stats
+for an override.
+
+For enchantment formulas or explicitly conditional behavior, the
+existing advanced **mapping** syntax remains supported:
+
+```yaml
+smite:
+  Stats:
+    damage:
+      Trigger: onAttack
+      PerLevel: 2.5
+      Operation: add
+      Conditions:
+        - "target{type=undead}"
+```
+
+The advanced syntax accepts `Base`, `PerLevel`, `Operation`
+(`add`, `multiply`, `set`), `Trigger`, and `Conditions`.
+When advanced `Operation` is omitted it still defaults to `add`,
+preserving existing vanilla enchantment formulas; a plain scalar
+mapping (`damage: 50`) sets an absolute value, like the list syntax.
+`PerLevel` scales with the enchantment level; item modifiers use
+level 1. Without `Trigger`, a modifier applies whenever its item or
+enchantment is evaluated by a published event. Conditions are shared
+with the Core skill engine and must all pass. Item modifiers run before
+enchantment modifiers, and the `Skills` list is independent.
+
+Only stats used by an authoritative Gameplay event actually change
+gameplay. For example, `damage` is read by the melee attack pipeline,
+while **`attack_speed` is accepted and stored as an event-local number
+but does not yet change cooldowns or client attributes**.
+
+Stats are server-side values, **not Minecraft item components**, and
+do not change Java protocol component node assignments. Custom item
+aliases without a distinct stack identity still resolve to the
+physical vanilla item definition in Gameplay.
+
+### Mending driven by Skills and Stats
+
+Mending's `~onExperiencePickup` skill now activates repair of eligible
+worn equipped items. The `mending_repair_per_xp` numeric Stat (default
+2) controls how many durability points each collected XP restores.
+This is evaluated synchronously during the inventory transaction,
+using Core's skill engine. Setting `Skills: []` disables activation,
+and overriding `Stats` changes the rate without changing compiled
+Gameplay code. Eligible slots remain selected main-hand, offhand and
+armor; the existing legacy Mending logic still provides a fallback
+for unit-test inventories explicitly created without a skill engine.
+
+### Unbreaking driven by Skills
+
+The bundled Unbreaking definition has two `~onItemDamage` skill rules:
+
+```yaml
+unbreaking:
+  Id: minecraft:unbreaking
+  MaxLevel: 3
+  Weight: 5
+  AnvilCost: 2
+  SupportedItems: [breakable]
+  Skills:
+    - "cancelEvent @self ~onItemDamage ?flag{name=non_armor} ?chance{mode=level_ratio}"
+    - "cancelEvent @self ~onItemDamage ?flag{name=armor} ?chance{mode=level_ratio;factor=0.4}"
+```
+
+Every attempted durability point dispatches `~onItemDamage` through
+Core's shared skill engine. When `cancelEvent` passes its conditions,
+the current event is cancelled, preventing that individual durability
+point of wear (including one that would have broken the item).
+`?chance{mode=level_ratio}` calculates level / (level + 1);
+`factor=0.4` gives armor its vanilla reduced protection chance.
+`?flag{name=armor}` and `?flag{name=non_armor}` are event context
+provided by the durability publisher. For other skills,
+`?chance{base=0.1;perLevel=0.05}` retains linear probability.
+`factor` is also available for linear chances.
+
+Unlike the former hard-coded wear calculation, YAML overrides of
+`Skills` really change or disable protection. `Skills: []` disables
+Unbreaking's effect while keeping its enchantment metadata. Gameplay
+consumes this rule for mining, tool use, weapons, armor, fishing rods,
+Elytra and tridents (including damage on the returned trident stack).
+No configured engine means no enchantment-based wear prevention.
+Skill mechanics on this synchronous durability event must complete
+without awaiting; this avoids asynchronous callbacks while holding
+the inventory transaction lock. `cancelEvent` does **not** stop the
+remaining skills: everything after the cancellation still executes,
+including other enchantments' skills. The event publisher reads
+`Runtime.IsCancelled` after dispatch to suppress only its default
+gameplay action. A regular `setFlag` does not cancel an event.
+
+Currently connected cancellation handlers prevent:
+`~onAttack` server-side attack damage, knockback and weapon wear;
+`~onHurt` health damage and armor wear; `~onMine` block destruction
+(including instant and Creative mining); `~onBlockDrop` item drops;
+and `~onProjectileLaunch` projectile creation and ammunition use.
+Other events must honor `Runtime.IsCancelled` when implemented.
+The **attacker's first-person swing is client-predicted** in vanilla
+26.3, before the attack or punch packet reaches Amethyst. The server
+cannot undo or conditionally suppress it via vanilla packets; fully
+blocking that local animation requires a compatible client mod.
+However, Amethyst now handles serverbound `punch` (0x2E), and sends
+clientbound `swing_animation` (0x7B) to nearby observers on allowed
+swings. If the preceding `~onAttack` is cancelled, the subsequent
+swing is withheld from observers. The punch correlation lasts one
+client tick to avoid accidentally suppressing later unrelated swings.
+The default remote animation is a six-tick main-hand whack; item-
+specific `attack_animation` variants are not yet used for this relay.
+
+As with all server-authored enchantments, client-provided item NBT
+cannot substitute for inventory authority. Vanilla item components
+with definition-level Enchantments also supply enchantment levels.
+
+This deliberately retains the **45 selected** source-fixed item-component
+node aliases; unassigned nodes are still pending and are never auto-named.

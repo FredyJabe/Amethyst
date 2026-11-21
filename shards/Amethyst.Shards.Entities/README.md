@@ -123,11 +123,13 @@ sheep:
 
 Custom aliases inherit the underlying species' interaction rules.
 Any enabled Shard can register a skill using those event triggers;
-an additional action is only executed after successful, in-range
-interactions. Client packet 0x1A is validated, offhand remains
-unsupported until Gameplay models that slot, and a second shearing
-cannot duplicate drops. There is no sheep grazing/regrowth, coloured
-wool, sheared visual metadata or shears durability yet.
+milk and shear skill actions execute once after validating the real
+entity and reach, but before their default state/inventory mutation.
+The onRightClick, onMilk and onShear event publishers all respect
+cancelEvent while continuing remaining skills. Mainhand and offhand
+milking are supported; shearing has an authoritative sheared flag and
+cannot be duplicated. Sheep have all 16 wool colours, persisted wool
+state, timed regrowth, metadata updates and shears durability.
 
 ## Console commands
 
@@ -168,22 +170,76 @@ if (types.TryGetByIdentifier("minecraft:cow", out var cow) &&
 ```
 
 The manager synchronizes its state with a lock, returns snapshots,
-allocates unique positive network entity IDs through `AllocateEntityId`,
-and reserves those IDs for players and dropped items through Gameplay.
-The manager currently allows at most 10,000 live managed instances and
-rejects non-finite or unreasonable coordinates.
+and allocates unique positive network IDs for all world entities,
+including players, livestock, item entities, XP, fishing hooks and projectiles.
+The generic entity manager currently allows up to 10,000 managed instances
+and rejects non-finite or unreasonable coordinates.
+
+## Entity runtime ownership and persistence
+
+The Entities Shard is authoritative for all server-owned physical entity
+state and simulation, via `EntityManager` and these shared Core interfaces:
+
+| Interface | Entities-owned state |
+| --- | --- |
+| `IShardEntityManager` | Generic YAML entity instances, persistent spawn/health/teleport state, one-shot death queue and shared entity IDs |
+| `IShardLivingEntities` | Persisted native sheep health, wool color, sheared state and regrowth |
+| `IShardGroundItems` | Dropped item stacks, 20 Hz gravity, despawn, pickup and persistent ground-item storage |
+| `IShardExperienceOrbs` | Experience orbs, physical simulation and persistent XP storage |
+| `IShardFishingWorld` | Fishing bobbers, casting, reeling and water simulation |
+| `IShardProjectileWorld` | Arrow, trident and other projectile motion and collision detection |
+
+The Entities implementation lives in `shards/Amethyst.Shards.Entities/`.
+The immutable shared records and interfaces live in `src/Shards/`, avoiding
+a reverse dependency on Gameplay. Gameplay owns only the clientbound packet
+protocols and validated player interactions, resolving Entities services
+through `IShardContext`. Items configures `dropItem` and other skills; Core
+dispatches the skill pipeline. On-shear wool is selected by color-aware
+Items YAML, using server-owned sheep metadata.
+
+`BindWorldEntities` reuses the existing Gameplay world/data-directory paths.
+Legacy `AMLIVE01` sheep, ground-item and XP saves remain readable; new
+`AMGEN001` generic-instance saves use a distinct sibling file. Mutations
+are atomically persisted, and the Entities Shard flushes all durable stores
+on disable. Entity IDs are reallocated at startup; UUIDs remain stable. Projectiles and fishing bobbers
+are intentionally not saved between restarts.
+
+## Configurable mob experience
+
+The bundled `entities-26.3.yml` includes fixed XP rewards for 45 mob
+definitions that are eligible for a player kill. Administrators can
+override the server-owned reward in an Entities YAML root:
+
+```yaml
+cow:
+  Health: 10
+  Experience: [1, 3]
+zombie:
+  Experience: 5
+```
+
+`Experience` is an exact nonnegative number or a bounded inclusive
+`[minimum, maximum]` range; values above 32,767 are rejected.
+Eligible melee and projectile deaths spawn one persistent Entities-owned
+XP orb. Console and plugin kills do not inherit player-only XP. The
+reward definition is separate from Items loot YAML, and it does not
+confer AI, natural spawn rules or vanilla parity on an otherwise inert mob.
 
 ## Current limits
 
-Entity instances do not currently perform natural spawning, wandering,
-pathfinding, gravity, collision, attacks, breeding, item drops, or automated
-healing. Configured Health and Invulnerable currently affect manager
-operations, not client-visible damage animations or a vanilla combat
-system. Configured Display is not yet sent as custom-name entity metadata.
-Entities are **not persisted** on restart or Shard disable. Player
-entities and dropped-item entities still have dedicated Gameplay logic;
-the Entities Shard supplies them a common ID allocator, not their whole
-movement/inventory lifecycle.
+Generic entity instances do not currently perform natural spawning,
+wandering, pathfinding, gravity, collisions, automatic hostile attacks,
+breeding or healing. Player melee and projectile attacks already damage
+health-bearing generic mobs; their one-shot deaths run Items YAML and
+pinned vanilla loot with configurable player-kill XP. Configured Display
+is not yet sent as custom-name entity metadata.
+Generic YAML-spawned instances now use a separate atomic, world-scoped
+`AMGEN001` save file with stable UUIDs, authoritative health and positions,
+and fresh network IDs allocated at load. This does **not** implement
+natural spawning or AI. Sheep retain their color/sheared state and health through restart, and physical item
+entities and XP orbs are persisted. Fishing bobbers and launched projectiles
+remain transient. Player authentication, inventory, movement and networking
+stay with Gameplay because they are player-session responsibilities.
 
 Minecraft Java clients require the exact protocol registry types. YAML
 cannot create modded entity models, custom renderer IDs, or new client

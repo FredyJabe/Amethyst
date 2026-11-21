@@ -1,0 +1,252 @@
+# Java Edition 26.3 consumables (40 foods plus milk and potion entries).
+# Nutrition and saturation are absolute bar units, not multipliers.
+# YAML overrides in shards/data/items/consumables replace a full root.
+# Components for individual potion bottles and suspicious stew still require
+# per-stack component parsing by Gameplay.
+minecraft:golden_carrot:
+  Nutrition: 6
+  Saturation: 14.4
+  DurationTicks: 32
+
+minecraft:cooked_porkchop:
+  Nutrition: 8
+  Saturation: 12.8
+  DurationTicks: 32
+
+minecraft:cooked_beef:
+  Nutrition: 8
+  Saturation: 12.8
+  DurationTicks: 32
+
+minecraft:rabbit_stew:
+  Nutrition: 10
+  Saturation: 12
+  DurationTicks: 32
+  Remainder: minecraft:bowl
+
+minecraft:cooked_mutton:
+  Nutrition: 6
+  Saturation: 9.6
+  DurationTicks: 32
+
+minecraft:cooked_salmon:
+  Nutrition: 6
+  Saturation: 9.6
+  DurationTicks: 32
+
+minecraft:enchanted_golden_apple:
+  Nutrition: 4
+  Saturation: 9.6
+  DurationTicks: 32
+  AlwaysEdible: true
+  Effects:
+    - { Id: minecraft:regeneration, DurationTicks: 400, Amplifier: 1, Chance: 1 }
+    - { Id: minecraft:resistance, DurationTicks: 6000, Amplifier: 0, Chance: 1 }
+    - { Id: minecraft:fire_resistance, DurationTicks: 6000, Amplifier: 0, Chance: 1 }
+    - { Id: minecraft:absorption, DurationTicks: 2400, Amplifier: 3, Chance: 1 }
+
+minecraft:golden_apple:
+  Nutrition: 4
+  Saturation: 9.6
+  DurationTicks: 32
+  AlwaysEdible: true
+  Effects:
+    - { Id: minecraft:regeneration, DurationTicks: 100, Amplifier: 1, Chance: 1 }
+    - { Id: minecraft:absorption, DurationTicks: 2400, Amplifier: 0, Chance: 1 }
+
+minecraft:beetroot_soup:
+  Nutrition: 6
+  Saturation: 7.2
+  DurationTicks: 32
+  Remainder: minecraft:bowl
+
+minecraft:cooked_chicken:
+  Nutrition: 6
+  Saturation: 7.2
+  DurationTicks: 32
+
+minecraft:mushroom_stew:
+  Nutrition: 6
+  Saturation: 7.2
+  DurationTicks: 32
+  Remainder: minecraft:bowl
+
+minecraft:suspicious_stew:
+  Nutrition: 6
+  Saturation: 7.2
+  DurationTicks: 32
+  AlwaysEdible: true
+  Remainder: minecraft:bowl
+
+minecraft:baked_potato:
+  Nutrition: 5
+  Saturation: 6
+  DurationTicks: 32
+
+minecraft:bread:
+  Nutrition: 5
+  Saturation: 6
+  DurationTicks: 32
+
+minecraft:cooked_cod:
+  Nutrition: 5
+  Saturation: 6
+  DurationTicks: 32
+
+minecraft:cooked_rabbit:
+  Nutrition: 5
+  Saturation: 6
+  DurationTicks: 32
+
+minecraft:pumpkin_pie:
+  Nutrition: 8
+  Saturation: 4.8
+  DurationTicks: 32
+
+minecraft:carrot:
+  Nutrition: 3
+  Saturation: 3.6
+  DurationTicks: 32
+
+minecraft:spider_eye:
+  Nutrition: 2
+  Saturation: 3.2
+  DurationTicks: 32
+  Effects:
+    - { Id: minecraft:poison, DurationTicks: 100, Amplifier: 0, Chance: 1 }
+
+minecraft:apple:
+  Nutrition: 4
+  Saturation: 2.4
+  DurationTicks: 32
+
+minecraft:chorus_fruit:
+  Nutrition: 4
+  Saturation: 2.4
+  DurationTicks: 32
+  AlwaysEdible: true
+  Effects:
+    - { Id: minecraft:random_teleport, DurationTicks: 0, Amplifier: 0, Chance: 1 }
+
+minecraft:beef:
+  Nutrition: 3
+  Saturation: 1.8
+  DurationTicks: 32
+
+minecraft:porkchop:
+  Nutrition: 3
+  Saturation: 1.8
+  DurationTicks: 32
+
+minecraft:rabbit:
+  Nutrition: 3
+  Saturation: 1.8
+  DurationTicks: 32
+
+minecraft:honey_bottle:
+  Nutrition: 6
+  Saturation: 1.2
+  DurationTicks: 40
+  AlwaysEdible: true
+  Remainder: minecraft:glass_bottle
+  Effects:
+    - { Id: minecraft:clear_poison, DurationTicks: 0, Amplifier: 0, Chance: 1 }
+
+minecraft:melon_slice:
+  Nutrition: 2
+  Saturation: 1.2
+  DurationTicks: 32
+
+minecraft:poisonous_potato:
+  Nutrition: 2
+  Saturation: 1.2
+  DurationTicks: 32
+  Effects:
+    - { Id: minecraft:poison, DurationTicks: 100, Amplifier: 0, Chance: 0.6 }
+
+minecraft:chicken:
+  Nutrition: 2
+  Saturation: 1.2
+  DurationTicks: 32
+  Effects:
+    - { Id: minecraft:hunger, DurationTicks: 600, Amplifier: 0, Chance: 0.3 }
+
+minecraft:mutton:
+  Nutrition: 2
+  Saturation: 1.2
+  DurationTicks: 32
+
+minecraft:beetroot:
+  Nutrition: 1
+  Saturation: 1.2
+  DurationTicks: 32
+
+minecraft:rotten_flesh:
+  Nutrition: 4
+  Saturation: 0.8
+  DurationTicks: 32
+  Effects:
+    - { Id: minecraft:hunger, DurationTicks: 600, Amplifier: 0, Chance: 0.8 }
+
+minecraft:dried_kelp:
+  Nutrition: 1
+  Saturation: 0.6
+  DurationTicks: 16
+
+minecraft:potato:
+  Nutrition: 1
+  Saturation: 0.6
+  DurationTicks: 32
+
+minecraft:cookie:
+  Nutrition: 2
+  Saturation: 0.4
+  DurationTicks: 32
+
+minecraft:glow_berries:
+  Nutrition: 2
+  Saturation: 0.4
+  DurationTicks: 32
+
+minecraft:cod:
+  Nutrition: 2
+  Saturation: 0.4
+  DurationTicks: 32
+
+minecraft:salmon:
+  Nutrition: 2
+  Saturation: 0.4
+  DurationTicks: 32
+
+minecraft:sweet_berries:
+  Nutrition: 2
+  Saturation: 0.4
+  DurationTicks: 32
+
+minecraft:pufferfish:
+  Nutrition: 1
+  Saturation: 0.2
+  DurationTicks: 32
+  Effects:
+    - { Id: minecraft:poison, DurationTicks: 1200, Amplifier: 1, Chance: 1 }
+    - { Id: minecraft:hunger, DurationTicks: 300, Amplifier: 2, Chance: 1 }
+    - { Id: minecraft:nausea, DurationTicks: 300, Amplifier: 0, Chance: 1 }
+
+minecraft:tropical_fish:
+  Nutrition: 1
+  Saturation: 0.2
+  DurationTicks: 32
+minecraft:milk_bucket:
+  Nutrition: 0
+  Saturation: 0
+  DurationTicks: 32
+  AlwaysEdible: true
+  Remainder: minecraft:bucket
+  Effects:
+    - { Id: minecraft:clear_all, DurationTicks: 0, Amplifier: 0, Chance: 1 }
+minecraft:potion:
+  Nutrition: 0
+  Saturation: 0
+  DurationTicks: 32
+  AlwaysEdible: true
+  Remainder: minecraft:glass_bottle

@@ -1,5 +1,6 @@
 using Amethyst;
 using Amethyst.BuiltinShards;
+using Amethyst.Shards;
 
 internal static class DurabilityFeatureTests
 {
@@ -9,6 +10,11 @@ internal static class DurabilityFeatureTests
         public override int Next(int minValue, int maxValue) =>
             ignore ? maxValue - 1 : minValue;
         public override double NextDouble() => ignore ? 1.0 : 0.0;
+    }
+
+    private sealed class FixedFractionRandom(double fraction) : Random
+    {
+        public override double NextDouble() => fraction;
     }
 
     private static void Check(bool result, string message)
@@ -25,22 +31,38 @@ internal static class DurabilityFeatureTests
             items.TryGetByIdentifier("diamond_axe", out axe) &&
             items.TryGetByIdentifier("iron_shovel", out shovel),
             "Pinned items cover tool and equipment durability");
+        DirectoryInfo? solutionRoot = new(AppContext.BaseDirectory);
+        while (solutionRoot is not null &&
+            !File.Exists(Path.Combine(solutionRoot.FullName, "Amethyst.slnx")))
+            solutionRoot = solutionRoot.Parent;
+        if (solutionRoot is null) throw new InvalidOperationException("Missing Amethyst.slnx");
+        var enchantments = new EnchantmentCatalog(Path.Combine(solutionRoot.FullName,
+            "shards", "Amethyst.Shards.Items", "enchantments-26.3.yml"));
+        var engine = new SkillEngine();
+        EnchantmentSkills.Register(new TestSkillContext(engine));
+        engine.RegisterInstructions("items", enchantments.Instructions);
+        var wear = new EnchantmentDurability(items, enchantments, engine);
         ItemStack item = new(wood.ProtocolId, 1) { Damage = 10, Unbreaking = 3 };
         Check(DurabilityRules.ApplyWear(item, wood.MaxDurability, 10,
-            random: new FixedRandom(true)) == item &&
+            random: new FixedRandom(false), preventsWear: wear.PreventsWear) == item &&
             DurabilityRules.ApplyWear(item, wood.MaxDurability, 3,
-            random: new FixedRandom(false)).Damage == 13,
-            "Unbreaking uses independent per-point prevention rolls");
+            random: new FixedRandom(true), preventsWear: wear.PreventsWear).Damage == 13,
+            "Unbreaking from configured Skills checks every durability point");
         Check(DurabilityRules.ApplyWear(item with { Unbreakable = true },
             wood.MaxDurability, 100) == item with { Unbreakable = true },
             "Unbreakable items do not take damage");
         ItemStack armor = new(helm.ProtocolId, 1)
             { Damage = 4, Unbreaking = 3 };
         Check(DurabilityRules.ApplyWear(armor, helm.MaxDurability, 3,
-            armor: true, random: new FixedRandom(false)).Damage == 7 &&
+            armor: true, random: new FixedFractionRandom(0.5),
+            preventsWear: wear.PreventsWear).Damage == 7 &&
             DurabilityRules.ApplyWear(armor, helm.MaxDurability, 3,
-            armor: true, random: new FixedRandom(true)) == armor,
-            "Armor has vanilla Unbreaking's reduced prevention probability");
+            armor: true, random: new FixedFractionRandom(0.1),
+            preventsWear: wear.PreventsWear) == armor &&
+            DurabilityRules.ApplyWear(item, wood.MaxDurability, 3,
+            random: new FixedFractionRandom(0.5),
+            preventsWear: wear.PreventsWear) == item,
+            "Armor's configured 40% multiplier reduces Unbreaking protection");
         Check(DurabilityRules.TryCombine(
                 new ItemStack(wood.ProtocolId, 1) { Damage = 50, Unbreaking = 3 },
                 new ItemStack(wood.ProtocolId, 1) { Damage = 40, Mending = true },
@@ -61,12 +83,12 @@ internal static class DurabilityFeatureTests
         try
         {
             Guid playerId = Guid.NewGuid();
-            var inventory = new PlayerInventory(root, playerId, items);
+            var inventory = new PlayerInventory(root, playerId, items, enchantments, engine);
             Check(inventory.TryCreativeSet(36, wood.ProtocolId, 1, true) &&
                 inventory.ConfigureHeld(3, mending: true, unbreakable: false),
                 "Enchantments can be authored only by the authoritative server");
             Check(!inventory.DamageSlot(36, wood.ProtocolId, 8,
-                    random: new FixedRandom(true)) &&
+                    random: new FixedRandom(false)) &&
                 inventory.Held().Damage == 0 &&
                 inventory.Held().Unbreaking == 3,
                 "Server applies Unbreaking to mining wear");
@@ -115,7 +137,7 @@ internal static class DurabilityFeatureTests
                 "Armor carries its own independent enchantments and wear");
             Check(inventory.RepairFromExperience(2) == (0, 5) &&
                 inventory.Snapshot().Slots[5].Damage == 16 &&
-                inventory.DamageArmor(2, new FixedRandom(false)) == 1 &&
+                inventory.DamageArmor(2, new FixedRandom(true)) == 1 &&
                 inventory.Snapshot().Slots[5].Damage == 18,
                 "Mending targets equipped armor and armor wear uses Unbreaking");
             int beforeInvalid = inventory.Snapshot().Revision;
@@ -156,10 +178,21 @@ internal static class DurabilityFeatureTests
             // ground, through persistence, or when collected.
             int groundId = 2000;
             var ground = new GroundItemStore(root, worldPath, () => ++groundId, items);
+            var componentPatch = ItemStackComponents.Encode(
+                new Dictionary<string, string>
+                {
+                    ["minecraft:custom_name"] = System.Text.Json.JsonSerializer.Serialize("Persisted Pickaxe"),
+                    ["minecraft:enchantment_glint_override"] = "true"
+                });
             var droppedTool = new ItemStack(wood.ProtocolId, 1)
             {
-                Damage = 14, Unbreaking = 2, Mending = true, RepairCost = 3
+                Damage = 14, Unbreaking = 2, Mending = true, RepairCost = 3,
+                EnchantmentData = "minecraft:efficiency=2",
+                ComponentData = componentPatch
             };
+            Check(ItemStackComponents.IsValid(componentPatch) &&
+                droppedTool.Components.Count == 2,
+                "Validated component patches retain arbitrary per-stack presentation values");
             Check(ground.TrySpawn(droppedTool, 3.5, 81.5, 3.5,
                 out var enchantedDrop, now) &&
                 enchantedDrop.ResolvedStack == droppedTool,
@@ -174,6 +207,66 @@ internal static class DurabilityFeatureTests
                     out _, now + 600) == 1 &&
                 receiver.Snapshot().Slots.Any(item => item == droppedTool),
                 "Enchanted tools persist as drops and retain data on pickup");
+
+            Guid componentOwner = Guid.NewGuid();
+            var componentInventory = new PlayerInventory(root, componentOwner, items);
+            Check(componentInventory.GiveStack(droppedTool) == 1 &&
+                new PlayerInventory(root, componentOwner, items)
+                    .Snapshot().Slots.Any(item => item == droppedTool),
+                "Player inventory persistence retains enchantments and arbitrary stack components");
+
+            Check(items.TryGetByIdentifier("stone", out var stone),
+                "Stone is available for component-aware stack merging");
+            var namedStone = new ItemStack(stone.ProtocolId, 3).WithComponents(
+                new Dictionary<string, string>
+                {
+                    ["minecraft:custom_name"] = System.Text.Json.JsonSerializer.Serialize("Named Stone")
+                });
+            var otherStone = new ItemStack(stone.ProtocolId, 2).WithComponents(
+                new Dictionary<string, string>
+                {
+                    ["minecraft:custom_name"] = System.Text.Json.JsonSerializer.Serialize("Other Stone")
+                });
+            Guid stackOwner = Guid.NewGuid();
+            var stackInventory = new PlayerInventory(root, stackOwner, items);
+            Check(stackInventory.GiveStack(namedStone) == 3 &&
+                stackInventory.GiveStack(otherStone) == 2 &&
+                stackInventory.GiveStack(namedStone with { Count = 1 }) == 1 &&
+                stackInventory.Snapshot().Slots.Count(s =>
+                    s.ItemId == stone.ProtocolId && s.Count != 0) == 2,
+                "Stack merges use canonical components and separate differently patched items");
+            var namedReload = new PlayerInventory(root, stackOwner, items);
+            Check(namedReload.Snapshot().Slots.Any(s => s.ItemId == stone.ProtocolId &&
+                    s.Count == 4 && s.ComponentData == namedStone.ComponentData) &&
+                namedReload.Snapshot().Slots.Any(s => s.ItemId == stone.ProtocolId &&
+                    s.Count == 2 && s.ComponentData == otherStone.ComponentData),
+                "Component-carrying stackable items survive inventory reload");
+
+            ItemStack beforeDrop = stackInventory.Held();
+            Check(beforeDrop.Count == 4 &&
+                stackInventory.TryDropHeld(beforeDrop, 1) &&
+                stackInventory.Held().Count == 3 &&
+                stackInventory.Held().ComponentData == namedStone.ComponentData &&
+                !stackInventory.TryDropHeld(beforeDrop, 1),
+                "Authoritative held-item drops preserve components and reject stale stacks");
+            Check(ground.TrySpawn(namedStone with { Count = 1 }, 6.5, 81.5, 6.5,
+                    out GroundItem abortable, now) &&
+                ground.TryDiscard(abortable.EntityId) &&
+                !ground.Snapshot().Any(d => d.EntityId == abortable.EntityId),
+                "Failed item-drop inventory transactions can discard the staged entity");
+
+            var wireWriter = new PacketWriter();
+            InventoryProtocol.WriteStack(wireWriter, namedStone, items);
+            var stackWire = new PacketReader(wireWriter.ToArray());
+            Check(stackWire.ReadVarInt() == 3 &&
+                stackWire.ReadVarInt() == stone.ProtocolId &&
+                stackWire.ReadVarInt() == 1 &&
+                stackWire.ReadVarInt() == 0 &&
+                stackWire.ReadVarInt() == 6,
+                "Per-stack custom name is emitted as a Java 26.3 component patch");
+            Check(!ItemStackComponents.IsValid(
+                "{\"minecraft:nonexistent\":\"true\"}"),
+                "Invalid component registry IDs cannot enter authoritative stacks");
 
             Check(DurabilityRules.TryWearAnvil(12962, out ushort chipped,
                     new FixedRandom(false)) && chipped == 12966 &&
@@ -258,11 +351,11 @@ internal static class DurabilityFeatureTests
                 Check(stations.Close(anvilPlayerId).Length == 0,
                     "Anvil keeps no phantom inputs after successful repair");
 
-                var grindInventory = new PlayerInventory(null, Guid.NewGuid(), items);
+                var grindInventory = new PlayerInventory(null, Guid.NewGuid(), items, enchantments, engine);
                 Check(grindInventory.TryCreativeSet(36, wood.ProtocolId, 1, true) &&
                     grindInventory.ConfigureHeld(2, true, false) &&
                     grindInventory.DamageSlot(36, wood.ProtocolId, 1,
-                        random: new FixedRandom(false)),
+                        random: new FixedRandom(true)),
                     "Prepare damaged enchanted tool for grindstone");
                 Guid grindPlayerId = Guid.NewGuid();
                 var grindMenu = stations.Open(grindPlayerId,
@@ -307,7 +400,7 @@ internal static class DurabilityFeatureTests
             Check(actor.Inventory.TryCreativeSet(36, axe.ProtocolId, 1, true) &&
                 world.TrySetBlockState(1, 81, 1, 139, out _),
                 "Prepare world and axe for real tool-use packet path");
-            var game = new MinecraftServer(settings, world, null!, world,
+            var game = TestServerFactory.Create(settings, world, null!, world,
                 items: items, recipes: recipes);
             await game.HandleBlockUseAsync(actor,
                 new BlockUseOn(0, 1, 81, 1, 1, 101, true),
@@ -335,5 +428,27 @@ internal static class DurabilityFeatureTests
             try { Directory.Delete(root, recursive: true); }
             catch (IOException) { }
         }
+    }
+
+    private sealed class TestSkillContext(SkillEngine engine) : IShardContext
+    {
+        public string Id => "items";
+        public ServerOptions Options => throw new NotSupportedException();
+        public string DataDirectory => Path.GetTempPath();
+        public void RegisterService<T>(T service) where T : class { }
+        public T GetRequiredService<T>() where T : class => throw new NotSupportedException();
+        public T? GetService<T>() where T : class => null;
+        public void Log(string message) { }
+        public void RegisterPlayPacketHandler(int packetId, ShardPlayPacketHandler handler) { }
+        public void RegisterConsoleCommand(string name, ShardConsoleCommand handler) { }
+        public void RegisterSkillTrigger(string trigger) => engine.RegisterTrigger(Id, trigger);
+        public void RegisterSkillMechanic(string name, ShardSkillValidator validator,
+            ShardSkillExecutor executor) => engine.RegisterMechanic(Id, name, validator, executor);
+        public void RegisterSkillCondition(string name, ShardSkillConditionValidator validator,
+            ShardSkillConditionEvaluator evaluator) => engine.RegisterCondition(Id, name, validator, evaluator);
+        public void RegisterSkillDefinitions(string file, string? directory = null) =>
+            engine.RegisterDefinitions(Id, file, directory);
+        public void RegisterSkillInstructions(IEnumerable<ShardSkillInstruction> skills) =>
+            engine.RegisterInstructions(Id, skills);
     }
 }

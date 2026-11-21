@@ -6,6 +6,7 @@ namespace Amethyst.BuiltinShards;
 public sealed class EntitiesShard : IShard
 {
     private IShardContext? _context;
+    private EntityManager? _manager;
 
     public Task OnLoadAsync(IShardContext context, CancellationToken ct)
     {
@@ -42,9 +43,15 @@ public sealed class EntitiesShard : IShard
 
         var catalog = new EntityCatalog(Path.Combine(directory, "entities-26.3.yml"), overrides);
         var manager = new EntityManager(catalog);
+        _manager = manager;
         ctx.RegisterService<IShardEntityRegistry>(catalog);
         ctx.RegisterService<IShardEntityManager>(manager);
         ctx.RegisterService<IShardEntityInteractions>(manager);
+        ctx.RegisterService<IShardLivingEntities>(manager);
+        ctx.RegisterService<IShardExperienceOrbs>(manager);
+        ctx.RegisterService<IShardFishingWorld>(manager);
+        ctx.RegisterService<IShardGroundItems>(manager);
+        ctx.RegisterService<IShardProjectileWorld>(manager);
         // The Entities Shard supplies these interaction event triggers to the
         // universal Core skill registry; it does not own skill parsing.
         ctx.RegisterSkillTrigger("onMilk");
@@ -107,5 +114,10 @@ public sealed class EntitiesShard : IShard
         return Task.CompletedTask;
     }
 
-    public Task OnDisableAsync(CancellationToken ct) => Task.CompletedTask;
+    public Task OnDisableAsync(CancellationToken ct)
+    {
+        _manager?.SaveWorldEntities();
+        _manager = null;
+        return Task.CompletedTask;
+    }
 }

@@ -4,7 +4,7 @@ namespace Amethyst;
 
 public sealed partial class MinecraftServer
 {
-    private readonly FishingWorld? _fishing;
+    private readonly IShardFishingWorld? _fishing;
     private readonly Dictionary<Guid, Dictionary<int, FishingBobber>> _fishingViews = new();
 
     internal FishingBobber[] FishingHooksForTests => _fishing?.Snapshot() ?? [];
@@ -24,14 +24,63 @@ public sealed partial class MinecraftServer
         {
             if (reel.Caught)
             {
-                var (loot, xp) = FishingWorld.RollLoot();
-                if (_groundItems is not null &&
-                    _items.TryGetByIdentifier(loot, out var reward))
-                    _groundItems.TrySpawn(reward.ProtocolId, 1,
+                var fishingEffects = await EnchantmentEventAsync(held,
+                    "onFishing", ct, actor: player.PlayerUuid);
+                bool hasOverride = _loot?.HasOverride("minecraft:fishing") == true;
+                IReadOnlyList<ShardItemDrop>? nativeCatch =
+                    hasOverride || fishingEffects.IsCancelled ? null :
+                    TryVanillaLoot("minecraft:gameplay/fishing",
+                        new ShardVanillaLootContext
+                        {
+                            Luck = Math.Clamp(
+                                fishingEffects.Number("fishing_luck"), 0, 3),
+                            // Open-water state is only approximate until all
+                            // 26.3 collision/fluid and weather checks exist.
+                            InOpenWater = _blocks is not null &&
+                                _fishing.CheckOpenWater(_blocks, reel.Bobber)
+                        });
+                if (nativeCatch is not null)
+                {
+                    SpawnLoot(nativeCatch, reel.Bobber.X,
+                        reel.Bobber.Y + 0.4, reel.Bobber.Z);
+                }
+                else if (_loot?.HasDefinition("minecraft:fishing") == true &&
+                    _skills is not null &&
+                    (hasOverride || !fishingEffects.IsCancelled))
+                {
+                    int roll = Random.Shared.Next(100);
+                    // Compatibility YAML distribution when a specialized
+                    // native loot modifier is not yet supported.
+                    double luck = Math.Clamp(
+                        fishingEffects.Number("fishing_luck"), 0, 3);
+                    if (luck > 0 &&
+                        Random.Shared.NextDouble() < luck * 0.02)
+                        roll = 98 + Random.Shared.Next(2);
+                    fishingEffects.SetNumber("loot_roll", roll);
+                    await _skills.DispatchAsync(new ShardSkillEvent(
+                        "minecraft:fishing", "onFishing", reel.Bobber.X,
+                        reel.Bobber.Y, reel.Bobber.Z,
+                        ActorUuid: player.PlayerUuid)
+                        { Runtime = fishingEffects,
+                            PublisherCommitsDrops = true }, ct);
+                    SpawnLoot(fishingEffects.Drops, reel.Bobber.X,
+                        reel.Bobber.Y + 0.4, reel.Bobber.Z);
+                }
+                else if (!fishingEffects.IsCancelled)
+                {
+                    var (loot, _) = _fishing.RollStarterLoot();
+                    if (_groundItems is not null &&
+                        _items.TryGetByIdentifier(loot, out var reward))
+                        _groundItems.TrySpawn(reward.ProtocolId, 1,
+                            reel.Bobber.X, reel.Bobber.Y + 0.4,
+                            reel.Bobber.Z, out _);
+                }
+                // XP is the vanilla fishing action, not an explicit
+                // dropItem intent; cancelling it does not skip other skills.
+                if (!fishingEffects.IsCancelled)
+                    _experienceOrbs?.TrySpawn(Random.Shared.Next(1, 7),
                         reel.Bobber.X, reel.Bobber.Y + 0.4,
                         reel.Bobber.Z, out _);
-                _experienceOrbs?.TrySpawn(xp, reel.Bobber.X,
-                    reel.Bobber.Y + 0.4, reel.Bobber.Z, out _);
             }
             foreach (ConnectedPlayer viewer in _players.Snapshot()
                 .Where(x => x.Ready))
@@ -46,8 +95,16 @@ public sealed partial class MinecraftServer
                 await InventoryProtocol.SendSlotAsync(player.Connection,
                     player.Inventory, slot, ct);
         }
-        else _fishing.TryCast(player.PlayerUuid, player.EntityId,
-            player.Pose, out _);
+        else
+        {
+            var castEffects = await EnchantmentEventAsync(held,
+                "onFishing", ct, actor: player.PlayerUuid);
+            if (!castEffects.IsCancelled)
+                _fishing.TryCast(player.PlayerUuid, player.EntityId,
+                    player.Pose, out _,
+                    waitReductionSeconds: (int)Math.Clamp(
+                        -castEffects.Number("fishing_wait"), 0, 30));
+        }
         await BlockInteractionProtocol.SendAckAsync(player.Connection,
             action.Sequence, ct);
         return true;

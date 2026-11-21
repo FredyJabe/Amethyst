@@ -7,11 +7,12 @@ namespace Amethyst;
 /// No client-supplied item components are trusted by these methods.</summary>
 public static class DurabilityRules
 {
-    /// <summary>For each point of attempted wear, Unbreaking prevents it with
-    /// probability level/(level+1) for tools; for armor the chance is only
-    /// 40% * level/(level+1), matching vanilla's armor penalty.</summary>
+    /// <summary>For every point of attempted wear, consult the configured
+    /// ~onItemDamage skill decision. Durability arithmetic contains no
+    /// hard-coded enchantment chance.</summary>
     public static ItemStack ApplyWear(ItemStack stack, int maximum, int points,
-        bool armor = false, Random? random = null)
+        bool armor = false, Random? random = null,
+        Func<ItemStack, bool, Random, bool>? preventsWear = null)
     {
         if (points <= 0 || stack.Count != 1 || maximum <= 0 ||
             stack.Unbreakable || stack.Damage >= maximum)
@@ -20,13 +21,7 @@ public static class DurabilityRules
         int taken = 0;
         for (int i = 0; i < points && taken < maximum; i++)
         {
-            if (stack.Unbreaking > 0)
-            {
-                if (!armor || random.NextDouble() >= 0.6)
-                {
-                    if (random.Next(stack.Unbreaking + 1) > 0) continue;
-                }
-            }
+            if (preventsWear?.Invoke(stack, armor, random) == true) continue;
             taken++;
         }
         if (taken == 0) return stack;
@@ -88,26 +83,30 @@ public static class DurabilityRules
     /// accounting and can credit the remaining XP to the player.</summary>
     public static (int ExperienceLeft, bool Changed, int RepairedSlot) ApplyMending(
         ItemStack[] slots, int selectedSlot, int xp, IShardItemRegistry? items,
-        Random? random = null)
+        Random? random = null, Func<ItemStack, int>? repairPerXp = null)
     {
         if (xp <= 0 || items is null || slots.Length < 46 ||
             selectedSlot is < 36 or > 44) return (xp, false, -1);
-        var candidates = new List<int>();
+        var candidates = new List<(int Slot, int Rate)>();
         foreach (int slot in new[] { selectedSlot, 45, 5, 6, 7, 8 })
         {
             ItemStack stack = slots[slot];
-            if (stack.Count != 1 || stack.Damage <= 0 || !stack.Mending ||
+            if (stack.Count != 1 || stack.Damage <= 0 ||
                 !items.TryGetById(stack.ItemId, out var definition) ||
                 definition.MaxDurability <= 0)
                 continue;
-            candidates.Add(slot);
+            int rate = repairPerXp is null ? (stack.Mending ? 2 : 0) :
+                repairPerXp(stack);
+            if (rate is < 1 or > 64) continue;
+            candidates.Add((slot, rate));
         }
         if (candidates.Count == 0) return (xp, false, -1);
         random ??= Random.Shared;
-        int chosen = candidates[random.Next(candidates.Count)];
+        var (chosen, ratePerXp) = candidates[random.Next(candidates.Count)];
         ItemStack item = slots[chosen];
-        int repair = Math.Min(item.Damage, (int)Math.Min((long)xp * 2, int.MaxValue));
-        int cost = (repair + 1) / 2;
+        int repair = Math.Min(item.Damage,
+            (int)Math.Min((long)xp * ratePerXp, int.MaxValue));
+        int cost = (repair + ratePerXp - 1) / ratePerXp;
         slots[chosen] = item with { Damage = item.Damage - repair };
         return (xp - cost, true, chosen);
     }
