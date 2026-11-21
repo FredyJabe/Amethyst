@@ -322,10 +322,11 @@ internal static class CombatFeatureTests
             overridePlayer.SetGameMode(PlayerGameMode.Survival);
             overridePlayer.SetPose(new PlayerPose(0, 80, 0, 0, 0, true));
             ShardItemDefinition emerald = default;
+            ShardEntityInstance overrideCow = default;
             Check(items.TryGetByIdentifier("minecraft:emerald", out emerald) &&
                 overridePlayer.Inventory.TryCreativeSet(
                     36, sword.ProtocolId, 1, true) &&
-                overriddenMobs.TrySpawn("cow", 1, 80, 0, out var overrideCow),
+                overriddenMobs.TrySpawn("cow", 1, 80, 0, out overrideCow),
                 "Set up a custom emerald-only cow death skill");
             await overrideServer.HandleAttackAsync(
                 overridePlayer, overrideCow.EntityId, CancellationToken.None);

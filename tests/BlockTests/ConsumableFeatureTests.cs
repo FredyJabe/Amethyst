@@ -239,10 +239,11 @@ internal static class ConsumableFeatureTests
                 "Customized potion use begins with original component patch");
             await server.TickConsumablesAsync(CancellationToken.None,
                 nowMilliseconds: Environment.TickCount64 + 4000);
+            ShardItemDefinition emptyBottle = default;
             Check(player.ActiveEffects.Snapshot().Any(e =>
                     e.Id == "minecraft:speed" && e.RemainingTicks == 40) &&
                 items.TryGetByIdentifier("minecraft:glass_bottle",
-                    out var emptyBottle) &&
+                    out emptyBottle) &&
                 player.Inventory.Snapshot().Slots.Any(v =>
                     v.ItemId == emptyBottle.ProtocolId && v.Count > 0),
                 "Potion consumption applies configured effects and returns bottle");
