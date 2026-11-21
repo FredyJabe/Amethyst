@@ -274,6 +274,8 @@ public sealed partial class VanillaLootTables : IShardVanillaLootTables
                     chances[Math.Clamp(level, 0, chances.Length - 1)].GetDouble();
             }
             case "minecraft:killed_by_player": return c.KilledByPlayer;
+            case "minecraft:damage_source_properties":
+                return DamageSourceProperties(cond, c);
             case "minecraft:entity_properties":
                 return EntityProperties(cond, c);
             case "minecraft:match_tool":
