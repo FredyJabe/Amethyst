@@ -7,6 +7,44 @@ namespace Amethyst;
 /// this service when their event sinks are implemented.</summary>
 public sealed partial class MinecraftServer
 {
+    private int _chorusTeleportSequence = 10000;
+
+    /// <summary>Chorus fruit uses preloaded chunks and exact block-state
+    /// identities, never a client-chosen or speculative teleport target.
+    /// Failure leaves the player's location untouched.</summary>
+    private async Task<bool> TryChorusTeleportAsync(
+        ConnectedPlayer player, CancellationToken ct)
+    {
+        if (_blocks is null || _vanillaBlockStates is null ||
+            player.View is not IShardChunkSubscriptions loaded)
+            return false;
+        PlayerPose origin = player.Pose;
+        foreach (PlayerPose candidate in ChorusTeleportRules.Candidates(
+            origin, _world.MinY, Random.Shared))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!ChorusTeleportRules.TryFindLanding(_blocks,
+                    _vanillaBlockStates, candidate, _world.MinY,
+                    out PlayerPose destination) ||
+                !_positions.Valid(destination))
+                continue;
+            int chunkX = (int)Math.Floor(destination.X / 16);
+            int chunkZ = (int)Math.Floor(destination.Z / 16);
+            if (!await loaded.HasLoadedChunkAsync(chunkX, chunkZ, ct))
+                continue;
+            int teleportId = Interlocked.Increment(ref _chorusTeleportSequence);
+            await SpawnPackets.SendPositionAsync(player.Connection,
+                teleportId, destination.X, destination.Y, destination.Z,
+                destination.Yaw, destination.Pitch, ct);
+            player.SetPose(destination);
+            _positions.Save(player.PlayerUuid, destination);
+            await player.View.UpdateAsync(player.Connection, destination, ct);
+            await BroadcastMovementAsync(player, origin, destination, ct);
+            return true;
+        }
+        return false;
+    }
+
     private async Task ApplyConsumedEffectsAsync(ConnectedPlayer player,
         IReadOnlyList<ShardConsumeEffect> effects, CancellationToken ct)
     {
@@ -30,10 +68,9 @@ public sealed partial class MinecraftServer
             }
             if (effect.Id == "minecraft:random_teleport")
             {
-                // A separate safe teleport scheduler must validate collision,
-                // loaded chunks and world border. Never teleport through solids.
-                Console.WriteLine("[items] Random teleport requested; " +
-                    "safe teleport targeting is not yet implemented.");
+                if (!await TryChorusTeleportAsync(player, ct))
+                    Console.WriteLine("[items] Chorus fruit found no safe " +
+                        "landing in preloaded chunks; position unchanged.");
                 continue;
             }
             if (!StatusEffectProtocol.TryGetId(effect.Id, out int effectId))

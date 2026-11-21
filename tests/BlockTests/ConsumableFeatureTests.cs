@@ -98,6 +98,35 @@ internal static class ConsumableFeatureTests
             slot.Remaining == 0,
             "Potion contents use the exact Java 26.3 slot network format");
 
+        var chorusBlocks = new ChorusBlockWorld();
+        var chorusStates = new ChorusBlockStates();
+        var requestedLanding = new PlayerPose(4.5, 86, 4.5, 17, 2, false);
+        Check(ChorusTeleportRules.TryFindLanding(chorusBlocks, chorusStates,
+                requestedLanding, -64, out PlayerPose landing) &&
+            landing.Y == 80 && landing.OnGround &&
+            landing.Yaw == requestedLanding.Yaw &&
+            landing.Pitch == requestedLanding.Pitch,
+            "Chorus fruit only lands in two blocks of air above known solid ground");
+        chorusBlocks.BlockHead = true;
+        Check(!ChorusTeleportRules.TryFindLanding(chorusBlocks, chorusStates,
+                requestedLanding, -64, out _),
+            "Chorus fruit refuses to teleport into a blocked head space");
+        chorusBlocks.BlockHead = false;
+        chorusBlocks.LavaGround = true;
+        Check(!ChorusTeleportRules.TryFindLanding(chorusBlocks, chorusStates,
+                requestedLanding, -64, out _),
+            "Chorus fruit refuses lava and other unsafe ground materials");
+        var possible = ChorusTeleportRules.Candidates(
+            new PlayerPose(0.5, 80, 0.5, 0, 0, true), -64,
+            new Random(1234)).ToArray();
+        Check(possible.Length == ChorusTeleportRules.Attempts &&
+            possible.All(p => Math.Abs(p.X - 0.5) <= 8 &&
+                Math.Abs(p.Z - 0.5) <= 8 && p.Y is >= 72 and <= 88) &&
+            !ChorusTeleportRules.TryFindLanding(chorusBlocks, chorusStates,
+                new PlayerPose(30_000_000, 80, 0.5, 0, 0, true),
+                -64, out _),
+            "Chorus fruit bounds random destinations and rejects the world border");
+
         string folder = Path.Combine(Path.GetTempPath(),
             "amethyst-consumables-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
@@ -222,6 +251,34 @@ internal static class ConsumableFeatureTests
         {
             try { Directory.Delete(folder, recursive: true); }
             catch (IOException) { }
+        }
+     }
+
+    private sealed class ChorusBlockWorld : IShardBlockWorld
+    {
+        public bool BlockHead { get; set; }
+        public bool LavaGround { get; set; }
+        public ushort GetBlockState(int x, int y, int z) =>
+            y == 79 ? (ushort)(LavaGround ? 2 : 1) :
+            BlockHead && y == 81 ? (ushort)1 : (ushort)0;
+        public bool TrySetBlockState(int x, int y, int z,
+            ushort state, out ushort previousState)
+        {
+            previousState = GetBlockState(x, y, z);
+            return false;
+        }
+    }
+
+    private sealed class ChorusBlockStates : IShardVanillaBlockStates
+    {
+        public int Count => 2;
+        public bool TryGet(ushort state, out string blockId,
+            out IReadOnlyDictionary<string, string> properties)
+        {
+            blockId = state == 1 ? "minecraft:stone" :
+                state == 2 ? "minecraft:lava" : "";
+            properties = new Dictionary<string, string>();
+            return state is 1 or 2;
         }
     }
 }
