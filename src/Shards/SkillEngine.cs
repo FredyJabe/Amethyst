@@ -270,8 +270,8 @@ public sealed class SkillEngine : IShardSkillEngine
         {
             ct.ThrowIfCancellationRequested();
             if (!string.Equals(skill.Trigger, context.Trigger, StringComparison.OrdinalIgnoreCase) ||
-                context.AllowedSkills is { } allowed &&
-                    !allowed.Contains(skill))
+                context.AllowedSkills is { } selectedSkills &&
+                    !selectedSkills.Contains(skill))
                 continue;
             ShardSkillExecutor executor;
             ShardSkillConditionEvaluator[] checks;
