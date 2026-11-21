@@ -27,7 +27,7 @@ public sealed class ConnectedPlayer : IShardPlayer
     }
     public PlayerInventory Inventory { get; }
     public PlayerVitals Vitals { get; }
-    public PlayerActiveEffects ActiveEffects { get; } = new();
+    public PlayerActiveEffects ActiveEffects { get; }
     public PlayerUseState UseState { get; } = new();
     public PlayerFlightState Flight { get; } = new();
     public PlayerExperience Experience { get; }
@@ -164,6 +164,7 @@ public sealed class ConnectedPlayer : IShardPlayer
         EntityId = entityId; Connection = connection; View = world.CreateView();
         Inventory = new PlayerInventory(inventoryDirectory, id, items, enchantments, skills);
         Vitals = new PlayerVitals(inventoryDirectory, id);
+        ActiveEffects = new PlayerActiveEffects(inventoryDirectory, id);
         Experience = new PlayerExperience(inventoryDirectory, id);
     }
 }

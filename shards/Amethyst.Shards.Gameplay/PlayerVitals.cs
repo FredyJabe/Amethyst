@@ -103,7 +103,8 @@ public sealed class PlayerVitals
     }
 
     public bool TryDamage(float amount, long now, out bool killed,
-        bool bypassIFrames = false)
+        bool bypassIFrames = false,
+        Func<float, float>? mitigation = null)
     {
         killed = false;
         if (!float.IsFinite(amount) || amount <= 0) return false;
@@ -112,8 +113,13 @@ public sealed class PlayerVitals
             if (_health <= 0 ||
                 !bypassIFrames && now - _lastDamageAt < 500)
                 return false;
+            // Mitigation is evaluated only AFTER i-frame checks. Consumed
+            // absorption hearts cannot be wasted on an invulnerable hit.
+            float applied = mitigation is null ? amount : mitigation(amount);
+            if (!float.IsFinite(applied) || applied < 0)
+                throw new InvalidDataException("Invalid mitigated damage.");
             float previous = _health;
-            _health = Math.Max(0, _health - amount);
+            _health = Math.Max(0, _health - applied);
             _lastDamageAt = now;
             killed = _health == 0;
             try { Persist(); }

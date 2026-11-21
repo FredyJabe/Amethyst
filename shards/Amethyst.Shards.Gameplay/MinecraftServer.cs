@@ -175,6 +175,11 @@ public sealed partial class MinecraftServer
         await ExperienceProtocol.SendExperienceAsync(player.Connection,
             player.Experience, ct);
         await CombatProtocol.SendHealthAsync(player, ct);
+        foreach (var effect in player.ActiveEffects.Snapshot())
+            if (StatusEffectProtocol.TryGetId(effect.Id, out int effectId))
+                await StatusEffectProtocol.ApplyAsync(player.Connection,
+                    player.EntityId, effectId, effect.Amplifier,
+                    effect.RemainingTicks, ct);
         int actualOpLevel = _options.OnlineMode ? _operators.Level(player.PlayerUuid) : 0;
         await GameModeProtocol.SendClientPermissionsAsync(player.Connection, player.EntityId, actualOpLevel, ct);
         await CommandTree.SendAsync(player.Connection, actualOpLevel, ct);
@@ -193,6 +198,9 @@ public sealed partial class MinecraftServer
         CancelConsumableUse(player.PlayerUuid);
         _fishing?.Cancel(player.PlayerUuid);
         TrySavePosition(player);
+        try { player.ActiveEffects.Save(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { Console.WriteLine($"[effects] Unable to save {player.Username}: {ex.Message}"); }
         _players.Remove(player.ConnectionId);
         await NotifyDepartureAsync(player);
         Console.WriteLine($"[leave] {player.Username}; {_players.Snapshot().Length} connected");

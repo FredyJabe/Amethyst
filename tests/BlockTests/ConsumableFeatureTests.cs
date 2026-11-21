@@ -117,6 +117,28 @@ internal static class ConsumableFeatureTests
                     { Food: 20, Saturation: 6 },
                 "Consumed food restores hunger and saturation across restart");
 
+            Guid effectsId = Guid.NewGuid();
+            var active = new PlayerActiveEffects(folder, effectsId);
+            Check(active.Apply("minecraft:absorption", 2400, 0) &&
+                active.Apply("minecraft:resistance", 200, 0) &&
+                Math.Abs(active.Absorption - 4) < 0.01f,
+                "Absorption and resistance effects initialize authoritative hearts");
+            var effectVitals = new PlayerVitals(null, Guid.NewGuid());
+            Check(effectVitals.TryDamage(7, 5000, out bool effectKilled,
+                    mitigation: active.Mitigate) && !effectKilled &&
+                Math.Abs(effectVitals.Snapshot().Health - 18.4) < 0.01 &&
+                Math.Abs(active.Absorption) < 0.01f,
+                "Resistance reduces accepted damage before absorption hearts");
+            Check(!effectVitals.TryDamage(7, 5200, out _,
+                    mitigation: active.Mitigate) &&
+                Math.Abs(effectVitals.Snapshot().Health - 18.4) < 0.01,
+                "Invulnerability frames do not consume status mitigation");
+            var restoredEffects = new PlayerActiveEffects(folder, effectsId);
+            Check(restoredEffects.Has("minecraft:absorption") &&
+                restoredEffects.Has("minecraft:resistance") &&
+                Math.Abs(restoredEffects.Absorption) < 0.01,
+                "Server potion effects persist across reconnects");
+
             var settings = new ServerOptions {
                 Seed = 9314, GeneratorVersion = 5, ViewDistance = 2,
                 SaveGeneratedChunks = false,

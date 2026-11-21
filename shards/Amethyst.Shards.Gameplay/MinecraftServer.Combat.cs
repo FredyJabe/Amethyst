@@ -231,6 +231,7 @@ public sealed partial class MinecraftServer
     {
         if (player.Vitals.Snapshot().Health > 0) return;
         player.Vitals.Respawn();
+        player.ActiveEffects.Clear();
         player.SetPose(new PlayerPose(_world.SpawnXPosition,
             _world.SpawnYPosition, _world.SpawnZPosition, 0, 0, true));
         await CombatProtocol.SendRespawnAsync(player, _world, ct);
