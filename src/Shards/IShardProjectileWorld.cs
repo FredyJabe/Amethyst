@@ -10,7 +10,8 @@ public interface IShardProjectileWorld
     ProjectileEntity[] Snapshot();
     bool TryLaunch(Guid owner, ProjectileKind kind, PlayerPose source,
         double speed, float damage, ItemStack recoverable,
-        out ProjectileEntity projectile, ItemStack payload = default);
+        out ProjectileEntity projectile, ItemStack payload = default,
+        ItemStack sourceWeapon = default);
     ProjectileFrame Tick(IShardBlockWorld world,
         IReadOnlyList<ProjectilePlayer> players,
         IReadOnlyList<ShardEntityInstance> mobs);

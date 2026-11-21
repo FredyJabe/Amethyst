@@ -122,9 +122,9 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
     bool IShardProjectileWorld.TryLaunch(Guid owner, ProjectileKind kind,
         PlayerPose source, double speed, float damage,
         ItemStack recoverable, out ProjectileEntity projectile,
-        ItemStack payload) =>
+        ItemStack payload, ItemStack sourceWeapon) =>
         _projectiles.TryLaunch(owner, kind, source, speed, damage, recoverable,
-            out projectile, payload);
+            out projectile, payload, sourceWeapon);
     ProjectileFrame IShardProjectileWorld.Tick(IShardBlockWorld world,
         IReadOnlyList<ProjectilePlayer> players,
         IReadOnlyList<ShardEntityInstance> mobs) =>

@@ -153,7 +153,7 @@ public sealed partial class MinecraftServer
         }
         if (!_projectiles.TryLaunch(player.PlayerUuid, kind, player.Pose,
             speed, damage, creative ? ItemStack.Empty : recoverable,
-            out _))
+            out _, sourceWeapon: stack))
             return;
         if (kind != ProjectileKind.Trident && !creative &&
             player.Inventory.DamageSlot(slot, stack.ItemId, 1))
@@ -264,12 +264,29 @@ public sealed partial class MinecraftServer
             ProjectileEntity p = impact.Projectile;
             ConnectedPlayer? attacker = players.FirstOrDefault(x =>
                 x.PlayerUuid == p.Owner);
+            var hitSkills = new ShardSkillRuntime();
+            hitSkills.SetNumber("damage", p.Damage);
+            string? targetKind = impact.PlayerHit != Guid.Empty ? "player" : null;
+            if (impact.MobHit != 0 && _entities is not null)
+                targetKind = EnchantmentMobCategory(_entities.Snapshot()
+                    .FirstOrDefault(e => e.EntityId == impact.MobHit).DefinitionId);
+            if (_vanillaBlockStates is not null && _blocks is not null &&
+                _vanillaBlockStates.TryGet(_blocks.GetBlockState(
+                    (int)Math.Floor(p.X), (int)Math.Floor(p.Y),
+                    (int)Math.Floor(p.Z)), out string fluid, out _) &&
+                fluid == "minecraft:water")
+                hitSkills.SetFlag("wet_target");
+            await EnchantmentEventAsync(p.SourceWeapon, "onProjectileHit", ct,
+                hitSkills, targetKind: targetKind, actor: attacker?.PlayerUuid);
+            float impactDamage = (float)Math.Clamp(
+                hitSkills.Number("damage", p.Damage), 0, 1000);
+            bool cancelDamage = hitSkills.IsCancelled;
             if (impact.PlayerHit != Guid.Empty)
             {
                 ConnectedPlayer? victim = players.FirstOrDefault(x =>
                     x.PlayerUuid == impact.PlayerHit);
-                if (victim is not null && p.Damage > 0)
-                    await DamagePlayerAsync(victim, p.Damage, attacker, ct,
+                if (victim is not null && !cancelDamage && impactDamage > 0)
+                    await DamagePlayerAsync(victim, impactDamage, attacker, ct,
                         projectile: true);
             }
             if (p.Kind == ProjectileKind.SplashPotion && p.Payload.Count > 0)
@@ -277,13 +294,14 @@ public sealed partial class MinecraftServer
             // Both livestock and generic YAML mobs are owned by Entities.
             // Commit the one-shot death through the same loot pipeline as
             // melee, never a hard-coded sheep reward or duplicate tick drop.
-            if (impact.MobHit != 0 && _entities is not null && p.Damage > 0 &&
-                _entities.TryDamageAndTakeDeath(impact.MobHit, p.Damage,
+            if (impact.MobHit != 0 && _entities is not null &&
+                !cancelDamage && impactDamage > 0 &&
+                _entities.TryDamageAndTakeDeath(impact.MobHit, impactDamage,
                     out ShardEntityInstance injured, out bool killedMob))
             {
                 if (killedMob)
                     await ProcessEntityDeathAsync(injured, attacker,
-                        ItemStack.Empty, ct);
+                        p.SourceWeapon, ct);
                 else
                     foreach (ConnectedPlayer viewer in players.Where(v =>
                         _entityViews.TryGetValue(v.ConnectionId, out var seen) &&

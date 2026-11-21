@@ -91,8 +91,35 @@ internal static class ProjectileFeatureTests
 
             using var playStream = new MemoryStream();
             using var conn = new PacketChannel(playStream);
+            DirectoryInfo? repository = new(AppContext.BaseDirectory);
+            while (repository is not null &&
+                !File.Exists(Path.Combine(repository.FullName, "Amethyst.slnx")))
+                repository = repository.Parent;
+            if (repository is null)
+                throw new InvalidOperationException("Missing repository root.");
+            var entityCatalog = new EntityCatalog(Path.Combine(
+                repository.FullName, "shards", "Amethyst.Shards.Entities",
+                "entities-26.3.yml"));
+            var managed = new EntityManager(entityCatalog);
+            int impactSkillsRun = 0;
+            var skillEngine = new Amethyst.Shards.SkillEngine();
+            skillEngine.RegisterTrigger("projectile-test", "onProjectileHit");
+            skillEngine.RegisterMechanic("projectile-test", "testImpact",
+                skill => { },
+                (skill, evt, ct) =>
+                {
+                    impactSkillsRun++;
+                    evt.Runtime.SetNumber("damage", 20);
+                    return ValueTask.CompletedTask;
+                });
+            skillEngine.RegisterInstructions("projectile-test", [
+                Amethyst.Shards.SkillEngine.Parse("minecraft:bow",
+                    "testImpact @self ~onProjectileHit")
+            ]);
             var server = TestServerFactory.Create(settings, world,
-                null!, world, items: items, recipes: recipes);
+                null!, world, items: items, recipes: recipes,
+                entities: managed, entityTypes: entityCatalog,
+                skills: skillEngine);
             Guid playerId = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(playerId,
                 "ProjectileTester", []), conn, 0, out _),
@@ -113,6 +140,15 @@ internal static class ProjectileFeatureTests
                 player.Inventory.Held().Damage == 1 &&
                 player.Inventory.Snapshot().Slots[37].Count == 2,
                 "Charged bow consumes an arrow and wears the bow exactly once");
+            Check(server.ProjectilesForTests[0].SourceWeapon.ItemId == bow.ProtocolId &&
+                managed.TrySpawn("cow", 0.5, 115.3, 3.5,
+                    out ShardEntityInstance targetCow),
+                "Ranged projectile retains authoritative firing weapon and has a mob target");
+            for (int t = 0; t < 20 && impactSkillsRun == 0; t++)
+                await server.TickProjectilesAsync(CancellationToken.None);
+            Check(impactSkillsRun == 1 &&
+                !managed.Snapshot().Any(m => m.EntityId == targetCow.EntityId),
+                "~onProjectileHit item skill runs once and changes actual mob damage");
             Check(player.Inventory.TryCreativeSet(36, trident.ProtocolId, 1, true),
                 "Equip trident for throwing");
             player.UseState.BeginCharge(0, trident.ProtocolId,
