@@ -126,19 +126,37 @@ public sealed class SkillEngine : IShardSkillEngine
             StringComparer.OrdinalIgnoreCase).ToArray();
         lock (_gate)
         {
-            if (_packs.ContainsKey(owner))
-                throw new InvalidOperationException($"Shard '{owner}' has a skill pack.");
-            var pack = new Dictionary<string, IReadOnlyList<ShardSkillInstruction>>(
-                StringComparer.OrdinalIgnoreCase);
+            // The Items Shard supplies an administrator YAML pack and also
+            // generated item/enchantment instructions. Both belong to the
+            // same shard; append generated instructions without overriding
+            // explicit empty YAML skill lists (which disable defaults).
+            var pack = _packs.TryGetValue(owner, out var existing)
+                ? new Dictionary<string, IReadOnlyList<ShardSkillInstruction>>(
+                    existing, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, IReadOnlyList<ShardSkillInstruction>>(
+                    StringComparer.OrdinalIgnoreCase);
             foreach (var group in grouped)
             {
-                if (!Identifier.IsMatch(group.Key) || group.Count() > 32)
+                if (!Identifier.IsMatch(group.Key))
                     throw new InvalidDataException($"Invalid skill owner '{group.Key}'.");
-                foreach (var skill in group)
+                var incoming = group.ToArray();
+                foreach (var skill in incoming)
                     ValidateRegistered(skill);
-                pack.Add(group.Key, Array.AsReadOnly(group.ToArray()));
+                if (pack.TryGetValue(group.Key, out var previous))
+                {
+                    if (previous.Count == 0) continue; // explicit Skills: []
+                    if (previous.Count + incoming.Length > 32)
+                        throw new InvalidDataException($"Too many skills for '{group.Key}'.");
+                    pack[group.Key] = Array.AsReadOnly(previous.Concat(incoming).ToArray());
+                }
+                else
+                {
+                    if (incoming.Length > 32)
+                        throw new InvalidDataException($"Too many skills for '{group.Key}'.");
+                    pack.Add(group.Key, Array.AsReadOnly(incoming));
+                }
             }
-            _packs.Add(owner, pack);
+            _packs[owner] = pack;
         }
     }
 
