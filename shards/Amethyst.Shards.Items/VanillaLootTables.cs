@@ -20,13 +20,14 @@ public sealed partial class VanillaLootTables : IShardVanillaLootTables
     public VanillaLootTables(string directory, IShardItemRegistry items,
         IShardRecipeRegistry? recipes = null,
         string? tagsDirectory = null,
-        IShardEnchantmentRegistry? enchantments = null)
+        IShardEnchantmentRegistry? enchantments = null,
+        string? enchantmentDataDirectory = null)
     {
         _items = items ?? throw new ArgumentNullException(nameof(items));
         _recipes = recipes;
         _enchantments = enchantments;
-        _enchantmentDataDirectory = Path.GetFullPath(Path.Combine(
-            directory, "..", "enchantment"));
+        _enchantmentDataDirectory = enchantmentDataDirectory ??
+            Path.GetFullPath(Path.Combine(directory, "..", "enchantment"));
         string candidateTags = tagsDirectory ??
             Path.GetFullPath(Path.Combine(directory, "..", "tags"));
         if (Directory.Exists(candidateTags))
