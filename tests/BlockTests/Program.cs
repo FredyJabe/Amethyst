@@ -1680,6 +1680,24 @@ try
         Check(lootGame.GroundItemsForTests.Length == shearedWool.Length,
             "Repeated shearing cannot duplicate wool rewards");
 
+        // The Entities Shard owns sheep color, and Items YAML chooses the
+        // matching wool material through the ?flag skill condition.
+        Check(lootWorld.TrySpawnSheep(11, 80, 12,
+                out LivingEntity redSheep, color: 14) &&
+            itemsCatalog.TryGetByIdentifier("minecraft:red_wool", out var redWool),
+            "Spawn a colored native sheep through the Entities Shard");
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(redSheep.EntityId, 0, false),
+            CancellationToken.None);
+        GroundItem[] coloredDrops = lootGame.GroundItemsForTests
+            .Where(d => !shearedWool.Any(old => old.EntityId == d.EntityId))
+            .ToArray();
+        Check(lootWorld.TryGet(redSheep.EntityId, out LivingEntity coloredState) &&
+            coloredState.Sheared && coloredState.Color == 14 &&
+            coloredDrops.Length == 1 &&
+            coloredDrops[0].ItemId == redWool.ProtocolId,
+            "Shearing an Entities-owned red sheep executes the red-wool YAML skill");
+
         // Click triggers are item-owner skills, separate from entity events.
         Check(stationWorld.TrySetBlockState(11, 80, 12, 9, out _),
             "Prepare a nearby block for item left-click");

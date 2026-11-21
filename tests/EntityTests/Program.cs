@@ -1,3 +1,4 @@
+using Amethyst;
 using Amethyst.BuiltinShards;
 using Amethyst.Shards;
 
@@ -100,6 +101,51 @@ try
     string itemVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
         "items-26.3.yml");
     var items = new ItemCatalog(itemVanilla);
+
+    // The Entities Shard owns all physical world entities. One shared ID
+    // allocator and world binding preserve existing save paths after moving
+    // storage out of Gameplay; only projectiles and bobbers are transient.
+    string ownedWorld = Path.Combine(temp, "entity-owned-world");
+    var authoritative = new EntityManager(catalog);
+    authoritative.BindWorldEntities(temp, ownedWorld, items);
+    var native = (IShardLivingEntities)authoritative;
+    var itemEntities = (IShardGroundItems)authoritative;
+    var xpEntities = (IShardExperienceOrbs)authoritative;
+    var fishingEntities = (IShardFishingWorld)authoritative;
+    var projectiles = (IShardProjectileWorld)authoritative;
+    Check(native.TrySpawnSheep(4, 80, 4, out LivingEntity redSheep, 14) &&
+        native.TryShear(redSheep.EntityId, out var shearedRed) &&
+        shearedRed.Sheared && shearedRed.Color == 14 &&
+        authoritative.Snapshot().Any(x => x.EntityId == redSheep.EntityId) &&
+        items.TryGetByIdentifier("minecraft:diamond", out var diamond) &&
+        itemEntities.TrySpawn(diamond.ProtocolId, 2, 4, 80, 4,
+            out GroundItem dropped) &&
+        xpEntities.TrySpawn(5, 4, 80, 4, out ExperienceOrb orb),
+        "Entities owns colored sheep, ground items and XP with one allocator");
+    Guid fisher = Guid.NewGuid();
+    var launchPose = new PlayerPose(4, 80, 4, 0, 0, true);
+    Check(fishingEntities.TryCast(fisher, 123, launchPose,
+            out FishingBobber hook) &&
+        projectiles.TryLaunch(fisher, ProjectileKind.Arrow, launchPose, 1.5f,
+            2, ItemStack.Empty, out ProjectileEntity arrow) &&
+        new[] { redSheep.EntityId, dropped.EntityId, orb.EntityId,
+            hook.EntityId, arrow.EntityId }.Distinct().Count() == 5,
+        "Entity ID allocation is unique across livestock, items, XP, hooks and projectiles");
+    native.Save();
+    itemEntities.Save();
+    xpEntities.Save();
+    var restartedWorld = new EntityManager(catalog);
+    restartedWorld.BindWorldEntities(temp, ownedWorld, items);
+    Check(((IShardLivingEntities)restartedWorld).Snapshot()
+            .Any(x => x.Uuid == redSheep.Uuid && x.Sheared && x.Color == 14) &&
+        ((IShardGroundItems)restartedWorld).Snapshot()
+            .Any(x => x.Uuid == dropped.Uuid && x.Count == 2) &&
+        ((IShardExperienceOrbs)restartedWorld).Snapshot()
+            .Any(x => x.Value == 5) &&
+        ((IShardFishingWorld)restartedWorld).Snapshot().Length == 0 &&
+        ((IShardProjectileWorld)restartedWorld).Snapshot().Length == 0,
+        "Entities restores durable living/item/XP state without resurrecting transient projectiles");
+
     var drops = new TestDropSink();
     SkillEngine CreateEngine()
     {
