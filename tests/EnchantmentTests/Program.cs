@@ -433,6 +433,13 @@ try
               - Trigger: onAttack
                 Operation: multiply
                 Base: 2
+        wooden_axe:
+          Stats:
+            - damage 50
+            - attack_speed 2
+        wooden_shovel:
+          Stats:
+            damage: 12
         """);
     var statItems = new ItemCatalog(Path.Combine(path, "items-26.3.yml"), itemOverrides);
     Check(statItems.TryGetByIdentifier("diamond_sword", out var boosted) &&
@@ -448,6 +455,49 @@ try
     Check(Math.Abs(itemRuntime.Number("damage") - 10) < 0.001 &&
         Math.Abs(itemRuntime.Number("knockback") - 1.8) < 0.001,
         "Multiple item modifiers compose add and multiply in order");
+
+    if (!statItems.TryGetByIdentifier("wooden_axe", out var axe))
+        throw new Exception("Missing wooden axe definition.");
+    Check(axe.Stats?.Count == 2 && axe.Stats.All(x => x.Operation == "set"),
+        "Stats sequence entries are parsed as absolute assignments");
+    var axeRuntime = new ShardSkillRuntime();
+    axeRuntime.SetNumber("damage", 7);
+    axeRuntime.SetNumber("attack_speed", 4);
+    var axeEvent = new ShardSkillEvent(axe.Identifier, "onAttack",
+        EnchantmentLevel: 1) { Runtime = axeRuntime };
+    foreach (var stat in axe.Stats ?? []) stat.Apply(axeEvent, engine);
+    Check(axeRuntime.Number("damage") == 50 &&
+        axeRuntime.Number("attack_speed") == 2,
+        "Item Stats scalar list replaces existing values instead of adding");
+
+    if (!statItems.TryGetByIdentifier("wooden_shovel", out var shovel))
+        throw new Exception("Missing wooden shovel definition.");
+    var shovelRuntime = new ShardSkillRuntime();
+    shovelRuntime.SetNumber("damage", 7);
+    var shovelEvent = new ShardSkillEvent(shovel.Identifier, "onAttack")
+        { Runtime = shovelRuntime };
+    foreach (var stat in shovel.Stats ?? []) stat.Apply(shovelEvent, engine);
+    Check(shovelRuntime.Number("damage") == 12,
+        "Legacy mapping scalar values also use absolute assignment");
+
+    var invalidStats = Path.Combine(temporary, "invalid-stats");
+    Directory.CreateDirectory(invalidStats);
+    File.WriteAllText(Path.Combine(invalidStats, "duplicates.yml"), """
+        wooden_axe:
+          Stats:
+            - damage 50
+            - damage 100
+        """);
+    bool duplicateStatRejected = false;
+    try
+    {
+        _ = new ItemCatalog(Path.Combine(path, "items-26.3.yml"), invalidStats);
+    }
+    catch (InvalidDataException)
+    {
+        duplicateStatRejected = true;
+    }
+    Check(duplicateStatRejected, "Duplicate scalar Stats assignments are rejected");
     var smite = catalog.All.Single(x => x.Identifier == "minecraft:smite").Stats[0];
     engine.ValidateConditions(smite.Conditions);
     var undead = new ShardSkillRuntime();
