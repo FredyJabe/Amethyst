@@ -1,74 +1,120 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Amethyst.Shards;
 
 namespace Amethyst.BuiltinShards;
 
-/// <summary>dropItem mechanics add explicit drop intents to the current
-/// event. The Gameplay publisher decides when/where physical items spawn.
-/// The mechanic never modifies inventories or the world by itself.</summary>
+/// <summary>One dropItem mechanic for new Phase 4 intent-based loot and the
+/// original Mythic-style Items skills. The publisher is authoritative about
+/// cancelling its default action; generated drops are independent.</summary>
 public static class LootSkills
 {
+    private static readonly Regex Range = new(
+        @"^(?<min>\d{1,3})(?:\s*-\s*(?<max>\d{1,3}))?$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private readonly record struct Parameters(int ItemId, int StackLimit,
+        int Min, int Max, double Chance, bool Looting);
+
     public static void Register(IShardContext context, IShardItemRegistry items)
     {
         context.RegisterSkillMechanic("dropItem", Validate, Execute);
 
-        void Validate(ShardSkillInstruction skill)
-        {
-            foreach (string key in skill.Arguments.Keys)
-                if (key is not ("item" or "amount" or "min" or "max" or "bonus"))
-                    throw new InvalidDataException($"Unknown dropItem argument '{key}'.");
-            string identifier = Required(skill, "item");
-            if (!identifier.StartsWith("minecraft:", StringComparison.Ordinal) ||
-                !items.TryGetByIdentifier(identifier, out var definition) ||
-                definition.ProtocolId == 0)
-                throw new InvalidDataException($"Unknown vanilla drop item '{identifier}'.");
-            bool fixedAmount = skill.Arguments.ContainsKey("amount");
-            if (fixedAmount && (skill.Arguments.ContainsKey("min") ||
-                skill.Arguments.ContainsKey("max")))
-                throw new InvalidDataException("Use amount or min/max, not both.");
-            int min = fixedAmount ? Positive(skill, "amount") :
-                Positive(skill, "min");
-            int max = fixedAmount ? min : Positive(skill, "max");
-            if (min > max || max > 64 || max > definition.MaxStackSize)
-                throw new InvalidDataException("Invalid dropItem amount range.");
-            string bonus = skill.Arguments.GetValueOrDefault("bonus") ?? "none";
-            if (bonus is not ("none" or "looting"))
-                throw new InvalidDataException("dropItem bonus must be none or looting.");
-        }
+        void Validate(ShardSkillInstruction skill) => _ = Read(skill);
 
         ValueTask Execute(ShardSkillInstruction skill, ShardSkillEvent evt,
             CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
-            var def = items.TryGetByIdentifier(Required(skill, "item"),
-                out var item) ? item : throw new InvalidOperationException(
-                    "Previously validated dropItem material missing.");
-            bool fixedAmount = skill.Arguments.ContainsKey("amount");
-            int min = fixedAmount ? Positive(skill, "amount") : Positive(skill, "min");
-            int max = fixedAmount ? min : Positive(skill, "max");
-            int count = min == max ? min : evt.Rng.Next(min, max + 1);
-            if (skill.Arguments.GetValueOrDefault("bonus") == "looting")
+            Parameters p = Read(skill);
+            if (evt.Rng.NextDouble() >= p.Chance) return ValueTask.CompletedTask;
+            int amount = p.Min == p.Max ? p.Min : evt.Rng.Next(p.Min, p.Max + 1);
+            if (p.Looting)
             {
                 int level = (int)Math.Clamp(evt.Runtime.Number("looting_level"), 0, 255);
-                if (level > 0) count += evt.Rng.Next(level + 1);
+                if (level > 0) amount += evt.Rng.Next(level + 1);
             }
-            if (count > 0)
-                evt.Runtime.AddDrop(new ShardItemDrop(def.ProtocolId,
-                    Math.Min(count, def.MaxStackSize)));
+            amount = Math.Min(amount, 64);
+            IShardItemDropSink? sink = evt.PublisherCommitsDrops ? null :
+                context.GetService<IShardItemDropSink>();
+            while (amount > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                int count = Math.Min(amount, p.StackLimit);
+                evt.Runtime.AddDrop(new ShardItemDrop(p.ItemId, count));
+                // PR #18 dispatchers do not inspect Runtime.Drops. Keep their
+                // physical-drop behavior until all callers use the publisher
+                // transaction, without duplicating PR #21's deferred drops.
+                if (sink is not null &&
+                    !sink.TryDropItem(p.ItemId, count, evt.X, evt.Y + 0.2, evt.Z))
+                    context.Log($"dropItem failed to spawn {p.ItemId} x{count} for {evt.OwnerId}");
+                amount -= count;
+            }
             return ValueTask.CompletedTask;
         }
-    }
 
-    private static string Required(ShardSkillInstruction skill, string name) =>
-        skill.Arguments.TryGetValue(name, out string? value) && value.Length > 0
-            ? value : throw new InvalidDataException($"dropItem missing {name}.");
+        Parameters Read(ShardSkillInstruction skill)
+        {
+            if (skill.Target is not null &&
+                !skill.Target.Equals("self", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException(
+                    $"dropItem does not support @{skill.Target}.");
+            var args = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (original, value) in skill.Arguments)
+            {
+                string key = original.ToLowerInvariant() switch
+                {
+                    "i" => "item", "a" => "amount", "c" => "chance",
+                    var name => name
+                };
+                if (key is not ("item" or "amount" or "min" or "max" or
+                    "chance" or "bonus") || !args.TryAdd(key, value))
+                    throw new InvalidDataException(
+                        $"Invalid or duplicate dropItem argument '{original}'.");
+            }
+            if (!args.TryGetValue("item", out string? identifier) ||
+                !items.TryGetByIdentifier(identifier, out var definition) ||
+                definition.ProtocolId <= 0 || definition.MaxStackSize <= 0)
+                throw new InvalidDataException($"Unknown dropItem material '{identifier}'.");
 
-    private static int Positive(ShardSkillInstruction skill, string name)
-    {
-        string raw = Required(skill, name);
-        if (!int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture,
-            out int parsed) || parsed is < 1 or > 64)
-            throw new InvalidDataException($"Invalid dropItem {name}={raw}.");
-        return parsed;
+            bool hasAmount = args.TryGetValue("amount", out string? range);
+            if (hasAmount && (args.ContainsKey("min") || args.ContainsKey("max")))
+                throw new InvalidDataException("dropItem accepts amount or min/max, not both.");
+            int min, max;
+            if (hasAmount)
+            {
+                Match match = Range.Match(range!);
+                if (!match.Success || !int.TryParse(match.Groups["min"].Value,
+                        NumberStyles.None, CultureInfo.InvariantCulture, out min) ||
+                    !int.TryParse(match.Groups["max"].Success
+                        ? match.Groups["max"].Value : match.Groups["min"].Value,
+                        NumberStyles.None, CultureInfo.InvariantCulture, out max))
+                    throw new InvalidDataException($"Invalid dropItem amount '{range}'.");
+            }
+            else
+            {
+                if (!args.TryGetValue("min", out string? lo) ||
+                    !args.TryGetValue("max", out string? hi) ||
+                    !int.TryParse(lo, NumberStyles.None, CultureInfo.InvariantCulture,
+                        out min) || !int.TryParse(hi, NumberStyles.None,
+                        CultureInfo.InvariantCulture, out max))
+                    throw new InvalidDataException("dropItem requires amount or min/max.");
+            }
+            if (min < 0 || max < min || max > 64 ||
+                (max + Math.Max(0, 255) + definition.MaxStackSize - 1) /
+                    definition.MaxStackSize > 32 && args.GetValueOrDefault("bonus") == "looting")
+                throw new InvalidDataException("Invalid dropItem count range.");
+            double chance = 1;
+            if (args.TryGetValue("chance", out string? rawChance) &&
+                (!double.TryParse(rawChance, NumberStyles.Float,
+                     CultureInfo.InvariantCulture, out chance) ||
+                 !double.IsFinite(chance) || chance is < 0 or > 1))
+                throw new InvalidDataException("Invalid dropItem chance.");
+            string bonus = args.GetValueOrDefault("bonus") ?? "none";
+            if (bonus is not ("none" or "looting"))
+                throw new InvalidDataException("dropItem bonus must be none or looting.");
+            return new Parameters(definition.ProtocolId, definition.MaxStackSize,
+                min, max, chance, bonus == "looting");
+        }
     }
 }
