@@ -50,6 +50,9 @@ public interface IShardEntityInteractions
 /// <summary>Authoritative entity store and network identifier allocator.</summary>
 public interface IShardEntityManager
 {
+    /// <summary>Bind legacy-compatible world persistence once, before
+    /// Gameplay begins spawning or viewing living entities.</summary>
+    void BindWorldEntities(string? directory, string worldPath);
     int AllocateEntityId();
     ShardEntityInstance[] Snapshot();
     bool TrySpawn(string definitionId, double x, double y, double z,

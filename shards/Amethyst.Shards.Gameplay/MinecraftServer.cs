@@ -19,7 +19,7 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     private readonly OperatorStore _operators;
     private readonly GroundItemStore? _groundItems;
     private readonly ExperienceOrbStore? _experienceOrbs;
-    private readonly LivingEntityStore? _livingEntities;
+    private readonly IShardLivingEntities? _livingEntities;
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
@@ -52,7 +52,8 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         IShardLootRegistry? loot = null,
         IShardVanillaLootTables? vanillaLoot = null,
         IShardVanillaBlockStates? vanillaBlockStates = null,
-        IShardConsumableRegistry? consumables = null)
+        IShardConsumableRegistry? consumables = null,
+        IShardLivingEntities? livestock = null)
     {
         _options = options;
         _world = world;
@@ -63,6 +64,8 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         _skills = skills;
         _entityTypes = entityTypes;
         _interactions = interactions;
+        _livingEntities = livestock;
+        entities?.BindWorldEntities(inventoryDirectory, options.WorldPath);
         _enchantments = enchantments;
         _loot = loot;
         _vanillaLoot = vanillaLoot;
@@ -80,8 +83,6 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             _groundItems = new GroundItemStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId, items);
             _experienceOrbs = new ExperienceOrbStore(inventoryDirectory,
-                options.WorldPath, _players.AllocateEntityId);
-            _livingEntities = new LivingEntityStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId);
             _projectiles = new ProjectileWorld(_players.AllocateEntityId);
             _fishing = new FishingWorld(_players.AllocateEntityId);
@@ -1325,6 +1326,11 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             PlayerPose pose = viewer.Pose;
             foreach (ShardEntityInstance entity in instances)
             {
+                // Sheep are owned by the same Entities manager but require
+                // their dedicated health/color/sheared metadata packet path.
+                // Do not spawn the same EID twice for one client.
+                if (_livingEntities?.TryGet(entity.EntityId, out _) == true)
+                    continue;
                 double dx = entity.X - pose.X, dz = entity.Z - pose.Z;
                 if (dx * dx + dz * dz > 48 * 48 || Math.Abs(entity.Y - pose.Y) > 48)
                     continue;

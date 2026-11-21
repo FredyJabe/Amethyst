@@ -1,19 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Amethyst;
+using Amethyst;
+using Amethyst.Shards;
 
-/// <summary>Persistent simple livestock entities. Every entity has a stable
-/// UUID while runtime entity IDs are reallocated on startup. No client packet
-/// can invent or mutate these entities.</summary>
-public readonly record struct LivingEntity(int EntityId, Guid Uuid,
-    string Kind, double X, double Y, double Z, float Health,
-    bool Sheared, int Color, long LastGrazeAt)
-{
-    public bool Alive => Health > 0;
-}
+namespace Amethyst.BuiltinShards;
 
-public sealed class LivingEntityStore
+public sealed class LivingEntityStore : IShardLivingEntities
 {
     private static readonly byte[] Magic = "AMLIVE01"u8.ToArray();
     private readonly object _gate = new();
@@ -43,6 +36,32 @@ public sealed class LivingEntityStore
     public bool TryGet(int entityId, out LivingEntity entity)
     {
         lock (_gate) return _entities.TryGetValue(entityId, out entity);
+    }
+
+    public bool TryRemove(int entityId)
+    {
+        lock (_gate)
+        {
+            if (!_entities.Remove(entityId, out LivingEntity removed)) return false;
+            try { Persist(); }
+            catch { _entities[entityId] = removed; throw; }
+            return true;
+        }
+    }
+
+    public bool TryTeleport(int entityId, double x, double y, double z)
+    {
+        if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z) ||
+            Math.Abs(x) > 29_999_984 || Math.Abs(z) > 29_999_984 ||
+            y < -64 || y > 320) return false;
+        lock (_gate)
+        {
+            if (!_entities.TryGetValue(entityId, out LivingEntity old)) return false;
+            _entities[entityId] = old with { X = x, Y = y, Z = z };
+            try { Persist(); }
+            catch { _entities[entityId] = old; throw; }
+            return true;
+        }
     }
 
     public bool TrySpawnSheep(double x, double y, double z,

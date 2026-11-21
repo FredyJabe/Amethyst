@@ -4,7 +4,7 @@ namespace Amethyst.BuiltinShards;
 
 /// <summary>Thread-safe authoritative instance store. No automatic spawn,
 /// AI or physics: other Shards can implement those via the typed service.</summary>
-public sealed class EntityManager : IShardEntityManager, IShardEntityInteractions
+public sealed class EntityManager : IShardEntityManager, IShardEntityInteractions, IShardLivingEntities
 {
     private const int MaximumEntities = 10_000;
     private const double MaximumCoordinate = 30_000_000;
@@ -14,9 +14,50 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
     private readonly HashSet<int> _sheared = [];
     private readonly object _gate = new();
     private int _nextEntityId;
+    private LivingEntityStore _livestock;
+    private bool _worldBound;
 
-    public EntityManager(IShardEntityRegistry definitions) =>
+    public EntityManager(IShardEntityRegistry definitions)
+    {
         _definitions = definitions ?? throw new ArgumentNullException(nameof(definitions));
+        _livestock = new LivingEntityStore(null, ".", AllocateEntityId);
+    }
+
+    /// <summary>Bind persistence once to the actual Gameplay world directory.
+    /// Entities owns the store; Gameplay supplies the already-established save
+    /// path so AMLIVE01 worlds remain readable after the Shard migration.</summary>
+    public void BindWorldEntities(string? directory, string worldPath)
+    {
+        lock (_gate)
+        {
+            if (_worldBound) return;
+            _livestock = new LivingEntityStore(directory, worldPath, AllocateEntityId);
+            _worldBound = true;
+        }
+    }
+
+    LivingEntity[] IShardLivingEntities.Snapshot() => _livestock.Snapshot();
+    public bool TryGet(int entityId, out LivingEntity entity) =>
+        _livestock.TryGet(entityId, out entity);
+    public bool TrySpawnSheep(double x, double y, double z,
+        out LivingEntity created, int color = 0) =>
+        _livestock.TrySpawnSheep(x, y, z, out created, color);
+    bool IShardLivingEntities.TryDamage(int id, float points,
+        out LivingEntity updated, out bool killed) =>
+        _livestock.TryDamage(id, points, out updated, out killed);
+    bool IShardLivingEntities.TryShear(int id, out LivingEntity changed) =>
+        _livestock.TryShear(id, out changed);
+    public LivingEntity[] Regrow(long nowMs, int requiredMs = 180_000) =>
+        _livestock.Regrow(nowMs, requiredMs);
+    public void Save() => _livestock.Save();
+
+    private ShardEntityInstance FromLivestock(LivingEntity sheep)
+    {
+        int protocolId = _definitions.TryGetByIdentifier("minecraft:sheep",
+            out var definition) ? definition.ProtocolId : 114;
+        return new ShardEntityInstance(sheep.EntityId, sheep.Uuid, sheep.Kind,
+            protocolId, sheep.X, sheep.Y, sheep.Z, 0, 0, sheep.Health);
+    }
 
     public int AllocateEntityId()
     {
@@ -27,7 +68,9 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
 
     public ShardEntityInstance[] Snapshot()
     {
-        lock (_gate) return _instances.Values.OrderBy(e => e.EntityId).ToArray();
+        lock (_gate)
+            return _instances.Values.Concat(_livestock.Snapshot().Select(FromLivestock))
+                .OrderBy(e => e.EntityId).ToArray();
     }
 
     public bool TrySpawn(string definitionId, double x, double y, double z,
@@ -40,7 +83,15 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
             return false;
         lock (_gate)
         {
-            if (_instances.Count >= MaximumEntities) return false;
+            if (definition.Identifier == "minecraft:sheep")
+            {
+                if (!_livestock.TrySpawnSheep(x, y, z, out LivingEntity sheep))
+                    return false;
+                entity = FromLivestock(sheep);
+                return true;
+            }
+            if (_instances.Count + _livestock.Snapshot().Length >= MaximumEntities)
+                return false;
             entity = new ShardEntityInstance(AllocateEntityId(), Guid.NewGuid(),
                 definition.Identifier, definition.ProtocolId, x, y, z, 0, 0,
                 definition.MaxHealth);
@@ -54,7 +105,7 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
         lock (_gate)
         {
             _sheared.Remove(entityId);
-            return _instances.Remove(entityId);
+            return _instances.Remove(entityId) || _livestock.TryRemove(entityId);
         }
     }
 
@@ -65,6 +116,8 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
             return false;
         lock (_gate)
         {
+            if (_livestock.TryGet(entityId, out _))
+                return _livestock.TryTeleport(entityId, x, y, z);
             if (!_instances.TryGetValue(entityId, out var entity)) return false;
             _instances[entityId] = entity with { X = x, Y = y, Z = z, Yaw = yaw, Pitch = pitch };
             return true;
@@ -77,6 +130,14 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
         if (!double.IsFinite(amount) || amount <= 0) return false;
         lock (_gate)
         {
+            if (_livestock.TryGet(entityId, out _))
+            {
+                if (!_livestock.TryDamage(entityId, (float)Math.Min(amount, float.MaxValue),
+                        out LivingEntity livestock, out bool killed)) return false;
+                updated = FromLivestock(livestock);
+                if (killed) EnqueueDeath(updated);
+                return true;
+            }
             if (!_instances.TryGetValue(entityId, out var entity) ||
                 !_definitions.TryGetByIdentifier(entity.DefinitionId, out var definition) ||
                 definition.Invulnerable || entity.Health is not double health)
@@ -98,6 +159,15 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
         killed = default;
         lock (_gate)
         {
+            if (_livestock.TryGet(entityId, out _))
+            {
+                if (!_livestock.TryDamage(entityId, float.MaxValue,
+                        out LivingEntity livestock, out bool defeated) || !defeated)
+                    return false;
+                killed = FromLivestock(livestock);
+                EnqueueDeath(killed);
+                return true;
+            }
             if (!_instances.TryGetValue(entityId, out var entity) ||
                 !_definitions.TryGetByIdentifier(entity.DefinitionId, out var definition) ||
                 definition.Invulnerable)
@@ -130,6 +200,12 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
         entity = default;
         lock (_gate)
         {
+            if (_livestock.TryGet(entityId, out _))
+            {
+                if (!_livestock.TryShear(entityId, out LivingEntity sheep)) return false;
+                entity = FromLivestock(sheep);
+                return true;
+            }
             if (!_instances.TryGetValue(entityId, out var found) ||
                 !_definitions.TryGetById(found.ProtocolId, out var kind) ||
                 kind.Identifier != "minecraft:sheep" || _sheared.Contains(entityId))
@@ -142,7 +218,9 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
 
     public bool IsSheared(int entityId)
     {
-        lock (_gate) return _sheared.Contains(entityId);
+        lock (_gate)
+            return _sheared.Contains(entityId) ||
+                _livestock.TryGet(entityId, out LivingEntity sheep) && sheep.Sheared;
     }
 
     public ShardEntityInstance[] DrainDeaths()
