@@ -7,7 +7,8 @@ using YamlDotNet.RepresentationModel;
 namespace Amethyst.BuiltinShards;
 
 /// <summary>Common strict Stats YAML format for items and enchantments.
-/// A stat's value may be a number, a modifier mapping, or a list of mappings.
+/// Short list entries ("damage 50") set the event-local value exactly.
+/// Advanced stat mappings retain explicit add/multiply/set modifiers and triggers.
 /// The YAML stat keys are server-side names, not item component node names.</summary>
 public static class StatModifiers
 {
@@ -20,10 +21,38 @@ public static class StatModifiers
 
     public static IReadOnlyList<ShardStatModifier> Parse(YamlNode node, string owner)
     {
-        if (node is not YamlMappingNode map || map.Children.Count > 64)
-            throw new InvalidDataException($"Stats for '{owner}' must be a mapping of at most 64 stats.");
         var result = new List<ShardStatModifier>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Preferred shorthand:
+        // Stats:
+        //   - damage 50
+        //   - attack_speed 2
+        // Numbers are absolute values, not additive bonuses.
+        if (node is YamlSequenceNode assignments)
+        {
+            if (assignments.Children.Count > 64)
+                throw new InvalidDataException(
+                    $"Stats for '{owner}' can contain at most 64 entries.");
+            foreach (YamlNode assignment in assignments.Children)
+            {
+                string[] parts = Scalar(assignment, owner).Split(
+                    (char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length != 2 || !StatName.IsMatch(parts[0]) ||
+                    !names.Add(parts[0]))
+                    throw new InvalidDataException(
+                        $"Invalid or duplicate Stats assignment in '{owner}': expected '- stat_name number'.");
+                result.Add(new ShardStatModifier(parts[0].ToLowerInvariant(),
+                    Number(parts[1], owner), 0, "set", null, []));
+            }
+            return Array.AsReadOnly(result.ToArray());
+        }
+
+        // Keep the advanced mapping format for vanilla enchantment formulas
+        // and compatibility with existing administrator definitions.
+        if (node is not YamlMappingNode map || map.Children.Count > 64)
+            throw new InvalidDataException(
+                $"Stats for '{owner}' must be a list or mapping (max 64 entries).");
         foreach (var entry in map.Children)
         {
             string stat = Scalar(entry.Key, owner);
@@ -47,7 +76,7 @@ public static class StatModifiers
     {
         if (node is YamlScalarNode)
             return new ShardStatModifier(stat.ToLowerInvariant(),
-                Number(node, owner), 0, "add", null, []);
+                Number(node, owner), 0, "set", null, []);
         if (node is not YamlMappingNode map)
             throw new InvalidDataException($"Stats.{stat} for '{owner}' must be a number or mapping.");
 
@@ -111,9 +140,11 @@ public static class StatModifiers
         node is YamlScalarNode { Value: { } value } ? value :
         throw new InvalidDataException($"Expected scalar in Stats for '{owner}'.");
 
-    private static double Number(YamlNode node, string owner)
+    private static double Number(YamlNode node, string owner) =>
+        Number(Scalar(node, owner), owner);
+
+    private static double Number(string text, string owner)
     {
-        string text = Scalar(node, owner);
         if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture,
                 out double value) || !double.IsFinite(value) ||
             Math.Abs(value) > 1_000_000)
