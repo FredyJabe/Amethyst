@@ -30,6 +30,15 @@ internal static class CombatFeatureTests
             CombatRules.Mitigate(8, 20) < 8 &&
             CombatRules.MeleeDamage("minecraft:diamond_sword") == 7,
             "Combat uses reach, armor mitigation, and weapon damage rules");
+        var meleeEffects = new PlayerActiveEffects();
+        Check(meleeEffects.Apply("minecraft:strength", 200, 1) &&
+            CombatRules.MeleeDamageWithEffects(
+                "minecraft:diamond_sword", meleeEffects.Snapshot()) == 13f &&
+            meleeEffects.Apply("minecraft:weakness", 200, 0) &&
+            CombatRules.MeleeDamageWithEffects(
+                "minecraft:diamond_sword", meleeEffects.Snapshot()) == 9f,
+            "Strength II adds six and Weakness I subtracts four melee damage");
+
         var parserWriter = new PacketWriter();
         parserWriter.WriteVarInt(42);
         Check(CombatProtocol.ReadAttack(new Packet(
