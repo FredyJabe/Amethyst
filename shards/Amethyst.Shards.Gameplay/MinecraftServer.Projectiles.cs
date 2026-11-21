@@ -172,7 +172,7 @@ public sealed partial class MinecraftServer
         ProjectileFrame frame = _projectiles.Tick(_blocks,
             players.Where(p => p.Ready && p.GameMode != PlayerGameMode.Spectator)
                 .Select(p => new ProjectilePlayer(p.PlayerUuid, p.Pose)).ToArray(),
-            _livingEntities?.Snapshot() ?? []);
+            _entities?.Snapshot() ?? []);
         ProjectileEntity[] present = frame.Moving;
         var online = players.Select(p => p.ConnectionId).ToHashSet();
         foreach (Guid id in _projectileViews.Keys.ToArray())
@@ -222,14 +222,23 @@ public sealed partial class MinecraftServer
                     await DamagePlayerAsync(victim, p.Damage, attacker, ct,
                         projectile: true);
             }
-            if (impact.MobHit != 0 && _livingEntities is not null &&
-                p.Damage > 0 &&
-                _livingEntities.TryDamage(impact.MobHit, p.Damage,
-                    out var updated, out bool killed) && killed &&
-                _groundItems is not null && _items is not null &&
-                _items.TryGetByIdentifier("minecraft:mutton", out var mutton))
-                _groundItems.TrySpawn(mutton.ProtocolId, 1,
-                    updated.X, updated.Y, updated.Z, out _);
+            // Both livestock and generic YAML mobs are owned by Entities.
+            // Commit the one-shot death through the same loot pipeline as
+            // melee, never a hard-coded sheep reward or duplicate tick drop.
+            if (impact.MobHit != 0 && _entities is not null && p.Damage > 0 &&
+                _entities.TryDamageAndTakeDeath(impact.MobHit, p.Damage,
+                    out ShardEntityInstance injured, out bool killedMob))
+            {
+                if (killedMob)
+                    await ProcessEntityDeathAsync(injured, attacker,
+                        ItemStack.Empty, ct);
+                else
+                    foreach (ConnectedPlayer viewer in players.Where(v =>
+                        _entityViews.TryGetValue(v.ConnectionId, out var seen) &&
+                        seen.ContainsKey(impact.MobHit)))
+                        await CombatProtocol.SendHurtAsync(
+                            viewer.Connection, impact.MobHit, ct);
+            }
             if (p.CanRecover && _groundItems is not null)
                 _groundItems.TrySpawn(p.Recoverable, p.X, p.Y,
                     p.Z, out _);

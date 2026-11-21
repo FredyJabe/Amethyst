@@ -53,7 +53,7 @@ public sealed class ProjectileWorld : IShardProjectileWorld
 
     public ProjectileFrame Tick(IShardBlockWorld world,
         IReadOnlyList<ProjectilePlayer> players,
-        IReadOnlyList<LivingEntity> mobs)
+        IReadOnlyList<ShardEntityInstance> mobs)
     {
         var moving = new List<ProjectileEntity>();
         var impacts = new List<ProjectileImpact>();
@@ -103,7 +103,7 @@ public sealed class ProjectileWorld : IShardProjectileWorld
                         }
                     }
                     if (playerHit != Guid.Empty) break;
-                    foreach (LivingEntity mob in mobs)
+                    foreach (ShardEntityInstance mob in mobs)
                     {
                         double dx = mob.X - x, dz = mob.Z - z;
                         if (dx * dx + dz * dz < 0.6 * 0.6 &&

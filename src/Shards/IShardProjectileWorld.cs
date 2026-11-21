@@ -13,5 +13,5 @@ public interface IShardProjectileWorld
         out ProjectileEntity projectile);
     ProjectileFrame Tick(IShardBlockWorld world,
         IReadOnlyList<ProjectilePlayer> players,
-        IReadOnlyList<LivingEntity> mobs);
+        IReadOnlyList<ShardEntityInstance> mobs);
 }

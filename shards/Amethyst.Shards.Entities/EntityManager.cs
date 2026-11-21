@@ -101,7 +101,7 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
             out projectile);
     ProjectileFrame IShardProjectileWorld.Tick(IShardBlockWorld world,
         IReadOnlyList<ProjectilePlayer> players,
-        IReadOnlyList<LivingEntity> mobs) =>
+        IReadOnlyList<ShardEntityInstance> mobs) =>
         _projectiles.Tick(world, players, mobs);
 
     FishingBobber[] IShardFishingWorld.Snapshot() => _fishing.Snapshot();

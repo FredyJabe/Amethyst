@@ -59,6 +59,24 @@ internal static class ProjectileFeatureTests
                 collision.Projectile.EntityId == launched.EntityId &&
                 physics.Snapshot().Length == 0,
                 "Swept server physics collides with the player and removes projectile");
+            var mob = new Amethyst.Shards.ShardEntityInstance(
+                33333, Guid.NewGuid(), "minecraft:zombie", 136,
+                0.5, 115.2, 3.5, 0, 0, 20);
+            Check(physics.TryLaunch(Guid.NewGuid(), ProjectileKind.Arrow, source,
+                1.5, 6, new ItemStack(arrow.ProtocolId, 1),
+                out var mobArrow), "Launch a second arrow at a generic living mob");
+            ProjectileImpact? mobImpact = null;
+            for (int i = 0; i < 20; i++)
+            {
+                ProjectileFrame frame = physics.Tick(world, [], [mob]);
+                if (frame.Impacts.Length == 0) continue;
+                mobImpact = frame.Impacts[0];
+                break;
+            }
+            Check(mobImpact is { } collidedMob &&
+                collidedMob.MobHit == mob.EntityId &&
+                collidedMob.Projectile.EntityId == mobArrow.EntityId,
+                "Projectile collision uses the generic Entities Shard population");
             await ProjectileProtocol.SendSpawnAsync(channel, launched,
                 CancellationToken.None);
             targetStream.Position = 0;
