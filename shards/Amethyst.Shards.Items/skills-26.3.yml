@@ -15,7 +15,6 @@ chicken:
     - 'dropItem{item=minecraft:feather;amount=0-2} ~onDeath'
 sheep:
   Skills:
-    - 'dropItem{item=minecraft:mutton;amount=1-2} ~onDeath'
     - 'dropItem{item=minecraft:white_wool;amount=1-3} ~onShear ?flag{name=color_white}'
     - 'dropItem{item=minecraft:orange_wool;amount=1-3} ~onShear ?flag{name=color_orange}'
     - 'dropItem{item=minecraft:magenta_wool;amount=1-3} ~onShear ?flag{name=color_magenta}'
