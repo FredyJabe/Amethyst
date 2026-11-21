@@ -248,24 +248,43 @@ try
               "entries":[{"type":"minecraft:item", "name":"minecraft:book",
                 "modifier":{"type":"minecraft:set_enchantments",
                             "enchantments":{"minecraft:unbreaking":3}}}]
+            },
+            {
+              "rolls":1,
+              "entries":[{"type":"minecraft:item", "name":"minecraft:book",
+                "modifier":{"type":"minecraft:enchant_with_levels",
+                            "levels":30, "options":["minecraft:sharpness"]}}]
+            },
+            {
+              "rolls":1,
+              "entries":[{"type":"minecraft:item", "name":"minecraft:diamond_hoe",
+                "modifier":{"type":"minecraft:enchant_with_levels",
+                            "levels":30, "options":"minecraft:unbreaking"}}]
             }
           ]
         }
         """);
     var generatedEnchanted = new VanillaLootTables(generatedLoot, items,
-        enchantments: catalog);
+        tagsDirectory: Path.Combine(vanillaRoot, "data", "minecraft", "tags"),
+        enchantments: catalog,
+        enchantmentDataDirectory: Path.Combine(
+            vanillaRoot, "data", "minecraft", "enchantment"));
     var enchantedLoot = generatedEnchanted.Roll("minecraft:test",
         new ShardVanillaLootContext { Random = new ConstantRandom(0.0) });
     if (!items.TryGetByIdentifier("minecraft:enchanted_book", out var book))
         throw new InvalidDataException("Enchanted book registry entry missing.");
-    Check(enchantedLoot.Count == 2 &&
-        enchantedLoot.All(d => d.ItemId == book.ProtocolId &&
-            ItemStackComponents.IsValid(d.ComponentData)) &&
+    Check(enchantedLoot.Count == 4 &&
+        enchantedLoot.All(d => ItemStackComponents.IsValid(d.ComponentData)) &&
+        enchantedLoot.Take(3).All(d => d.ItemId == book.ProtocolId) &&
         enchantedLoot[0].ComponentData!.Contains("minecraft:sharpness",
             StringComparison.Ordinal) &&
         enchantedLoot[1].ComponentData!.Contains("minecraft:unbreaking",
+            StringComparison.Ordinal) &&
+        enchantedLoot[2].ComponentData!.Contains("minecraft:sharpness",
+            StringComparison.Ordinal) &&
+        enchantedLoot[3].ComponentData!.Contains("minecraft:unbreaking",
             StringComparison.Ordinal),
-        "Vanilla enchant_randomly and set_enchantments preserve stored enchantment patches");
+        "Vanilla random, explicit and pinned-level enchantments yield valid per-stack components");
 
     File.WriteAllText(Path.Combine(temporary, "override.yml"), """
         sharpness:
