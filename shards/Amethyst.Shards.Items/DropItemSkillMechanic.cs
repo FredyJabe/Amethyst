@@ -34,14 +34,18 @@ public sealed class DropItemSkillMechanic
         if (evt.Rng.NextDouble() >= chance) return ValueTask.CompletedTask;
         int amount = evt.Rng.Next(min, max + 1);
         if (amount == 0) return ValueTask.CompletedTask;
-        IShardItemDropSink sink = _getDropSink() ??
+        IShardItemDropSink? sink = evt.PublisherCommitsDrops ? null :
+            _getDropSink() ??
             throw new InvalidOperationException(
                 "dropItem requires an enabled Shard providing IShardItemDropSink.");
         while (amount > 0)
         {
             ct.ThrowIfCancellationRequested();
             int count = Math.Min(amount, stackLimit);
-            if (!sink.TryDropItem(itemId, count, evt.X, evt.Y + 0.2, evt.Z))
+            if (evt.PublisherCommitsDrops)
+                evt.Runtime.AddDrop(new ShardItemDrop(itemId, count));
+            else if (!sink!.TryDropItem(itemId, count,
+                evt.X, evt.Y + 0.2, evt.Z))
                 _log?.Invoke($"dropItem failed to spawn item {itemId} x{count} for {evt.OwnerId}");
             amount -= count;
         }
