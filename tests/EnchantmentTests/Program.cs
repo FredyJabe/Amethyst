@@ -225,6 +225,27 @@ Check(discDrops.Any(d => d.ItemId == disc.ProtocolId ||
     items.TryGetById(d.ItemId, out var candidate) &&
     candidate.Identifier.StartsWith("minecraft:music_disc_", StringComparison.Ordinal)),
     "Killer-entity tags activate creeper music-disc loot");
+Check(items.TryGetByIdentifier("minecraft:music_disc_tears", out var ghastDisc),
+    "Java 26.3 includes the reflected-fireball music disc");
+var ghastProjectileLoot = nativeTables.Roll("minecraft:entities/ghast",
+    new ShardVanillaLootContext
+    {
+        KilledByPlayer = true,
+        DamageTypeIdentifier = "minecraft:fireball",
+        DirectDamagerKind = "minecraft:fireball",
+        Random = new ConstantRandom(0.0)
+    });
+var ghastOtherDamageLoot = nativeTables.Roll("minecraft:entities/ghast",
+    new ShardVanillaLootContext
+    {
+        KilledByPlayer = true,
+        DamageTypeIdentifier = "minecraft:in_fire",
+        DirectDamagerKind = "minecraft:fireball",
+        Random = new ConstantRandom(0.0)
+    });
+Check(ghastProjectileLoot.Any(d => d.ItemId == ghastDisc.ProtocolId) &&
+    ghastOtherDamageLoot.All(d => d.ItemId != ghastDisc.ProtocolId),
+    "Ghast special disc requires the authoritative projectile damage tag");
 
 string temporary = Path.Combine(Path.GetTempPath(),
     "amethyst-enchant-tests-" + Guid.NewGuid().ToString("N"));
