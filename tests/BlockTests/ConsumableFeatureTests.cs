@@ -246,6 +246,34 @@ internal static class ConsumableFeatureTests
                 player.Inventory.Snapshot().Slots.Any(v =>
                     v.ItemId == emptyBottle.ProtocolId && v.Count > 0),
                 "Potion consumption applies configured effects and returns bottle");
+
+            if (!items.TryGetByIdentifier("minecraft:honey_bottle", out var honey) ||
+                !items.TryGetByIdentifier("minecraft:milk_bucket", out var milk) ||
+                !items.TryGetByIdentifier("minecraft:bucket", out var bucket))
+                throw new InvalidDataException("Missing milk/honey consumable material.");
+            Check(player.ActiveEffects.Apply("minecraft:poison", 200, 0) &&
+                player.Inventory.TryCreativeSet(36, honey.ProtocolId, 1, true) &&
+                await server.HandleConsumableUseAsync(player,
+                    new UseItemAction(0, 45, 0, 0), CancellationToken.None),
+                "Honey bottle is usable while poisoned and already well fed");
+            await server.TickConsumablesAsync(CancellationToken.None,
+                nowMilliseconds: Environment.TickCount64 + 4000);
+            Check(!player.ActiveEffects.Has("minecraft:poison") &&
+                player.ActiveEffects.Has("minecraft:speed") &&
+                player.Inventory.Snapshot().Slots.Any(v =>
+                    v.ItemId == emptyBottle.ProtocolId && v.Count > 0),
+                "Honey clears only poison and returns a bottle without losing other effects");
+
+            Check(player.Inventory.TryCreativeSet(36, milk.ProtocolId, 1, true) &&
+                await server.HandleConsumableUseAsync(player,
+                    new UseItemAction(0, 46, 0, 0), CancellationToken.None),
+                "Milk bucket starts consumption regardless of fullness");
+            await server.TickConsumablesAsync(CancellationToken.None,
+                nowMilliseconds: Environment.TickCount64 + 4000);
+            Check(player.ActiveEffects.Snapshot().Length == 0 &&
+                player.Inventory.Snapshot().Slots.Any(v =>
+                    v.ItemId == bucket.ProtocolId && v.Count > 0),
+                "Milk clears all status effects and returns an empty bucket");
         }
         finally
         {
