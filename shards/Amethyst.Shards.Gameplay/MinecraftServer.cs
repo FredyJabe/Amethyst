@@ -1124,8 +1124,13 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         string? fallback = _entityTypes is not null &&
             _entityTypes.TryGetById(entity.ProtocolId, out var vanilla)
             ? vanilla.Identifier : null;
+        var eventRuntime = new ShardSkillRuntime();
+        if (trigger == "onShear" && _livingEntities?.TryGet(entity.EntityId,
+                out LivingEntity sheep) == true)
+            eventRuntime.SetFlag("color_" + WoolColors[sheep.Color]);
         await _skills.DispatchAsync(new ShardSkillEvent(entity.DefinitionId,
-            trigger, entity.X, entity.Y, entity.Z, entity.EntityId, fallback), ct);
+            trigger, entity.X, entity.Y, entity.Z, entity.EntityId, fallback)
+            { Runtime = eventRuntime }, ct);
     }
 
     internal async Task HandleBlockUseAsync(ConnectedPlayer player,

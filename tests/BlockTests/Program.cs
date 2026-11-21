@@ -1514,6 +1514,15 @@ try
     MinecraftServer? lootGame = null;
     var dropItem = new DropItemSkillMechanic(itemsCatalog, () => lootGame);
     deathSkills.RegisterMechanic("items", "dropItem", dropItem.Validate, dropItem.ExecuteAsync);
+    deathSkills.RegisterCondition("items", "flag",
+        condition =>
+        {
+            if (condition.Arguments.Count != 1 ||
+                !condition.Arguments.ContainsKey("name"))
+                throw new InvalidDataException("flag requires name.");
+        },
+        (condition, evt) =>
+            evt.Runtime.HasFlag(condition.Arguments["name"]));
     deathSkills.RegisterTrigger("entities", "onMilk");
     deathSkills.RegisterTrigger("entities", "onShear");
     foreach (string trigger in new[]

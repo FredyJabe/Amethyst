@@ -35,7 +35,23 @@ public sealed partial class MinecraftServer
         if (!_livingEntities.TryShear(action.EntityId,
             out LivingEntity changed)) return false;
 
-        if (_groundItems is not null &&
+        // Wool rewards belong to Items skills. Entity state and color come
+        // exclusively from the Entities Shard; Gameplay commits only the
+        // physical spawn intents after all skills have executed.
+        bool configured = false;
+        if (_skills is not null)
+        {
+            var effects = new ShardSkillRuntime();
+            effects.SetFlag("color_" + WoolColors[changed.Color]);
+            configured = await _skills.DispatchAsync(new ShardSkillEvent(
+                "sheep", "onShear", changed.X, changed.Y, changed.Z,
+                EntityId: changed.EntityId, FallbackOwnerId: changed.Kind,
+                ActorUuid: player.PlayerUuid, ItemId: held.ItemId,
+                Count: held.Count, TargetKind: "sheep")
+                { Runtime = effects, PublisherCommitsDrops = true }, ct);
+            SpawnLoot(effects.Drops, sheep.X, sheep.Y + 0.3, sheep.Z);
+        }
+        if (!configured && _groundItems is not null &&
             _items.TryGetByIdentifier(
                 "minecraft:" + WoolColors[changed.Color] + "_wool",
                 out ShardItemDefinition wool))

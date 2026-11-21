@@ -106,6 +106,15 @@ try
         var engine = new SkillEngine();
         var mechanic = new DropItemSkillMechanic(items, () => drops);
         engine.RegisterMechanic("items", "dropItem", mechanic.Validate, mechanic.ExecuteAsync);
+        engine.RegisterCondition("items", "flag",
+            condition =>
+            {
+                if (condition.Arguments.Count != 1 ||
+                    !condition.Arguments.ContainsKey("name"))
+                    throw new InvalidDataException("flag condition needs name.");
+            },
+            (condition, evt) =>
+                evt.Runtime.HasFlag(condition.Arguments["name"]));
         return engine;
     }
 
