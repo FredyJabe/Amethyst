@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Amethyst.Shards;
 
 namespace Amethyst.BuiltinShards;
 
