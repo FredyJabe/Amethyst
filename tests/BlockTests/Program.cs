@@ -1614,7 +1614,7 @@ try
             farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 1, true) &&
             lootWorld.TrySpawn("cow", 11, 80, 12, out milkTarget),
             "Prepare cow and bucket for interactive milking");
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Held() == new ItemStack(fullBucket.ProtocolId, 1),
             "Right-clicking a cow turns an empty bucket into a milk bucket");
@@ -1627,7 +1627,7 @@ try
             "Successful milking dispatches custom cross-Shard ~onMilk skills");
         Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 2, true),
             "Set up a stacked-bucket milking transaction");
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         var (milkSlots, _, _) = farmer.Inventory.Snapshot();
         Check(milkSlots[36] == new ItemStack(bucket.ProtocolId, 1) &&
@@ -1635,7 +1635,7 @@ try
             "Milking stacked buckets preserves the remaining empties and inserts filled milk");
         var beforeFar = farmer.Inventory.Snapshot().Slots;
         farmer.SetPose(new PlayerPose(40, 80, 40, 0, 0, true));
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(beforeFar),
             "Server enforces interaction reach to prevent remote item duplication");
@@ -1656,7 +1656,7 @@ try
         var lockedInventory = farmer.Inventory.Snapshot().Slots;
         int milkRewardsBefore = lootGame.GroundItemsForTests.Count(
             d => d.ItemId == milkReward.ProtocolId);
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
         Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(lockedInventory) &&
             lootGame.GroundItemsForTests.Count(d =>
@@ -1670,14 +1670,14 @@ try
             lootWorld.TrySpawn("sheep", 11, 80, 12, out shearTarget),
             "Prepare sheep and shears for triggered shearing");
         int beforeWool = lootGame.GroundItemsForTests.Length;
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(shearTarget.EntityId, 0, false), CancellationToken.None);
         var shearedWool = lootGame.GroundItemsForTests;
         Check(lootWorld.IsSheared(shearTarget.EntityId) &&
             shearedWool.Length > beforeWool &&
             shearedWool.Any(d => d.ItemId == wool.ProtocolId && d.Count is >= 1 and <= 3),
             "~onShear dispatches YAML dropItem mechanic to create real wool drops");
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(shearTarget.EntityId, 0, false), CancellationToken.None);
         Check(lootGame.GroundItemsForTests.Length == shearedWool.Length,
             "Repeated shearing cannot duplicate wool rewards");
@@ -1689,7 +1689,7 @@ try
                 out LivingEntity redSheep, color: 14) &&
             itemsCatalog.TryGetByIdentifier("minecraft:red_wool", out redWool),
             "Spawn a colored native sheep through the Entities Shard");
-        await lootGame.HandleEntityInteractionAsync(farmer,
+        await lootGame.HandleValidatedEntityInteractionAsync(farmer,
             new EntityInteraction(redSheep.EntityId, 0, false),
             CancellationToken.None);
         GroundItem[] coloredDrops = lootGame.GroundItemsForTests

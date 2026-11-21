@@ -1089,62 +1089,58 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     /// is checked against the authoritative Entities manager, reach distance,
     /// and the held stack. Entities owns species and sheared state; Gameplay
     /// owns inventory transactions and physical drops; Core dispatches events.</summary>
+    /// <summary>Milk a known cow, mooshroom or goat after reach and item
+    /// validation. The outer entity publisher has already evaluated
+    /// ~onRightClick; ~onMilk is dispatched once before inventory changes.
+    /// Skills cannot mint default milk from a cancelled vanilla action.</summary>
     internal async Task HandleEntityInteractionAsync(ConnectedPlayer player,
         EntityInteraction hit, CancellationToken ct)
     {
-        if (!player.Ready || _entities is null || _interactions is null ||
-            _items is null || _skills is null || hit.Hand != 0)
-            return; // Offhand items are not represented by PlayerInventory yet.
+        if (!player.Ready || player.GameMode == PlayerGameMode.Spectator ||
+            _entities is null || _interactions is null || _items is null ||
+            hit.Hand is < 0 or > 1)
+            return;
+        int slot = hit.Hand == 0 ? player.Inventory.SelectedSlot : 45;
+        ItemStack held = player.Inventory.Snapshot().Slots[slot];
+        if (held.Count < 1 ||
+            !_items.TryGetByIdentifier("minecraft:bucket", out var bucket) ||
+            !_items.TryGetByIdentifier("minecraft:milk_bucket", out var milk) ||
+            held.ItemId != bucket.ProtocolId)
+            return;
         ShardEntityInstance entity = default;
-        bool found = false;
         foreach (ShardEntityInstance next in _entities.Snapshot())
-            if (next.EntityId == hit.EntityId)
-            {
-                entity = next;
-                found = true;
-                break;
-            }
-        if (!found) return;
+            if (next.EntityId == hit.EntityId) { entity = next; break; }
+        if (entity.EntityId <= 0) return;
         PlayerPose pose = player.Pose;
         double dx = entity.X - pose.X, dz = entity.Z - pose.Z;
         double dy = entity.Y + 0.8 - (pose.Y + 1.62);
-        if (dx * dx + dy * dy + dz * dz > 25) return;
-        ItemStack held = player.Inventory.Held();
-        if (held.Count < 1) return;
-        // onRightClick was already dispatched once by the validated
-        // publisher before a milk/shear mutation can be committed.
-        string? trigger = null;
-        if (_items.TryGetByIdentifier("minecraft:bucket", out var bucket) &&
-            _items.TryGetByIdentifier("minecraft:milk_bucket", out var milk) &&
-            held.ItemId == bucket.ProtocolId &&
-            _interactions.TryMilk(hit.EntityId, out var milked) &&
-            player.Inventory.TryConvertHeld(bucket.ProtocolId, milk.ProtocolId))
-        {
-            entity = milked;
-            trigger = "onMilk";
-        }
-        else if (_groundItems is not null &&
-            _items.TryGetByIdentifier("minecraft:shears", out var shears) &&
-            held.ItemId == shears.ProtocolId &&
-            _interactions.TryShear(hit.EntityId, out var sheared))
-        {
-            entity = sheared;
-            // Reward items are entirely Items skills (dropItem ~onShear).
-            // Entities only changes sheep state and exposes the trigger.
-            trigger = "onShear";
-        }
-        if (trigger is null) return;
-        await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+        if (dx * dx + dy * dy + dz * dz > 25 ||
+            !_interactions.TryMilk(hit.EntityId, out var milked))
+            return;
         string? fallback = _entityTypes is not null &&
-            _entityTypes.TryGetById(entity.ProtocolId, out var vanilla)
-            ? vanilla.Identifier : null;
-        var eventRuntime = new ShardSkillRuntime();
-        if (trigger == "onShear" && _livingEntities?.TryGet(entity.EntityId,
-                out LivingEntity sheep) == true)
-            eventRuntime.SetFlag("color_" + WoolColors[sheep.Color]);
-        await _skills.DispatchAsync(new ShardSkillEvent(entity.DefinitionId,
-            trigger, entity.X, entity.Y, entity.Z, entity.EntityId, fallback)
-            { Runtime = eventRuntime }, ct);
+            _entityTypes.TryGetById(milked.ProtocolId, out var vanilla)
+                ? vanilla.Identifier : null;
+        var effects = new ShardSkillRuntime();
+        if (_skills is not null)
+            await _skills.DispatchAsync(new ShardSkillEvent(
+                milked.DefinitionId, "onMilk", milked.X, milked.Y, milked.Z,
+                milked.EntityId, fallback, ActorUuid: player.PlayerUuid,
+                ItemId: held.ItemId, Count: held.Count,
+                TargetKind: EnchantmentMobCategory(fallback))
+            {
+                Runtime = effects,
+                PublisherCommitsDrops = true
+            }, ct);
+        if (!effects.IsCancelled &&
+            !player.Inventory.TryConvertSlot(
+                slot, bucket.ProtocolId, milk.ProtocolId))
+            return;
+        // Explicit dropItem Skills still execute when the underlying milk
+        // conversion is cancelled, matching Core's cancelEvent contract.
+        SpawnLoot(effects.Drops, milked.X, milked.Y + 0.3, milked.Z);
+        if (!effects.IsCancelled)
+            await InventoryProtocol.SendContentAsync(
+                player.Connection, player.Inventory, ct);
     }
 
     internal async Task HandleBlockUseAsync(ConnectedPlayer player,

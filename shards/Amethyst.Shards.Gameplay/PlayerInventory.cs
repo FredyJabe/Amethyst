@@ -179,12 +179,19 @@ public sealed partial class PlayerInventory : IShardPickupInventory
     /// When buckets are stacked, insert the filled result elsewhere in the
     /// inventory; refuse the interaction if the result has nowhere to go.
     /// This prevents item duplication or loss when the inventory is full.</summary>
-    public bool TryConvertHeld(int expectedItem, int outputItem)
+    public bool TryConvertHeld(int expectedItem, int outputItem) =>
+        TryConvertSlot(SelectedSlot, expectedItem, outputItem);
+
+    /// <summary>Atomic mainhand or offhand container conversion. A stack of
+    /// empty buckets keeps its remainder in the original hand while its
+    /// filled output moves to a free main inventory slot.</summary>
+    public bool TryConvertSlot(int sourceSlot, int expectedItem, int outputItem)
     {
-        if (expectedItem <= 0 || MaxStack(outputItem) < 1) return false;
+        if (sourceSlot is < 9 or > 45 ||
+            expectedItem <= 0 || MaxStack(outputItem) < 1) return false;
         lock (_sync)
         {
-            int selected = 36 + _selected;
+            int selected = sourceSlot;
             ItemStack held = _slots[selected];
             if (held.ItemId != expectedItem || held.Count < 1) return false;
             var before = (ItemStack[])_slots.Clone();
