@@ -21,9 +21,23 @@ public sealed partial class MinecraftServer
                 success = false;
                 continue;
             }
+            int wear = 0;
+            if (ItemStackComponents.Decode(drop.ComponentData)
+                .TryGetValue("minecraft:damage", out string? encodedDamage))
+            {
+                try { wear = System.Text.Json.JsonSerializer.Deserialize<int>(
+                    encodedDamage); }
+                catch (System.Text.Json.JsonException)
+                {
+                    Console.WriteLine("[loot] Invalid item durability patch.");
+                    success = false;
+                    continue;
+                }
+            }
             var stack = new ItemStack(drop.ItemId, drop.Count)
             {
-                ComponentData = drop.ComponentData
+                ComponentData = drop.ComponentData,
+                Damage = wear
             };
             if (!_groundItems.TrySpawn(stack, x, y, z, out _))
             {
@@ -38,7 +52,23 @@ public sealed partial class MinecraftServer
         string tableId, ShardVanillaLootContext context)
     {
         if (_vanillaLoot?.HasTable(tableId) != true) return null;
-        try { return _vanillaLoot.Roll(tableId, context); }
+        try
+        {
+            var rolled = _vanillaLoot.Roll(tableId, context);
+            // A loot table with yet-unimplemented complex components is
+            // not a successful result; fail over before spawning ANY item,
+            // avoiding partially generated or client-invalid loot.
+            foreach (var drop in rolled)
+            {
+                if (!ItemStackComponents.IsValid(drop.ComponentData) ||
+                    _items is not null &&
+                    (!_items.IsValidStack(drop.ItemId, drop.Count) ||
+                     !_items.TryGetById(drop.ItemId, out _)))
+                    throw new NotSupportedException(
+                        $"The loot result for {tableId} uses an unsupported component or stack size.");
+            }
+            return rolled;
+        }
         catch (NotSupportedException ex)
         {
             // Use a clearly logged fallback until every 26.3 loot predicate,

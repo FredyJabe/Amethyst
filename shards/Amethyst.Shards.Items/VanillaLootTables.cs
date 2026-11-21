@@ -58,7 +58,8 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
                 drops.Add(new ShardItemDrop(drop.ItemId, amount)
                 {
                     ComponentData = drop.Components.Count == 0 ? null :
-                        JsonSerializer.Serialize(drop.Components)
+                        JsonSerializer.Serialize(new SortedDictionary<string, string>(
+                            drop.Components, StringComparer.Ordinal))
                 });
                 left -= amount;
                 if (drops.Count > 256)
