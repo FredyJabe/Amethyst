@@ -318,7 +318,32 @@ try
           ]
         }
         """);
-    var filteredLoot = generatedEnchanted.Roll("minecraft:filtered",
+    File.WriteAllText(Path.Combine(generatedLoot, "instrument.json"), """
+        {
+          "type":"minecraft:chest",
+          "pools":[{"rolls":1,"entries":[
+            {"type":"minecraft:item", "name":"minecraft:goat_horn",
+             "modifier":{"type":"minecraft:set_instrument",
+                         "options":"#minecraft:regular_goat_horns"}}
+          ]}]
+        }
+        """);
+    var extendedTables = new VanillaLootTables(generatedLoot, items,
+        tagsDirectory: Path.Combine(vanillaRoot, "data", "minecraft", "tags"),
+        enchantments: catalog,
+        enchantmentDataDirectory: Path.Combine(
+            vanillaRoot, "data", "minecraft", "enchantment"));
+    var hornLoot = extendedTables.Roll("minecraft:instrument",
+        new ShardVanillaLootContext { Random = new Random(14) });
+    Check(items.TryGetByIdentifier("minecraft:goat_horn", out var horn) &&
+        hornLoot.Count == 1 && hornLoot[0].ItemId == horn.ProtocolId &&
+        ItemStackComponents.IsValid(hornLoot[0].ComponentData) &&
+        ItemStackComponents.Decode(hornLoot[0].ComponentData)
+            .TryGetValue("minecraft:instrument", out var instrument) &&
+        VanillaRegistries.IndexOf("minecraft:instrument",
+            System.Text.Json.JsonSerializer.Deserialize<string>(instrument)!) >= 0,
+        "Native goat-horn loot assigns a validated 26.3 instrument component");
+    var filteredLoot = extendedTables.Roll("minecraft:filtered",
         new ShardVanillaLootContext { Random = new Random(19) });
     Check(items.TryGetByIdentifier("minecraft:compass", out var compass) &&
         filteredLoot.Count == 1 &&
