@@ -71,6 +71,64 @@ public sealed partial class VanillaLootTables
         return true;
     }
 
+    private bool DamageSourceProperties(JsonElement condition,
+        ShardVanillaLootContext context)
+    {
+        JsonElement predicate = condition.GetProperty("predicate");
+        if (predicate.ValueKind != JsonValueKind.Object)
+            throw new NotSupportedException("Invalid damage source predicate.");
+        foreach (JsonProperty entry in predicate.EnumerateObject())
+        {
+            switch (entry.Name)
+            {
+                case "tags":
+                    if (context.DamageTypeIdentifier is null)
+                        throw new NotSupportedException(
+                            "Native loot damage source requires an authoritative damage type.");
+                    foreach (JsonElement tag in entry.Value.EnumerateArray())
+                    {
+                        string id = tag.GetProperty("id").GetString()!;
+                        bool expected = tag.TryGetProperty("expected", out var flag)
+                            ? flag.GetBoolean() : true;
+                        bool actual = id.StartsWith("#", StringComparison.Ordinal)
+                            ? ReadTag("damage_type", id).Contains(
+                                context.DamageTypeIdentifier, StringComparer.Ordinal)
+                            : id == context.DamageTypeIdentifier;
+                        if (actual != expected) return false;
+                    }
+                    break;
+                case "direct_entity":
+                case "source_entity":
+                {
+                    string? observed = entry.Name == "direct_entity"
+                        ? context.DirectDamagerKind : context.AttackerKind;
+                    if (observed is null)
+                        throw new NotSupportedException(
+                            $"Native loot damage source needs {entry.Name} identity.");
+                    JsonElement selector = entry.Value;
+                    if (selector.ValueKind != JsonValueKind.Object ||
+                        selector.EnumerateObject().Count() != 1 ||
+                        !selector.TryGetProperty("minecraft:entity_type",
+                            out var requested) ||
+                        requested.ValueKind != JsonValueKind.String)
+                        throw new NotSupportedException(
+                            $"Unsupported damage source entity selector {entry.Name}.");
+                    string id = requested.GetString()!;
+                    bool matches = id.StartsWith("#", StringComparison.Ordinal)
+                        ? ReadTag("entity_type", id).Contains(
+                            observed, StringComparer.Ordinal)
+                        : id == observed;
+                    if (!matches) return false;
+                    break;
+                }
+                default:
+                    throw new NotSupportedException(
+                        $"Unsupported damage source predicate {entry.Name}.");
+            }
+        }
+        return true;
+    }
+
     private static void SetLootName(JsonElement modifier, List<Drop> drops)
     {
         string target = modifier.TryGetProperty("target", out var destination)
