@@ -519,7 +519,9 @@ public sealed class ItemsShard : IShard
                 #   Display: "<aqua>Miner's Pickaxe</aqua>"
                 #   ItemModel: amethyst:miners_pickaxe
                 #   Stats:
-                #     - mining_speed 1.5
+                #     - mining_speed 1.5   # set
+                #     - mining_speed +0.5  # add
+                #     - mining_speed *2    # multiply
                 #   Components:
                 #     Rarity: rare
                 #     GlintOverride: true
