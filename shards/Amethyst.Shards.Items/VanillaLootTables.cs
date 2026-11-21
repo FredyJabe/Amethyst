@@ -506,6 +506,28 @@ public sealed partial class VanillaLootTables : IShardVanillaLootTables
             case "minecraft:set_name":
                 SetLootName(modifier, drops);
                 break;
+            case "minecraft:set_instrument":
+            {
+                var choices = new HashSet<string>(StringComparer.Ordinal);
+                foreach (string selector in ReadSelectors(modifier.GetProperty("options")))
+                {
+                    if (selector.StartsWith("#", StringComparison.Ordinal))
+                        foreach (string id in ReadTag("instrument", selector))
+                            choices.Add(id);
+                    else choices.Add(selector);
+                }
+                string[] candidates = choices.Order(StringComparer.Ordinal).ToArray();
+                if (candidates.Length == 0)
+                    throw new InvalidDataException("Empty set_instrument options.");
+                foreach (Drop drop in drops)
+                {
+                    string chosen = candidates[c.Random.Next(candidates.Length)];
+                    _ = VanillaRegistries.IndexOf("minecraft:instrument", chosen);
+                    drop.Components["minecraft:instrument"] =
+                        JsonSerializer.Serialize(chosen);
+                }
+                break;
+            }
             case "minecraft:set_count":
             {
                 int amount = (int)Math.Clamp(Math.Floor(
