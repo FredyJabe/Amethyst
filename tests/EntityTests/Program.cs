@@ -254,6 +254,17 @@ try
             d.X == 2 && d.Z == 3),
         "Core dispatches Items dropItem with real resolved item effects");
 
+    drops.Items.Clear();
+    var deferredDeath = new ShardSkillEvent("minecraft:cow", "onDeath",
+        2, 80, 3, Random: new Random(123))
+        { PublisherCommitsDrops = true };
+    Check(await starterSkills.DispatchAsync(deferredDeath) &&
+        deferredDeath.Runtime.Drops.Count > 0 &&
+        deferredDeath.Runtime.Drops.All(d => d.ItemId > 0 &&
+            d.Count is > 0 and <= 64) &&
+        drops.Items.Count == 0,
+        "Legacy dropItem stages loot for a publisher-owned event until the transaction commits");
+
     string skillsDir = Path.Combine(temp, "skills");
     Directory.CreateDirectory(skillsDir);
     string skillsFile = Path.Combine(skillsDir, "custom.yml");
