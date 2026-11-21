@@ -739,7 +739,7 @@ try
         componentDir);
     var componentWear = new EnchantmentDurability(componentItems, catalog,
         unbreakingEngine);
-    Check(componentWear.PreventsWear(new ItemStack(pickaxe.ProtocolId, 1), false,
+    Check(componentWear.PreventsWear(new ItemStack(wearPickaxe.ProtocolId, 1), false,
         new ConstantRandom(0.0)),
         "Definition-level Enchantments component also activates the skill");
     var inventory = new PlayerInventory(temporary, Guid.NewGuid(), items);
