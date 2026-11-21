@@ -497,6 +497,15 @@ public sealed partial class VanillaLootTables : IShardVanillaLootTables
         string type = Type(modifier);
         switch (type)
         {
+            case "minecraft:discard":
+                drops.Clear();
+                break;
+            case "minecraft:filtered":
+                ApplyFiltered(modifier, c, drops);
+                break;
+            case "minecraft:set_name":
+                SetLootName(modifier, drops);
+                break;
             case "minecraft:set_count":
             {
                 int amount = (int)Math.Clamp(Math.Floor(
