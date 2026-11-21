@@ -7,7 +7,8 @@ using YamlDotNet.RepresentationModel;
 namespace Amethyst.BuiltinShards;
 
 /// <summary>Common strict Stats YAML format for items and enchantments.
-/// Short list entries ("damage 50") set the event-local value exactly.
+/// List entries accept absolute ("damage 50"), add ("damage +10"),
+/// subtract ("damage -5"), and multiply ("damage *1.5") operations.
 /// Advanced stat mappings retain explicit add/multiply/set modifiers and triggers.
 /// The YAML stat keys are server-side names, not item component node names.</summary>
 public static class StatModifiers
@@ -24,11 +25,14 @@ public static class StatModifiers
         var result = new List<ShardStatModifier>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Preferred shorthand:
+        // Preferred shorthand; repeat names to compose operations in list order:
         // Stats:
-        //   - damage 50
+        //   - damage 50    # set
+        //   - damage +10   # add
+        //   - damage -5    # subtract
+        //   - damage *1.5  # multiply
         //   - attack_speed 2
-        // Numbers are absolute values, not additive bonuses.
+        //   - knockback =-0.5  # explicit negative set
         if (node is YamlSequenceNode assignments)
         {
             if (assignments.Children.Count > 64)
@@ -38,12 +42,22 @@ public static class StatModifiers
             {
                 string[] parts = Scalar(assignment, owner).Split(
                     (char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length != 2 || !StatName.IsMatch(parts[0]) ||
-                    !names.Add(parts[0]))
+                if (parts.Length != 2 || !StatName.IsMatch(parts[0]))
                     throw new InvalidDataException(
-                        $"Invalid or duplicate Stats assignment in '{owner}': expected '- stat_name number'.");
+                        $"Invalid Stats assignment in '{owner}': expected '- stat_name number'.");
+                string token = parts[1];
+                // A bare number sets the value. An explicit operator modifies
+                // the preceding event-local value; preserve ordered repeats.
+                string operation = token[0] switch
+                {
+                    '+' or '-' => "add",
+                    '*' => "multiply",
+                    _ => "set"
+                };
+                string operand = token[0] is '*' or '=' ? token[1..] : token;
+                double amount = Number(operand, owner);
                 result.Add(new ShardStatModifier(parts[0].ToLowerInvariant(),
-                    Number(parts[1], owner), 0, "set", null, []));
+                    amount, 0, operation, null, []));
             }
             return Array.AsReadOnly(result.ToArray());
         }
