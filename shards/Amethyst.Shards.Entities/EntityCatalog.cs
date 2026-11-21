@@ -160,12 +160,19 @@ public sealed class EntityCatalog : IShardEntityRegistry
         double? health = fields.Health ?? entity.MaxHealth;
         if (health is double value && (!double.IsFinite(value) || value <= 0 || value > 2048))
             throw new InvalidDataException($"Invalid Health for entity '{root}' in {file}.");
+        int xpMin = fields.ExperienceMin ?? entity.ExperienceMin;
+        int xpMax = fields.ExperienceMax ?? entity.ExperienceMax;
+        if (xpMin < 0 || xpMax < xpMin || xpMax > short.MaxValue)
+            throw new InvalidDataException(
+                $"Invalid Experience range for entity '{root}' in {file}.");
         return entity with
         {
             Display = fields.Display ?? entity.Display,
             MaxHealth = health,
             Spawnable = fields.Spawnable ?? entity.Spawnable,
-            Invulnerable = fields.Invulnerable ?? entity.Invulnerable
+            Invulnerable = fields.Invulnerable ?? entity.Invulnerable,
+            ExperienceMin = xpMin,
+            ExperienceMax = xpMax
         };
     }
 
@@ -183,6 +190,8 @@ public sealed class EntityCatalog : IShardEntityRegistry
         public double? Width;
         public double? Height;
         public double? Health;
+        public int? ExperienceMin;
+        public int? ExperienceMax;
         public string? Display;
         public bool? Spawnable;
         public bool? Invulnerable;
@@ -232,6 +241,12 @@ public sealed class EntityCatalog : IShardEntityRegistry
                             throw new InvalidDataException($"Duplicate Health for '{key}'.");
                         fields.Health = Number(property.Value, file);
                         break;
+                    case "experience":
+                        if (fields.ExperienceMin.HasValue)
+                            throw new InvalidDataException($"Duplicate Experience for '{key}'.");
+                        (fields.ExperienceMin, fields.ExperienceMax) =
+                            Experience(property.Value, file);
+                        break;
                     case "spawnable":
                         if (fields.Spawnable.HasValue)
                             throw new InvalidDataException($"Duplicate Spawnable for '{key}'.");
@@ -257,6 +272,12 @@ public sealed class EntityCatalog : IShardEntityRegistry
                                     if (fields.Health.HasValue) throw new InvalidDataException($"Duplicate Health for '{key}'.");
                                     fields.Health = Number(option.Value, file);
                                     break;
+                                case "experience":
+                                    if (fields.ExperienceMin.HasValue)
+                                        throw new InvalidDataException($"Duplicate Experience for '{key}'.");
+                                    (fields.ExperienceMin, fields.ExperienceMax) =
+                                        Experience(option.Value, file);
+                                    break;
                                 case "spawnable":
                                     if (fields.Spawnable.HasValue) throw new InvalidDataException($"Duplicate Spawnable for '{key}'.");
                                     fields.Spawnable = Boolean(option.Value, file);
@@ -276,6 +297,21 @@ public sealed class EntityCatalog : IShardEntityRegistry
             }
             yield return (key, fields);
         }
+    }
+
+    /// <summary>XP may be an exact scalar or a two-element inclusive range.</summary>
+    private static (int Min, int Max) Experience(YamlNode node, string file)
+    {
+        if (node is YamlScalarNode)
+        {
+            int amount = Integer(node, file);
+            return (amount, amount);
+        }
+        if (node is YamlSequenceNode { Children.Count: 2 } sequence)
+            return (Integer(sequence.Children[0], file),
+                Integer(sequence.Children[1], file));
+        throw new InvalidDataException(
+            $"Experience must be a number or [min, max] in {file}.");
     }
 
     private static string Scalar(YamlNode node, string file) =>

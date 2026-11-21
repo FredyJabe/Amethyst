@@ -12,6 +12,10 @@ public readonly record struct ShardEntityDefinition(
     public double? MaxHealth { get; init; }
     public bool Spawnable { get; init; }
     public bool Invulnerable { get; init; }
+    /// <summary>XP awarded to an eligible player killer. Configure a fixed
+    /// number or inclusive [min, max] in the Entities Shard's YAML.</summary>
+    public int ExperienceMin { get; init; }
+    public int ExperienceMax { get; init; }
 }
 
 public readonly record struct ShardEntityInstance(

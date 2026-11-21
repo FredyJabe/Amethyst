@@ -35,6 +35,11 @@ try
         baseCatalog.TryGetByIdentifier("minecraft:slime", out var slime) &&
         slime.MaxHealth is null,
         "Bundled health is authoritative for fixed-HP mobs; variable-HP mobs stay pending");
+    Check(vanillaCow.ExperienceMin == 1 && vanillaCow.ExperienceMax == 3 &&
+        vanillaZombie.ExperienceMin == 5 && vanillaZombie.ExperienceMax == 5 &&
+        baseCatalog.TryGetByIdentifier("minecraft:blaze", out var blaze) &&
+        blaze.ExperienceMin == 10 && blaze.ExperienceMax == 10,
+        "Vanilla XP is a bounded scalar or inclusive range from entity YAML");
 
     string path = Path.Combine(temp, "override.yml");
     File.WriteAllText(path, """

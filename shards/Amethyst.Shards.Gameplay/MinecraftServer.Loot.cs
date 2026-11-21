@@ -48,6 +48,25 @@ public sealed partial class MinecraftServer
         return success;
     }
 
+    /// <summary>Player-attributed mob deaths create physical, persistent XP
+    /// orbs from the Entities Shard's YAML. Console/plugin kills do not
+    /// impersonate players or grant XP from nowhere.</summary>
+    private void SpawnEntityExperience(string definitionId,
+        ConnectedPlayer? killer, double x, double y, double z)
+    {
+        if (killer is null || _experienceOrbs is null || _entityTypes is null ||
+            !_entityTypes.TryGetByIdentifier(definitionId, out var definition))
+            return;
+        int minimum = definition.ExperienceMin;
+        int maximum = definition.ExperienceMax;
+        if (maximum <= 0 || minimum < 0 || maximum < minimum) return;
+        int amount = minimum == maximum ? minimum :
+            Random.Shared.Next(minimum, maximum + 1);
+        if (amount > 0 && !_experienceOrbs.TrySpawn(amount, x,
+                y + 0.35, z, out _))
+            Console.WriteLine($"[xp] Experience orb capacity rejected {amount} for {definitionId}.");
+    }
+
     /// <summary>Single source of truth for all Entities-Shard deaths.
     /// A pinned Mojang loot table takes precedence unless Items has an
     /// explicit YAML override. Skills always execute, but their drop intents
@@ -125,6 +144,8 @@ public sealed partial class MinecraftServer
             SpawnLoot(vanilla, dead.X, dead.Y + 0.25, dead.Z);
         else
             SpawnLoot(runtime.Drops, dead.X, dead.Y + 0.25, dead.Z);
+        SpawnEntityExperience(dead.DefinitionId, attacker,
+            dead.X, dead.Y, dead.Z);
     }
 
     private IReadOnlyList<ShardItemDrop>? TryVanillaLoot(

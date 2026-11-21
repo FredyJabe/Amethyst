@@ -81,6 +81,7 @@ public sealed partial class MinecraftServer
             hit = true;
             if (killed)
             {
+                SpawnEntityExperience(mob.Kind, attacker, mob.X, mob.Y, mob.Z);
                 // The complete, pinned 26.3 data pack is authoritative,
                 // unless a user has explicitly overridden this mob in YAML.
                 var lootRuntime = new ShardSkillRuntime();

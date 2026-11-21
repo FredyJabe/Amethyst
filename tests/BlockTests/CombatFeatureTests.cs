@@ -238,6 +238,9 @@ internal static class CombatFeatureTests
                 server.GroundItemsForTests.Any(x => x.ItemId == mutton.ProtocolId) &&
                 server.GroundItemsForTests.Any(x => x.ItemId == wool.ProtocolId),
                 "Killing a sheep commits the YAML-defined meat and wool skill drops");
+            Check(server.ExperienceOrbsForTests.Length == 1 &&
+                server.ExperienceOrbsForTests[0].Value is >= 1 and <= 3,
+                "Player-killed sheep creates an Entities-owned 1–3 XP orb");
 
             ShardItemDefinition beef = default;
             Check(managedMobs.TrySpawn("cow", 1, 80, 0,
@@ -254,6 +257,10 @@ internal static class CombatFeatureTests
                     drop.ItemId == beef.ProtocolId && drop.Count == 1) &&
                 managedMobs.DrainDeaths().Length == 0,
                 "Validated melee kills a generic mob and commits one YAML death reward");
+            Check(server.ExperienceOrbsForTests.Length == 2 &&
+                server.ExperienceOrbsForTests.Any(orb =>
+                    orb.Value is >= 1 and <= 3),
+                "Generic cow kill awards configured XP without duplicate death intents");
             await server.TickEntitiesAsync(CancellationToken.None);
             Check(server.GroundItemsForTests.Length == beforeGeneric + 1,
                 "Generic melee kill cannot award the same death loot twice");
@@ -275,6 +282,9 @@ internal static class CombatFeatureTests
                 nativeMobLoot.Contexts[0].DamageTypeIdentifier ==
                     "minecraft:player_attack",
                 "Melee death prefers native loot with player attribution over YAML fallback");
+            Check(server.ExperienceOrbsForTests.Length == 3 &&
+                server.ExperienceOrbsForTests.Count(orb => orb.Value == 5) == 1,
+                "Vanilla zombie kill awards five persistent XP points");
             Check(managedMobs.TrySpawn("zombie", 1, 80, 0,
                     out var consoleZombie) &&
                 managedMobs.TryKill(consoleZombie.EntityId, out _),
@@ -285,6 +295,8 @@ internal static class CombatFeatureTests
                 nativeMobLoot.Contexts[1].AttackerKind is null &&
                 server.GroundItemsForTests.Length == beforeNative + 2,
                 "Console kills use native loot without player-only eligibility");
+            Check(server.ExperienceOrbsForTests.Length == 3,
+                "Console kills cannot mint player-only experience rewards");
 
             string lootOverrides = Path.Combine(root, "loot-overrides");
             Directory.CreateDirectory(lootOverrides);
