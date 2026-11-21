@@ -127,7 +127,11 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
         int protocolId = _definitions.TryGetByIdentifier("minecraft:sheep",
             out var definition) ? definition.ProtocolId : 114;
         return new ShardEntityInstance(sheep.EntityId, sheep.Uuid, sheep.Kind,
-            protocolId, sheep.X, sheep.Y, sheep.Z, 0, 0, sheep.Health);
+            protocolId, sheep.X, sheep.Y, sheep.Z, 0, 0, sheep.Health)
+        {
+            Sheared = sheep.Sheared,
+            Color = sheep.Color
+        };
     }
 
     public int AllocateEntityId()

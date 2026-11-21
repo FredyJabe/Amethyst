@@ -148,6 +148,22 @@ try
         ((IShardProjectileWorld)restartedWorld).Snapshot().Length == 0,
         "Entities restores durable living/item/XP state without resurrecting transient projectiles");
 
+    // The dead entity disappears before Gameplay can process the one-shot
+    // onDeath event; its last color/sheared metadata must remain on the queued
+    // snapshot or configurable native wool drops would be incorrect.
+    var reloadedLivestock = (IShardLivingEntities)restartedWorld;
+    Check(reloadedLivestock.TrySpawnSheep(6, 80, 6,
+        out LivingEntity blueSheep, color: 11),
+        "Spawn a blue sheep using the unified native entity store");
+    bool killedBlue = restartedWorld.TryKill(blueSheep.EntityId,
+        out ShardEntityInstance blueDeath);
+    ShardEntityInstance[] deathQueue = restartedWorld.DrainDeaths();
+    Check(killedBlue && blueDeath.Color == 11 && !blueDeath.Sheared &&
+        deathQueue.Length == 1 && deathQueue[0].Color == 11 &&
+        deathQueue[0].EntityId == blueSheep.EntityId &&
+        restartedWorld.DrainDeaths().Length == 0,
+        "Sheep death events retain server-owned wool metadata exactly once");
+
     var drops = new TestDropSink();
     SkillEngine CreateEngine()
     {

@@ -1319,9 +1319,26 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                 string? fallback = _entityTypes is not null &&
                     _entityTypes.TryGetById(dead.ProtocolId, out var vanilla)
                         ? vanilla.Identifier : null;
+                // Keep native sheep color/sheared state on its one-shot
+                // death event, even though the authoritative entity has
+                // already been removed. Phase 4 loot skills need these flags.
+                bool nativeSheep = dead.DefinitionId == "minecraft:sheep";
+                var effects = new ShardSkillRuntime();
+                if (nativeSheep)
+                {
+                    effects.SetFlag("color_" + WoolColors[
+                        Math.Clamp(dead.Color, 0, WoolColors.Length - 1)]);
+                    if (!dead.Sheared) effects.SetFlag("not_sheared");
+                }
                 await _skills.DispatchAsync(new ShardSkillEvent(
                     dead.DefinitionId, "onDeath", dead.X, dead.Y, dead.Z,
-                    dead.EntityId, fallback), ct);
+                    dead.EntityId, fallback)
+                {
+                    Runtime = effects,
+                    PublisherCommitsDrops = nativeSheep
+                }, ct);
+                if (nativeSheep)
+                    SpawnLoot(effects.Drops, dead.X, dead.Y + 0.25, dead.Z);
             }
         }
         ShardEntityInstance[] instances = _entities.Snapshot();

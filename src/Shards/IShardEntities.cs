@@ -16,7 +16,13 @@ public readonly record struct ShardEntityDefinition(
 
 public readonly record struct ShardEntityInstance(
     int EntityId, Guid Uuid, string DefinitionId, int ProtocolId,
-    double X, double Y, double Z, float Yaw, float Pitch, double? Health);
+    double X, double Y, double Z, float Yaw, float Pitch, double? Health)
+{
+    /// <summary>Server-owned livestock metadata captured before removal,
+    /// so onDeath skills can evaluate the actual killed animal's state.</summary>
+    public bool Sheared { get; init; }
+    public int Color { get; init; }
+}
 
 /// <summary>Immutable version-pinned entity type catalog; custom YAML names
 /// map to existing vanilla types, not to additional protocol IDs.</summary>
