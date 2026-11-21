@@ -24,6 +24,17 @@ try
         baseCatalog.TryGetByIdentifier("minecraft:zombie", out var zombie) &&
         zombie.ProtocolId >= 0 && zombie.Category == "monster",
         "Vanilla entity registry reads all 161 wire types");
+    Check(baseCatalog.TryGetByIdentifier("minecraft:cow", out var vanillaCow) &&
+        vanillaCow.MaxHealth == 10 &&
+        baseCatalog.TryGetByIdentifier("minecraft:zombie", out var vanillaZombie) &&
+        vanillaZombie.MaxHealth == 20 &&
+        baseCatalog.TryGetByIdentifier("minecraft:iron_golem", out var golem) &&
+        golem.MaxHealth == 100 &&
+        baseCatalog.TryGetByIdentifier("minecraft:horse", out var horse) &&
+        horse.MaxHealth is null &&
+        baseCatalog.TryGetByIdentifier("minecraft:slime", out var slime) &&
+        slime.MaxHealth is null,
+        "Bundled health is authoritative for fixed-HP mobs; variable-HP mobs stay pending");
 
     string path = Path.Combine(temp, "override.yml");
     File.WriteAllText(path, """

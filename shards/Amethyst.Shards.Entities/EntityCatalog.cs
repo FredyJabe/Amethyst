@@ -44,11 +44,11 @@ public sealed class EntityCatalog : IShardEntityRegistry
             if (string.IsNullOrWhiteSpace(fields.Category) ||
                 fields.Category.Length > 64)
                 throw new InvalidDataException($"Invalid category for entity '{root}'.");
-            var entity = new ShardEntityDefinition(vanilla.Count, name,
+            var entity = ApplyConfig(new ShardEntityDefinition(vanilla.Count, name,
                 Normalize(fields.Category), fields.Width.Value, fields.Height.Value)
             {
                 Spawnable = fields.Category != "misc" && name != "minecraft:player"
-            };
+            }, fields, vanillaFile, root);
             if (_byName.ContainsKey(name))
                 throw new InvalidDataException($"Duplicate vanilla entity '{root}'.");
             vanilla.Add(entity);

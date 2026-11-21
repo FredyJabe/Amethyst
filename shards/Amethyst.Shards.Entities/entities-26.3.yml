@@ -20,6 +20,7 @@ allay:
   Category: creature
   Width: 0.3499999940395355
   Height: 0.6000000238418579
+  Health: 20
 area_effect_cloud:
   Id: minecraft:area_effect_cloud
   ProtocolId: 3
@@ -32,6 +33,7 @@ armadillo:
   Category: creature
   Width: 0.699999988079071
   Height: 0.6499999761581421
+  Health: 12
 armor_stand:
   Id: minecraft:armor_stand
   ProtocolId: 5
@@ -50,6 +52,7 @@ axolotl:
   Category: axolotls
   Width: 0.75
   Height: 0.41999998688697815
+  Health: 14
 bamboo_chest_raft:
   Id: minecraft:bamboo_chest_raft
   ProtocolId: 8
@@ -68,12 +71,14 @@ bat:
   Category: ambient
   Width: 0.5
   Height: 0.8999999761581421
+  Health: 6
 bee:
   Id: minecraft:bee
   ProtocolId: 11
   Category: creature
   Width: 0.550000011920929
   Height: 0.5
+  Health: 10
 birch_boat:
   Id: minecraft:birch_boat
   ProtocolId: 12
@@ -92,6 +97,7 @@ blaze:
   Category: monster
   Width: 0.6000000238418579
   Height: 1.7999999523162842
+  Health: 20
 block_display:
   Id: minecraft:block_display
   ProtocolId: 15
@@ -104,12 +110,14 @@ bogged:
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9900000095367432
+  Health: 16
 breeze:
   Id: minecraft:breeze
   ProtocolId: 17
   Category: monster
   Width: 0.6000000238418579
   Height: 1.7699999809265137
+  Health: 30
 breeze_wind_charge:
   Id: minecraft:breeze_wind_charge
   ProtocolId: 18
@@ -122,24 +130,28 @@ camel:
   Category: creature
   Width: 1.7000000476837158
   Height: 2.375
+  Health: 32
 camel_husk:
   Id: minecraft:camel_husk
   ProtocolId: 20
   Category: monster
   Width: 1.7000000476837158
   Height: 2.375
+  Health: 32
 cat:
   Id: minecraft:cat
   ProtocolId: 21
   Category: creature
   Width: 0.6000000238418579
   Height: 0.699999988079071
+  Health: 10
 cave_spider:
   Id: minecraft:cave_spider
   ProtocolId: 22
   Category: monster
   Width: 0.699999988079071
   Height: 0.5
+  Health: 12
 cherry_boat:
   Id: minecraft:cherry_boat
   ProtocolId: 23
@@ -164,18 +176,21 @@ chicken:
   Category: creature
   Width: 0.4000000059604645
   Height: 0.699999988079071
+  Health: 4
 cod:
   Id: minecraft:cod
   ProtocolId: 27
   Category: water_ambient
   Width: 0.5
   Height: 0.30000001192092896
+  Health: 3
 copper_golem:
   Id: minecraft:copper_golem
   ProtocolId: 28
   Category: misc
   Width: 0.49000000953674316
   Height: 0.9800000190734863
+  Health: 12
 command_block_minecart:
   Id: minecraft:command_block_minecart
   ProtocolId: 29
@@ -188,6 +203,7 @@ cow:
   Category: creature
   Width: 0.8999999761581421
   Height: 1.399999976158142
+  Health: 10
 creaking:
   Id: minecraft:creaking
   ProtocolId: 31
@@ -200,6 +216,7 @@ creeper:
   Category: monster
   Width: 0.6000000238418579
   Height: 1.7000000476837158
+  Health: 20
 cushion:
   Id: minecraft:cushion
   ProtocolId: 33
@@ -224,6 +241,7 @@ dolphin:
   Category: water_creature
   Width: 0.8999999761581421
   Height: 0.6000000238418579
+  Health: 10
 donkey:
   Id: minecraft:donkey
   ProtocolId: 37
@@ -242,6 +260,7 @@ drowned:
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 20
 egg:
   Id: minecraft:egg
   ProtocolId: 40
@@ -254,24 +273,28 @@ elder_guardian:
   Category: monster
   Width: 1.997499942779541
   Height: 1.997499942779541
+  Health: 80
 enderman:
   Id: minecraft:enderman
   ProtocolId: 42
   Category: monster
   Width: 0.6000000238418579
   Height: 2.9000000953674316
+  Health: 40
 endermite:
   Id: minecraft:endermite
   ProtocolId: 43
   Category: monster
   Width: 0.4000000059604645
   Height: 0.30000001192092896
+  Health: 8
 ender_dragon:
   Id: minecraft:ender_dragon
   ProtocolId: 44
   Category: monster
   Width: 16
   Height: 8
+  Health: 200
 ender_pearl:
   Id: minecraft:ender_pearl
   ProtocolId: 45
@@ -290,6 +313,7 @@ evoker:
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 24
 evoker_fangs:
   Id: minecraft:evoker_fangs
   ProtocolId: 48
@@ -338,12 +362,14 @@ fox:
   Category: creature
   Width: 0.6000000238418579
   Height: 0.699999988079071
+  Health: 10
 frog:
   Id: minecraft:frog
   ProtocolId: 56
   Category: creature
   Width: 0.5
   Height: 0.5
+  Health: 10
 furnace_minecart:
   Id: minecraft:furnace_minecart
   ProtocolId: 57
@@ -356,18 +382,21 @@ ghast:
   Category: monster
   Width: 4
   Height: 4
+  Health: 10
 happy_ghast:
   Id: minecraft:happy_ghast
   ProtocolId: 59
   Category: creature
   Width: 4
   Height: 4
+  Health: 20
 giant:
   Id: minecraft:giant
   ProtocolId: 60
   Category: monster
   Width: 3.5999999046325684
   Height: 12
+  Health: 100
 glow_item_frame:
   Id: minecraft:glow_item_frame
   ProtocolId: 61
@@ -380,24 +409,28 @@ glow_squid:
   Category: underground_water_creature
   Width: 0.800000011920929
   Height: 0.800000011920929
+  Health: 10
 goat:
   Id: minecraft:goat
   ProtocolId: 63
   Category: creature
   Width: 0.8999999761581421
   Height: 1.2999999523162842
+  Health: 10
 guardian:
   Id: minecraft:guardian
   ProtocolId: 64
   Category: monster
   Width: 0.8500000238418579
   Height: 0.8500000238418579
+  Health: 30
 hoglin:
   Id: minecraft:hoglin
   ProtocolId: 65
   Category: monster
   Width: 1.396484375
   Height: 1.399999976158142
+  Health: 40
 hopper_minecart:
   Id: minecraft:hopper_minecart
   ProtocolId: 66
@@ -416,12 +449,14 @@ husk:
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 20
 illusioner:
   Id: minecraft:illusioner
   ProtocolId: 69
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 32
 interaction:
   Id: minecraft:interaction
   ProtocolId: 70
@@ -434,6 +469,7 @@ iron_golem:
   Category: misc
   Width: 1.399999976158142
   Height: 2.700000047683716
+  Health: 100
 item:
   Id: minecraft:item
   ProtocolId: 72
@@ -530,6 +566,7 @@ mooshroom:
   Category: creature
   Width: 0.8999999761581421
   Height: 1.399999976158142
+  Health: 10
 mule:
   Id: minecraft:mule
   ProtocolId: 88
@@ -542,6 +579,7 @@ nautilus:
   Category: water_creature
   Width: 0.875
   Height: 0.949999988079071
+  Health: 15
 oak_boat:
   Id: minecraft:oak_boat
   ProtocolId: 90
@@ -560,6 +598,7 @@ ocelot:
   Category: creature
   Width: 0.6000000238418579
   Height: 0.699999988079071
+  Health: 10
 ominous_item_spawner:
   Id: minecraft:ominous_item_spawner
   ProtocolId: 93
@@ -596,48 +635,56 @@ parched:
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9900000095367432
+  Health: 16
 parrot:
   Id: minecraft:parrot
   ProtocolId: 99
   Category: creature
   Width: 0.5
   Height: 0.8999999761581421
+  Health: 6
 phantom:
   Id: minecraft:phantom
   ProtocolId: 100
   Category: monster
   Width: 0.8999999761581421
   Height: 0.5
+  Health: 20
 pig:
   Id: minecraft:pig
   ProtocolId: 101
   Category: creature
   Width: 0.8999999761581421
   Height: 0.8999999761581421
+  Health: 10
 piglin:
   Id: minecraft:piglin
   ProtocolId: 102
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 16
 piglin_brute:
   Id: minecraft:piglin_brute
   ProtocolId: 103
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 50
 pillager:
   Id: minecraft:pillager
   ProtocolId: 104
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 24
 polar_bear:
   Id: minecraft:polar_bear
   ProtocolId: 105
   Category: creature
   Width: 1.399999976158142
   Height: 1.399999976158142
+  Health: 30
 poplar_boat:
   Id: minecraft:poplar_boat
   ProtocolId: 106
@@ -668,36 +715,42 @@ pufferfish:
   Category: water_ambient
   Width: 0.699999988079071
   Height: 0.699999988079071
+  Health: 3
 rabbit:
   Id: minecraft:rabbit
   ProtocolId: 111
   Category: creature
   Width: 0.49000000953674316
   Height: 0.6000000238418579
+  Health: 3
 ravager:
   Id: minecraft:ravager
   ProtocolId: 112
   Category: monster
   Width: 1.9500000476837158
   Height: 2.200000047683716
+  Health: 100
 salmon:
   Id: minecraft:salmon
   ProtocolId: 113
   Category: water_ambient
   Width: 0.699999988079071
   Height: 0.4000000059604645
+  Health: 3
 sheep:
   Id: minecraft:sheep
   ProtocolId: 114
   Category: creature
   Width: 0.8999999761581421
   Height: 1.2999999523162842
+  Health: 8
 shulker:
   Id: minecraft:shulker
   ProtocolId: 115
   Category: monster
   Width: 1
   Height: 1
+  Health: 30
 shulker_bullet:
   Id: minecraft:shulker_bullet
   ProtocolId: 116
@@ -710,12 +763,14 @@ silverfish:
   Category: monster
   Width: 0.4000000059604645
   Height: 0.30000001192092896
+  Health: 8
 skeleton:
   Id: minecraft:skeleton
   ProtocolId: 118
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9900000095367432
+  Health: 20
 skeleton_horse:
   Id: minecraft:skeleton_horse
   ProtocolId: 119
@@ -740,6 +795,7 @@ sniffer:
   Category: creature
   Width: 1.899999976158142
   Height: 1.75
+  Health: 14
 snowball:
   Id: minecraft:snowball
   ProtocolId: 123
@@ -752,6 +808,7 @@ snow_golem:
   Category: misc
   Width: 0.699999988079071
   Height: 1.899999976158142
+  Health: 4
 spawner_minecart:
   Id: minecraft:spawner_minecart
   ProtocolId: 125
@@ -770,6 +827,7 @@ spider:
   Category: monster
   Width: 1.399999976158142
   Height: 0.8999999761581421
+  Health: 16
 spruce_boat:
   Id: minecraft:spruce_boat
   ProtocolId: 128
@@ -788,18 +846,21 @@ squid:
   Category: water_creature
   Width: 0.800000011920929
   Height: 0.800000011920929
+  Health: 10
 stray:
   Id: minecraft:stray
   ProtocolId: 131
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9900000095367432
+  Health: 20
 strider:
   Id: minecraft:strider
   ProtocolId: 132
   Category: creature
   Width: 0.8999999761581421
   Height: 1.7000000476837158
+  Health: 20
 sulfur_cube:
   Id: minecraft:sulfur_cube
   ProtocolId: 133
@@ -812,6 +873,7 @@ tadpole:
   Category: creature
   Width: 0.4000000059604645
   Height: 0.30000001192092896
+  Health: 6
 text_display:
   Id: minecraft:text_display
   ProtocolId: 135
@@ -848,42 +910,49 @@ tropical_fish:
   Category: water_ambient
   Width: 0.5
   Height: 0.4000000059604645
+  Health: 3
 turtle:
   Id: minecraft:turtle
   ProtocolId: 141
   Category: creature
   Width: 1.2000000476837158
   Height: 0.4000000059604645
+  Health: 30
 vex:
   Id: minecraft:vex
   ProtocolId: 142
   Category: monster
   Width: 0.4000000059604645
   Height: 0.800000011920929
+  Health: 14
 villager:
   Id: minecraft:villager
   ProtocolId: 143
   Category: misc
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 20
 vindicator:
   Id: minecraft:vindicator
   ProtocolId: 144
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 24
 wandering_trader:
   Id: minecraft:wandering_trader
   ProtocolId: 145
   Category: creature
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 20
 warden:
   Id: minecraft:warden
   ProtocolId: 146
   Category: monster
   Width: 0.8999999761581421
   Height: 2.9000000953674316
+  Health: 500
 wind_charge:
   Id: minecraft:wind_charge
   ProtocolId: 147
@@ -896,18 +965,21 @@ witch:
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 26
 wither:
   Id: minecraft:wither
   ProtocolId: 149
   Category: monster
   Width: 0.8999999761581421
   Height: 3.5
+  Health: 300
 wither_skeleton:
   Id: minecraft:wither_skeleton
   ProtocolId: 150
   Category: monster
   Width: 0.699999988079071
   Height: 2.4000000953674316
+  Health: 20
 wither_skull:
   Id: minecraft:wither_skull
   ProtocolId: 151
@@ -920,42 +992,49 @@ wolf:
   Category: creature
   Width: 0.6000000238418579
   Height: 0.8500000238418579
+  Health: 8
 zoglin:
   Id: minecraft:zoglin
   ProtocolId: 153
   Category: monster
   Width: 1.396484375
   Height: 1.399999976158142
+  Health: 40
 zombie:
   Id: minecraft:zombie
   ProtocolId: 154
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 20
 zombie_horse:
   Id: minecraft:zombie_horse
   ProtocolId: 155
   Category: monster
   Width: 1.396484375
   Height: 1.600000023841858
+  Health: 25
 zombie_nautilus:
   Id: minecraft:zombie_nautilus
   ProtocolId: 156
   Category: monster
   Width: 0.875
   Height: 0.949999988079071
+  Health: 15
 zombie_villager:
   Id: minecraft:zombie_villager
   ProtocolId: 157
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 20
 zombified_piglin:
   Id: minecraft:zombified_piglin
   ProtocolId: 158
   Category: monster
   Width: 0.6000000238418579
   Height: 1.9500000476837158
+  Health: 20
 player:
   Id: minecraft:player
   ProtocolId: 159
