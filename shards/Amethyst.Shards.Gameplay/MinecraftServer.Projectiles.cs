@@ -56,16 +56,20 @@ public sealed partial class MinecraftServer
                 action.Sequence, ct);
             return true;
         }
+        // Preserve authoritative potion_contents and custom effects for
+        // splash impacts. The projectile carries a copy of one stack, not
+        // the client-provided inventory or an item eligible for pickup.
+        ItemStack payload = kind == ProjectileKind.SplashPotion
+            ? stack with { Count = 1 } : ItemStack.Empty;
         if (_projectiles.TryLaunch(player.PlayerUuid, kind, player.Pose,
-            1.5, kind == ProjectileKind.EnderPearl ? 0 : 0,
-            ItemStack.Empty, out _))
+            1.5, 0, ItemStack.Empty, out _, payload))
         {
             if (!creative)
                 await InventoryProtocol.SendSlotAsync(player.Connection,
                     player.Inventory, slot, ct);
         }
         else if (!creative)
-            player.Inventory.GiveStack(new ItemStack(stack.ItemId, 1));
+            player.Inventory.GiveStack(stack with { Count = 1 });
         await BlockInteractionProtocol.SendAckAsync(player.Connection,
             action.Sequence, ct);
         return true;
@@ -164,6 +168,52 @@ public sealed partial class MinecraftServer
                 player.Inventory, ct);
     }
 
+    /// <summary>Commit splash effects to server-owned player state at the
+    /// projectile's validated impact position. Distance attenuates duration
+    /// and instant healing/damage. No client-reported potion effects are used.</summary>
+    internal async Task ApplySplashPotionAsync(ProjectileEntity potion,
+        Guid directHit, IReadOnlyList<ConnectedPlayer> players,
+        CancellationToken ct)
+    {
+        if (potion.Kind != ProjectileKind.SplashPotion || potion.Payload.Count < 1)
+            return;
+        IReadOnlyList<ShardConsumeEffect> effects;
+        try
+        {
+            effects = ConsumableEffects.ForStack(potion.Payload, []);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or
+            NotSupportedException or System.Text.Json.JsonException)
+        {
+            Console.WriteLine("[items] Rejected invalid splash potion: " +
+                ex.Message);
+            return;
+        }
+        foreach (ConnectedPlayer player in players)
+        {
+            if (!player.Ready || player.GameMode == PlayerGameMode.Spectator ||
+                player.Vitals.Snapshot().Health <= 0) continue;
+            PlayerPose pos = player.Pose;
+            double dx = potion.X - pos.X, dz = potion.Z - pos.Z;
+            double dy = potion.Y - (pos.Y + 0.9);
+            double distance = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+            if (distance > 4) continue;
+            double intensity = directHit == player.PlayerUuid ? 1 :
+                Math.Clamp(1 - distance / 4, 0, 1);
+            if (intensity <= 0) continue;
+            ShardConsumeEffect[] scaled = effects
+                .Select(e => e.DurationTicks > 0
+                    ? e with { DurationTicks =
+                        (int)Math.Floor(e.DurationTicks * intensity) }
+                    : e)
+                .Where(e => e.DurationTicks == 0 ||
+                    e.DurationTicks >= 20)
+                .ToArray();
+            await ApplyConsumedEffectsAsync(player, scaled, ct, intensity);
+            await CombatProtocol.SendHealthAsync(player, ct);
+        }
+    }
+
     internal async Task TickProjectilesAsync(CancellationToken ct)
     {
         if (_projectiles is null || _blocks is null) return;
@@ -222,6 +272,8 @@ public sealed partial class MinecraftServer
                     await DamagePlayerAsync(victim, p.Damage, attacker, ct,
                         projectile: true);
             }
+            if (p.Kind == ProjectileKind.SplashPotion && p.Payload.Count > 0)
+                await ApplySplashPotionAsync(p, impact.PlayerHit, players, ct);
             // Both livestock and generic YAML mobs are owned by Entities.
             // Commit the one-shot death through the same loot pipeline as
             // melee, never a hard-coded sheep reward or duplicate tick drop.

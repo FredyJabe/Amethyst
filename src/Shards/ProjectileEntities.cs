@@ -10,7 +10,12 @@ public readonly record struct ProjectileEntity(
     double X, double Y, double Z, double Vx, double Vy, double Vz,
     float Damage, int AgeTicks, ItemStack Recoverable)
 {
-    public bool CanRecover => Recoverable.Count > 0;
+    /// <summary>Full server-validated potion stack used by throwable item
+    /// effects. This is not a recoverable projectile drop.</summary>
+    public ItemStack Payload { get; init; }
+    public bool CanRecover => Recoverable.Count > 0 &&
+        Kind is ProjectileKind.Arrow or ProjectileKind.SpectralArrow or
+            ProjectileKind.Trident;
 }
 
 public readonly record struct ProjectileImpact(ProjectileEntity Projectile,

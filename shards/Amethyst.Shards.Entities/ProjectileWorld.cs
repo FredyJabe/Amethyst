@@ -25,7 +25,8 @@ public sealed class ProjectileWorld : IShardProjectileWorld
 
     public bool TryLaunch(Guid owner, ProjectileKind kind,
         PlayerPose source, double speed, float damage,
-        ItemStack recoverable, out ProjectileEntity projectile)
+        ItemStack recoverable, out ProjectileEntity projectile,
+        ItemStack payload = default)
     {
         projectile = default;
         if (!double.IsFinite(speed) || speed <= 0 || speed > 6 ||
@@ -45,7 +46,8 @@ public sealed class ProjectileWorld : IShardProjectileWorld
             projectile = new ProjectileEntity(_allocate(), Guid.NewGuid(), owner,
                 kind, source.X + vx * 0.55, source.Y + 1.52 + vy * 0.25,
                 source.Z + vz * 0.55, vx * speed, vy * speed,
-                vz * speed, damage, 0, recoverable);
+                vz * speed, damage, 0, recoverable)
+                { Payload = payload };
             _entities.Add(projectile.EntityId, projectile);
             return true;
         }

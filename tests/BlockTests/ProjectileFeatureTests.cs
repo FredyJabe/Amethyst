@@ -134,6 +134,44 @@ internal static class ProjectileFeatureTests
                 server.ProjectilesForTests.Any(p =>
                     p.Kind == ProjectileKind.Snowball),
                 "Throwing snowballs consumes one item and creates a physical entity");
+
+            if (!items.TryGetByIdentifier("minecraft:splash_potion",
+                out var splashMaterial))
+                throw new InvalidDataException("Missing splash potion definition.");
+            var splashPayload = new ItemStack(splashMaterial.ProtocolId, 1)
+                .WithComponents(new Dictionary<string, string>
+                {
+                    ["minecraft:potion_contents"] =
+                        System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            potion = "minecraft:water",
+                            custom_effects = new[]
+                            {
+                                new { id = "minecraft:speed", duration = 200,
+                                    amplifier = 1 }
+                            }
+                        })
+                });
+            Check(physics.TryLaunch(player.PlayerUuid,
+                    ProjectileKind.SplashPotion, player.Pose,
+                    1.5, 0, ItemStack.Empty, out var thrownPotion,
+                    splashPayload) &&
+                thrownPotion.Payload == splashPayload && !thrownPotion.CanRecover,
+                "A physical splash potion retains its custom component payload without becoming pickable");
+            ProjectileEntity potionImpact = thrownPotion with
+                { X = player.Pose.X, Y = player.Pose.Y + 0.9,
+                    Z = player.Pose.Z };
+            await server.ApplySplashPotionAsync(potionImpact,
+                player.PlayerUuid, [player], CancellationToken.None);
+            Check(player.ActiveEffects.Snapshot().Any(effect =>
+                    effect.Id == "minecraft:speed" &&
+                    effect.RemainingTicks == 200 && effect.Amplifier == 1),
+                "Splash impacts apply per-stack potion effects to nearby players");
+            player.ActiveEffects.Remove("minecraft:speed");
+            await server.ApplySplashPotionAsync(potionImpact with { X = 100 },
+                Guid.Empty, [player], CancellationToken.None);
+            Check(!player.ActiveEffects.Has("minecraft:speed"),
+                "Splash potion effects cannot reach players outside the four-block radius");
         }
         finally
         {

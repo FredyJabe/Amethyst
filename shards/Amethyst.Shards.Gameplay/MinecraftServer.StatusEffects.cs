@@ -46,7 +46,8 @@ public sealed partial class MinecraftServer
     }
 
     private async Task ApplyConsumedEffectsAsync(ConnectedPlayer player,
-        IReadOnlyList<ShardConsumeEffect> effects, CancellationToken ct)
+        IReadOnlyList<ShardConsumeEffect> effects, CancellationToken ct,
+        double intensity = 1)
     {
         foreach (ShardConsumeEffect effect in effects)
         {
@@ -83,11 +84,18 @@ public sealed partial class MinecraftServer
             if (effect.DurationTicks == 0)
             {
                 if (effect.Id == "minecraft:instant_health")
-                    player.Vitals.Heal(4 * (1 << Math.Min(8, effect.Amplifier)));
+                    player.Vitals.Heal((int)Math.Round(
+                        4 * (1 << Math.Min(8, effect.Amplifier)) * intensity));
                 else if (effect.Id == "minecraft:instant_damage")
-                    player.Vitals.TryDamage(
-                        6 * (1 << Math.Min(8, effect.Amplifier)),
-                        Environment.TickCount64, out _, bypassIFrames: true);
+                {
+                    float amount = (float)(6 * (1 << Math.Min(8, effect.Amplifier)) *
+                        Math.Clamp(intensity, 0, 1));
+                    if (amount > 0 && player.Vitals.TryDamage(amount,
+                            Environment.TickCount64, out bool killed,
+                            bypassIFrames: true) && killed)
+                        await CombatProtocol.SendDeathAsync(
+                            player.Connection, player.EntityId, ct);
+                }
                 else if (effect.Id == "minecraft:saturation")
                     player.Vitals.TryEat(
                         Math.Min(20, 2 * (1 << Math.Min(8, effect.Amplifier))),
