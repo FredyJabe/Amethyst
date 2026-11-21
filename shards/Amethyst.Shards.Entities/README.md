@@ -168,10 +168,38 @@ if (types.TryGetByIdentifier("minecraft:cow", out var cow) &&
 ```
 
 The manager synchronizes its state with a lock, returns snapshots,
-allocates unique positive network entity IDs through `AllocateEntityId`,
-and reserves those IDs for players and dropped items through Gameplay.
-The manager currently allows at most 10,000 live managed instances and
-rejects non-finite or unreasonable coordinates.
+and allocates unique positive network IDs for all world entities,
+including players, livestock, item entities, XP, fishing hooks and projectiles.
+The generic entity manager currently allows up to 10,000 managed instances
+and rejects non-finite or unreasonable coordinates.
+
+## Entity runtime ownership and persistence
+
+The Entities Shard is authoritative for all server-owned physical entity
+state and simulation, via `EntityManager` and these shared Core interfaces:
+
+| Interface | Entities-owned state |
+| --- | --- |
+| `IShardEntityManager` | Generic YAML entity instances, spawn, damage, teleport, death queue and shared entity IDs |
+| `IShardLivingEntities` | Persisted native sheep health, wool color, sheared state and regrowth |
+| `IShardGroundItems` | Dropped item stacks, 20 Hz gravity, despawn, pickup and persistent ground-item storage |
+| `IShardExperienceOrbs` | Experience orbs, physical simulation and persistent XP storage |
+| `IShardFishingWorld` | Fishing bobbers, casting, reeling and water simulation |
+| `IShardProjectileWorld` | Arrow, trident and other projectile motion and collision detection |
+
+The Entities implementation lives in `shards/Amethyst.Shards.Entities/`.
+The immutable shared records and interfaces live in `src/Shards/`, avoiding
+a reverse dependency on Gameplay. Gameplay owns only the clientbound packet
+protocols and validated player interactions, resolving Entities services
+through `IShardContext`. Items configures `dropItem` and other skills; Core
+dispatches the skill pipeline. On-shear wool is selected by color-aware
+Items YAML, using server-owned sheep metadata.
+
+`BindWorldEntities` reuses the existing Gameplay world/data-directory paths,
+so existing `AMLIVE01` sheep saves, ground-item saves and XP-orb saves can
+be read without resetting worlds. Entity IDs are reallocated for persisted
+entities at startup; UUIDs remain stable. Projectiles and fishing bobbers
+are intentionally not saved between restarts.
 
 ## Current limits
 
@@ -180,10 +208,12 @@ pathfinding, gravity, collision, attacks, breeding, item drops, or automated
 healing. Configured Health and Invulnerable currently affect manager
 operations, not client-visible damage animations or a vanilla combat
 system. Configured Display is not yet sent as custom-name entity metadata.
-Entities are **not persisted** on restart or Shard disable. Player
-entities and dropped-item entities still have dedicated Gameplay logic;
-the Entities Shard supplies them a common ID allocator, not their whole
-movement/inventory lifecycle.
+Generic YAML-spawned instances are **transient** (except sheep) and
+do not yet implement natural AI or universal persistence. Sheep retain
+their color/sheared state and health through restart, and physical item
+entities and XP orbs are persisted. Fishing bobbers and launched projectiles
+remain transient. Player authentication, inventory, movement and networking
+stay with Gameplay because they are player-session responsibilities.
 
 Minecraft Java clients require the exact protocol registry types. YAML
 cannot create modded entity models, custom renderer IDs, or new client
