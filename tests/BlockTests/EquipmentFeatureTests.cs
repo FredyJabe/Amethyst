@@ -75,9 +75,46 @@ internal static class EquipmentFeatureTests
             ConnectedPlayer player = server.GetPlayerForTests(playerId)!;
             player.MarkReady();
             player.SetGameMode(PlayerGameMode.Survival);
+            using var observerStream = new MemoryStream();
+            using var observerChannel = new PacketChannel(observerStream);
+            Guid observerId = Guid.NewGuid();
+            Check(server.TryAdmit(new VerifiedProfile(
+                    observerId, "EquipmentViewer", []), observerChannel, 0, out _),
+                "Admit a separate viewer for equipment packet replication");
+            server.GetPlayerForTests(observerId)!.MarkReady();
             Check(player.Inventory.TryCreativeSet(36, sword.ProtocolId, 1, true) &&
                 player.Inventory.TryCreativeSet(45, shield.ProtocolId, 1, true),
                 "Set up a sword and shield in separate equipped hands");
+            using (var protocolStream = new MemoryStream())
+            using (var protocolChannel = new PacketChannel(protocolStream))
+            {
+                EntityEquipment[] visible = EquipmentProtocol.AllSlots(player.Inventory);
+                Check(visible.Length == 2 && visible[0].Slot == 0 &&
+                    visible[1].Slot == 1,
+                    "Initial equipment snapshot includes main hand and offhand");
+                await EquipmentProtocol.SendAsync(protocolChannel,
+                    player.EntityId, visible, items, CancellationToken.None);
+                protocolStream.Position = 0;
+                Packet? packet = await Protocol.ReadPacketAsync(
+                    protocolStream, CancellationToken.None);
+                if (packet is not { Id: FlightProtocol.ClientboundSetEquipment })
+                    throw new Exception("FAIL: Missing Java 26.3 equipment packet.");
+                var equipment = packet.Value.Reader();
+                Check(equipment.ReadVarInt() == player.EntityId &&
+                    equipment.ReadByte() == 0x80 &&
+                    equipment.ReadVarInt() == 1 &&
+                    equipment.ReadVarInt() == sword.ProtocolId &&
+                    equipment.ReadVarInt() == 0 &&
+                    equipment.ReadVarInt() == 0 &&
+                    equipment.ReadByte() == 1 &&
+                    equipment.ReadVarInt() == 1 &&
+                    equipment.ReadVarInt() == shield.ProtocolId &&
+                    equipment.ReadVarInt() == 0 &&
+                    equipment.ReadVarInt() == 0 &&
+                    equipment.Remaining == 0,
+                    "Equipment packet uses continuation bit and valid item-stack wire fields");
+            }
+            long observerBeforeSwap = observerStream.Length;
             int revision = player.Inventory.Snapshot().Revision;
             await server.HandleBlockActionAsync(player,
                 new PlayerBlockAction(BlockInteractionProtocol.SwapItemWithOffhand,
@@ -91,7 +128,14 @@ internal static class EquipmentFeatureTests
                 events.Contains("shield_unequipped") &&
                 events.Contains("sword_equipped"),
                 "F-key swaps both component-preserving stacks and emits item skill events");
-
+            using (var latest = new MemoryStream(observerStream.ToArray()
+                .AsSpan((int)observerBeforeSwap).ToArray()))
+            {
+                Packet? broadcast = await Protocol.ReadPacketAsync(
+                    latest, CancellationToken.None);
+                Check(broadcast is { Id: FlightProtocol.ClientboundSetEquipment },
+                    "Accepted F-key swap replicates equipment to other players");
+            }
             cancelSwap = true;
             int beforeCancelled = events.Count;
             await server.HandleBlockActionAsync(player,
@@ -105,6 +149,7 @@ internal static class EquipmentFeatureTests
                 "onSwap cancelEvent suppresses transaction but runs remaining skills");
 
             var beforeHelmet = player.Inventory.Snapshot().Slots;
+            long observerBeforeHelmet = observerStream.Length;
             Check(player.Inventory.TryCreativeSet(5, helmet.ProtocolId, 1, true),
                 "An authoritative accepted creative slot equips a helmet");
             await server.NotifyEquipmentChangesAsync(
@@ -113,6 +158,8 @@ internal static class EquipmentFeatureTests
                 new PlayerInventory(root, playerId, items).Snapshot().Slots[45]
                     .ItemId == sword.ProtocolId,
                 "Equipment notifications follow committed slots and offhand changes persist");
+            Check(observerStream.Length > observerBeforeHelmet,
+                "Equipping armor sends a visible head-slot update to observers");
         }
         finally
         {

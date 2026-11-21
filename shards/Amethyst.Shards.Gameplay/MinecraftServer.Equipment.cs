@@ -8,6 +8,35 @@ public sealed partial class MinecraftServer
 {
     private static readonly int[] EquipmentSlots = [5, 6, 7, 8, 45];
 
+    private async Task BroadcastEquipmentAsync(ConnectedPlayer subject,
+        IReadOnlyList<EntityEquipment> changed, CancellationToken ct)
+    {
+        if (changed.Count == 0) return;
+        foreach (ConnectedPlayer observer in _players.Snapshot().Where(p =>
+            p.Ready && p.ConnectionId != subject.ConnectionId))
+        {
+            try
+            {
+                await EquipmentProtocol.SendAsync(observer.Connection,
+                    subject.EntityId, changed, _items, ct);
+            }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    /// <summary>Hotbar scroll changes the visible main-hand item, but is not
+    /// the dedicated F-key ~onSwap event.</summary>
+    internal async Task BroadcastSelectedEquipmentAsync(
+        ConnectedPlayer player, int oldSelectedSlot, CancellationToken ct)
+    {
+        if (!player.Ready || oldSelectedSlot == player.Inventory.SelectedSlot)
+            return;
+        ItemStack held = player.Inventory.Held();
+        await BroadcastEquipmentAsync(player,
+            [new EntityEquipment(0, held)], ct);
+    }
+
     private static bool SameEquipment(ItemStack before, ItemStack after) =>
         before.ItemId == after.ItemId &&
         before.Damage == after.Damage &&
@@ -27,10 +56,20 @@ public sealed partial class MinecraftServer
         ItemStack[] previous, CancellationToken ct)
     {
         ItemStack[] current = player.Inventory.Snapshot().Slots;
+        var changed = new List<EntityEquipment>();
+        int mainSlot = player.Inventory.SelectedSlot;
+        if (!SameEquipment(previous[mainSlot], current[mainSlot]))
+            changed.Add(new EntityEquipment(0, current[mainSlot]));
         foreach (int slot in EquipmentSlots)
         {
             ItemStack removed = previous[slot], added = current[slot];
             if (SameEquipment(removed, added)) continue;
+            byte equipmentId = slot switch
+            {
+                45 => 1, 8 => 2, 7 => 3, 6 => 4, 5 => 5,
+                _ => throw new InvalidOperationException("Bad equipment slot.")
+            };
+            changed.Add(new EntityEquipment(equipmentId, added));
             if (removed.Count > 0)
                 await EnchantmentEventAsync(removed, "onUnequip", ct,
                     actor: player.PlayerUuid);
@@ -38,6 +77,7 @@ public sealed partial class MinecraftServer
                 await EnchantmentEventAsync(added, "onEquip", ct,
                     actor: player.PlayerUuid);
         }
+        await BroadcastEquipmentAsync(player, changed, ct);
     }
 
     /// <summary>The F key is a cancellable pre-commit onSwap event. All

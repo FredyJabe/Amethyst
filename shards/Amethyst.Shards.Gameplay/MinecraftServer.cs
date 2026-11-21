@@ -442,9 +442,12 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                         ChatProtocol.ParseSessionUpdate(packet.Value);
                         break;
                     case BlockInteractionProtocol.ServerboundSetHeldItem:
+                        int previousSelected = player.Inventory.SelectedSlot;
                         player.UseState.CancelCharge();
                         player.SelectHotbar(BlockInteractionProtocol.ReadHeldItem(packet.Value));
                         await ReleaseUsingItemAsync(player, lifetime.Token);
+                        await BroadcastSelectedEquipmentAsync(player, previousSelected,
+                            lifetime.Token);
                         break;
                     case BlockInteractionProtocol.ServerboundCreativeSlot:
                     {
