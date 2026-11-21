@@ -19,6 +19,9 @@ public sealed class GameplayShard : IShard, IShardGameplay
         IShardWorld world = context.GetRequiredService<IShardWorld>();
         IShardItemRegistry items = context.GetRequiredService<IShardItemRegistry>();
         IShardRecipeRegistry recipes = context.GetRequiredService<IShardRecipeRegistry>();
+        IShardEntityManager entities = context.GetRequiredService<IShardEntityManager>();
+        IShardEntityRegistry entityTypes = context.GetRequiredService<IShardEntityRegistry>();
+        IShardEntityInteractions interactions = context.GetRequiredService<IShardEntityInteractions>();
         var game = new MinecraftServer(context.Options, world,
             context.GetRequiredService<IShardPacketBus>(), context.GetService<IShardBlockWorld>(),
             context.DataDirectory, items, recipes,
@@ -27,10 +30,12 @@ public sealed class GameplayShard : IShard, IShardGameplay
             context.GetService<IShardLootRegistry>(),
             context.GetService<IShardVanillaLootTables>(),
             context.GetService<IShardVanillaBlockStates>(),
-            context.GetService<IShardConsumableRegistry>());
+            context.GetService<IShardConsumableRegistry>(),
+            entities, entityTypes, interactions);
         game.Start();
         _gameplay = game;
         context.RegisterService<IShardGameplay>(this);
+        context.RegisterService<IShardItemDropSink>(game);
         context.Log("Gameplay handlers, roles, chat, movement, and clock enabled.");
         return Task.CompletedTask;
     }

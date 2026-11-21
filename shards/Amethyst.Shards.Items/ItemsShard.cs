@@ -573,6 +573,50 @@ public sealed class ItemsShard : IShard
                 """ + Environment.NewLine);
         var recipes = new RecipeCatalog(catalog,
             Path.Combine(directory, "recipes-26.3.yml"), recipeDirectory);
+        string skillsDirectory = Path.Combine(ctx.DataDirectory, "skills");
+        Directory.CreateDirectory(skillsDirectory);
+        string exampleSkill = Path.Combine(skillsDirectory, "example-skills.yml");
+        if (!File.Exists(exampleSkill))
+            File.WriteAllText(exampleSkill, """
+                # Entity death skills, owned by the Items Shard. Uncomment to enable.
+                # cow:
+                #   Skills:
+                #     - 'dropItem{item=minecraft:beef;amount=1-3} ~onDeath'
+                #     - 'dropItem{item=minecraft:emerald;amount=1} ~onMilk'
+                #     - 'dropItem{item=minecraft:leather;amount=0-2;chance=0.5} @self ~onDeath'
+                #
+                # guardian_cow:
+                #   Skills:
+                #     - 'dropItem{item=minecraft:diamond;amount=1-2} ~onDeath'
+                #
+                # To disable vanilla drops: Skills: [] or Enabled: false.
+                """ + Environment.NewLine);
+        // Prevent silently losing administrator drops defined by an older
+        // experimental version. Leave existing files untouched for migration.
+        string oldLootDirectory = Path.Combine(ctx.DataDirectory, "loot");
+        if (Directory.Exists(oldLootDirectory))
+            foreach (string file in Directory.EnumerateFiles(oldLootDirectory, "*",
+                SearchOption.AllDirectories)
+                .Where(p => p.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) ||
+                            p.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase)))
+                if (File.ReadLines(file).Any(line =>
+                    !string.IsNullOrWhiteSpace(line) && !line.TrimStart().StartsWith('#')))
+                    throw new InvalidDataException(
+                        $"Legacy loot YAML '{file}' requires migration to the Items Shard Skills format: " +
+                        "dropItem{item=...;amount=...} ~onDeath. See Items Shard README.");
+        // LootSkills already owns the shared dropItem mechanic and cancellation semantics.
+        // Item-originated events are owned by Items even though Gameplay
+        // detects packet/inventory actions and Core dispatches their skills.
+        // Register every trigger before loading administrator YAML so unknown
+        // actions are still rejected but valid new triggers can be configured.
+        foreach (string trigger in new[]
+        {
+            "onLeftClick", "onRightClick", "onDrop", "onSwap",
+            "onStackDrop", "onPickup", "onEquip", "onUnequip"
+        })
+            ctx.RegisterSkillTrigger(trigger);
+        ctx.RegisterSkillDefinitions(Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
+        IShardSkillEngine skills = ctx.GetRequiredService<IShardSkillEngine>();
         ctx.RegisterService<IShardItemRegistry>(catalog);
         ctx.RegisterService<IShardRecipeRegistry>(recipes);
         string consumableDir = Path.Combine(ctx.DataDirectory, "consumables");
@@ -705,10 +749,6 @@ public sealed class ItemsShard : IShard
                 (ids.Length == 30 ? " … (showing first 30)" : ""));
             return Task.CompletedTask;
         });
-        ctx.Log($"Registered {catalog.Count} vanilla Java {catalog.MinecraftVersion} " +
-            $"item definitions and {recipes.RecipeCount} YAML recipes; " +
-            $"item overrides: {definitions}; fixed component nodes: " +
-            $"{componentNodes.Nodes.Count} assigned, {componentNodes.PendingCount} pending; " +
             $"recipe overrides: {recipeDirectory}; " +
             $"enchantments: {enchantments.Count} (overrides: {enchantmentDirectory}); " +
             $"loot owners: {loot.Count} (overrides: {lootDirectory}); " +

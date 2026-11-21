@@ -5,6 +5,131 @@ Amethyst Core does not contain item definitions. Gameplay consumes the
 `IShardItemRegistry` service for stack sizes and validations in
 inventories, dropped-item entities and crafting/furnace menus.
 
+## Event skills (`dropItem`, entity events, and item events)
+
+**Item-drop definitions and the `dropItem` mechanic belong to the Items Shard; the generic skill engine lives in Amethyst Core.** The bundled starter
+definitions live in `shards/Amethyst.Shards.Items/skills-26.3.yml`.
+Administrators can override entity event skills with `*.yml` or
+`*.yaml` files under `shards/data/items/skills/`, including subfolders.
+Entity YAML in the Entities Shard describes entity properties; it does
+not contain item-drop actions.
+
+Like MythicMobs, each entity ID is a YAML root and has a `Skills` list.
+A skill entry names the mechanic, its parameters, optional `@self`
+target and the event trigger:
+
+```yaml
+cow:
+  Skills:
+    - 'dropItem{item=minecraft:beef;amount=1-3} ~onDeath'
+    - 'dropItem{item=minecraft:leather;amount=0-2;chance=0.65} @self ~onDeath'
+
+guardian_cow:
+  Skills:
+    - 'dropItem{item=minecraft:diamond;amount=1-2;chance=1} ~onDeath'
+
+sheep:
+  Skills:
+    - 'dropItem{item=minecraft:white_wool;amount=1-3} ~onShear'
+
+zombie:
+  Skills: [] # Explicitly suppress this entity's default drops
+```
+
+Supported mechanic: `dropItem`, with these parameters: `item`
+(or `i`) resolves a known Items Shard material; `amount` (or
+`a`) is an inclusive integer/range, `0-64`, default `1`;
+`chance` (or `c`) is a per-skill independent probability from
+0 to 1, default `1`. A skill can be written with or without
+`@self`; both drop at the event entity's location. The
+Entities Shard registers `~onMilk` and `~onShear`, alongside
+the built-in `~onDeath`. Unsupported triggers,
+target selectors, mechanics and parameters cause validation errors
+rather than being silently ignored. Stack quantities are split to
+respect the configured item stack limit.
+
+`Skills: []` or `Enabled: false` explicitly means no drops.
+A custom entity alias such as `amethyst:guardian_cow` can have its
+own skills, but otherwise inherits the vanilla entity type's
+death skills. Overriding a root in user YAML replaces the Items
+Shard's bundled skills for that root; independent skill packs
+registered by other Shards combine through Core; duplicate user roots and malformed expressions
+cause a startup error. Run `skillinfo cow` in the server console
+to inspect its configured event skills.
+
+### Item event triggers (Items Shard)
+
+The Items Shard now registers eight additional trigger names with
+the **Core** `IShardSkillEngine`, before loading any user skill YAML.
+Each root ID can also be an item key, not just an entity:
+
+```yaml
+diamond_pickaxe:
+  Skills:
+    - 'dropItem{item=minecraft:emerald;amount=1;chance=0.05} ~onLeftClick'
+
+bucket:
+  Skills:
+    - 'dropItem{item=minecraft:gold_nugget;amount=1} ~onRightClick'
+    - 'dropItem{item=minecraft:iron_nugget;amount=1} ~onPickup'
+```
+
+| Trigger | Meaning and current support |
+| --- | --- |
+| `~onLeftClick` | **Live:** main-hand click on a validated, reachable block (start of mining) |
+| `~onRightClick` | **Live:** main-hand click on a validated, reachable block or living entity; this is a click attempt, not a guarantee that the item was used |
+| `~onDrop` | **Live:** a successful Q or Ctrl+Q world-item drop |
+| `~onStackDrop` | **Live:** additional event for a successful Ctrl+Q full-stack drop |
+| `~onPickup` | **Live:** successful world-item pickup; fires only for the number actually inserted into inventory |
+| `~onSwap` | Registered; pending offhand swap support (F key) |
+| `~onEquip` | Registered; pending armor/equipment slot transactions |
+| `~onUnequip` | Registered; pending armor/equipment slot transactions |
+
+Core now passes the server-authoritative item ID, count, and
+actor UUID in `ShardSkillEvent` (`ItemId`, `Count`,
+`ActorUuid`) for item-triggered executions. Item owners resolve
+from the Items registry, not a client-supplied item ID; this version's
+`ItemStack` does not distinguish custom item aliases sharing a
+vanilla protocol ID.
+
+Ground-item dropping is authoritative: Q creates a real 1-item
+ground stack; Ctrl+Q drops the entire remaining held stack.
+The server persists the drop and removes the matching inventory
+amount before dispatching the event; failed or stale transactions
+roll back the new world stack. `~onDrop` always fires on successful
+drops, and `~onStackDrop` fires additionally on full-stack drops.
+Inventory-window Q/Ctrl+Q actions, offhand (F), armor, air-only
+use-item packets, and left-clicking entities are **not yet wired**.
+Only successfully processed interactions emit triggers; unknown
+mechanics and unregistered trigger names still fail YAML validation.
+
+The Entities Shard registers `onMilk` / `onShear` triggers and
+provides validated species and sheared-state interactions. Gameplay
+handles bucket-to-milk conversion and dispatches `~onMilk`; when
+a sheep is sheared, Gameplay dispatches `~onShear`, which runs
+the configured Items `dropItem` skill to spawn wool. Each sheep
+can be sheared once until regrowth is implemented. The vanilla
+starter sheep skill emits white wool; sheep colours and shears
+durability are not yet represented by the current item/entity data.
+
+The Entities Shard emits a one-time death event on `TryKill` or
+lethal `TryDamage`. Gameplay dispatches `~onDeath` via
+Core's shared `IShardSkillEngine`; the Items-owned `dropItem` mechanic
+calls Gameplay's `IShardItemDropSink` to spawn physical, pickable items.
+`entityremove` does not trigger skills. This is a starter
+event/skill engine, **not** a complete MythicMobs implementation:
+other registered game-specific triggers and mechanics, target selectors, AI, Minecraft loot conditions,
+Looting enchantments, cooking by fire, XP and rare-drop functions
+are not yet supported.
+
+**Migration from earlier experimental Drops YAML:** Files in
+`shards/data/items/loot/` using `Drops:` are not loaded. If they
+contain active configurations, startup fails with an explicit migration
+message rather than ignoring them. Move and rewrite them as
+`Skills:` lists in `shards/data/items/skills/`, then archive the
+old files. The Shard does not automatically modify your configuration.
+
+
 ## File locations
 
 - Bundled vanilla definitions:

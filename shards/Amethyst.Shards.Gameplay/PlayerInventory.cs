@@ -93,8 +93,27 @@ public sealed partial class PlayerInventory
         }
     }
 
-    /// <returns>Number actually inserted; overflow is not represented as a
-    /// ground entity yet, until item entities are implemented.</returns>
+    /// <summary>Remove a precisely identified held stack after a physical
+    /// ground-item spawn has succeeded. Rejects stale hotbar changes and
+    /// never consumes more items than are currently held.</summary>
+    public bool TryTakeHeld(int expectedItemId, int count)
+    {
+        if (expectedItemId <= 0 || count <= 0) return false;
+        lock (_sync)
+        {
+            int slot = 36 + _selected;
+            ItemStack current = _slots[slot];
+            if (current.ItemId != expectedItemId || current.Count < count)
+                return false;
+            _slots[slot] = current.Count == count
+                ? ItemStack.Empty : current with { Count = current.Count - count };
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = current; throw; }
+            return true;
+        }
+    }
+
+    /// <returns>Number actually inserted; excess remains uncollected.</returns>
     public int Give(int itemId, int count)
     {
         int maximum = MaxStack(itemId);
@@ -126,6 +145,49 @@ public sealed partial class PlayerInventory
             try { Persist(); _revision++; }
             catch { Array.Copy(backup, _slots, _slots.Length); throw; }
             return count - remaining;
+        }
+    }
+
+    /// <summary>Atomically convert one held bucket into a filled bucket.
+    /// When buckets are stacked, insert the filled result elsewhere in the
+    /// inventory; refuse the interaction if the result has nowhere to go.
+    /// This prevents item duplication or loss when the inventory is full.</summary>
+    public bool TryConvertHeld(int expectedItem, int outputItem)
+    {
+        if (expectedItem <= 0 || MaxStack(outputItem) < 1) return false;
+        lock (_sync)
+        {
+            int selected = 36 + _selected;
+            ItemStack held = _slots[selected];
+            if (held.ItemId != expectedItem || held.Count < 1) return false;
+            var before = (ItemStack[])_slots.Clone();
+            if (held.Count == 1)
+                _slots[selected] = new ItemStack(outputItem, 1);
+            else
+            {
+                int destination = -1;
+                foreach (int slot in Enumerable.Range(36, 9).Concat(Enumerable.Range(9, 27)))
+                {
+                    ItemStack other = _slots[slot];
+                    if (slot != selected && other.ItemId == outputItem &&
+                        other.Count > 0 && other.Count < MaxStack(outputItem))
+                    {
+                        destination = slot;
+                        break;
+                    }
+                    if (slot != selected && destination < 0 && other.Count == 0)
+                        destination = slot;
+                }
+                if (destination < 0) return false;
+                ItemStack previous = _slots[destination];
+                _slots[selected] = held with { Count = held.Count - 1 };
+                _slots[destination] = previous.Count == 0
+                    ? new ItemStack(outputItem, 1)
+                    : previous with { Count = previous.Count + 1 };
+            }
+            try { Persist(); _revision++; }
+            catch { Array.Copy(before, _slots, _slots.Length); throw; }
+            return true;
         }
     }
 

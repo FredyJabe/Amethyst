@@ -1505,6 +1505,213 @@ try
             "Real server use-on-block sends the Open Screen packet first");
     }
 
+    // Kill a real Entities-Shard instance and verify the Items-Shard YAML
+    // produces physical, pickable GroundItemStore stacks without repeat drops.
+    var lootTypes = new EntityCatalog(Path.Combine(solutionRoot.FullName,
+        "shards", "Amethyst.Shards.Entities", "entities-26.3.yml"));
+    var lootWorld = new EntityManager(lootTypes);
+    var deathSkills = new SkillEngine();
+    MinecraftServer? lootGame = null;
+    var dropItem = new DropItemSkillMechanic(itemsCatalog, () => lootGame);
+    deathSkills.RegisterMechanic("items", "dropItem", dropItem.Validate, dropItem.ExecuteAsync);
+    deathSkills.RegisterTrigger("entities", "onMilk");
+    deathSkills.RegisterTrigger("entities", "onShear");
+    foreach (string trigger in new[]
+    {
+        "onLeftClick", "onRightClick", "onDrop", "onStackDrop",
+        "onSwap", "onPickup", "onEquip", "onUnequip"
+    })
+        deathSkills.RegisterTrigger("items", trigger);
+    deathSkills.RegisterDefinitions("items", Path.Combine(solutionRoot.FullName,
+        "shards", "Amethyst.Shards.Items", "skills-26.3.yml"));
+    lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
+        Path.Combine(stationsRoot, "loot-gameplay"), itemsCatalog, recipesCatalog,
+        lootWorld, deathSkills, lootTypes, lootWorld);
+    Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var testCow) &&
+        lootWorld.TryKill(testCow.EntityId, out _),
+        "Prepare an entity death for the Gameplay loot pipeline");
+    await lootGame.TickEntitiesAsync(CancellationToken.None);
+    GroundItem[] spawnedDrops = lootGame.GroundItemsForTests;
+    Check(itemsCatalog.TryGetByIdentifier("beef", out var beefLoot) &&
+        spawnedDrops.Any(d => d.ItemId == beefLoot.ProtocolId && d.Count is >= 1 and <= 3) &&
+        spawnedDrops.All(d => d.X == 11 && d.Z == 12),
+        "~onDeath dispatches Items dropItem skills into physical world items");
+    await lootGame.TickEntitiesAsync(CancellationToken.None);
+    Check(lootGame.GroundItemsForTests.Length == spawnedDrops.Length &&
+        lootWorld.DrainDeaths().Length == 0,
+        "Processing one entity death never duplicates dropped loot");
+    Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var despawnCow) &&
+        lootWorld.TryRemove(despawnCow.EntityId),
+        "Prepare silent entity despawn without death");
+    await lootGame.TickEntitiesAsync(CancellationToken.None);
+    Check(lootGame.GroundItemsForTests.Length == spawnedDrops.Length,
+        "An ordinary entity despawn does not generate loot");
+
+    string bonusMilkFile = Path.Combine(stationsRoot, "bonus-milk-skills.yml");
+    File.WriteAllText(bonusMilkFile, """
+        cow:
+          Skills:
+            - 'dropItem{item=minecraft:diamond;amount=1} ~onMilk'
+        bucket:
+          Skills:
+            - 'dropItem{item=minecraft:emerald;amount=1} ~onRightClick'
+            - 'dropItem{item=minecraft:iron_ingot;amount=1} ~onDrop'
+            - 'dropItem{item=minecraft:gold_ingot;amount=1} ~onStackDrop'
+        shears:
+          Skills:
+            - 'dropItem{item=minecraft:lapis_lazuli;amount=1} ~onLeftClick'
+        """);
+    deathSkills.RegisterDefinitions("interaction-tests", bonusMilkFile);
+
+    // Validate the 26.3 packet codec: EID, main hand, compressed zero
+    // hit-vector and secondary-action flag. Reject impossible hands and
+    // malformed trailing fields before reaching gameplay handlers.
+    var packetWriter = new PacketWriter();
+    packetWriter.WriteVarInt(17);
+    packetWriter.WriteVarInt(0);
+    packetWriter.WriteByte(0);
+    packetWriter.WriteBool(false);
+    var interaction = EntityInteractionProtocol.Read(new Packet(
+        EntityInteractionProtocol.ServerboundInteract, packetWriter.ToArray()));
+    Check(interaction.EntityId == 17 && interaction.Hand == 0 &&
+        !interaction.SecondaryAction, "Java 26.3 entity-interact packet parses safely");
+    bool badInteraction = false;
+    try
+    {
+        var bad = new PacketWriter();
+        bad.WriteVarInt(17); bad.WriteVarInt(4);
+        bad.WriteByte(0); bad.WriteBool(false);
+        _ = EntityInteractionProtocol.Read(new Packet(
+            EntityInteractionProtocol.ServerboundInteract, bad.ToArray()));
+    }
+    catch (InvalidDataException) { badInteraction = true; }
+    Check(badInteraction, "Entity interact rejects invalid client hand values");
+
+    using (var interactionOutput = new MemoryStream())
+    using (var interactionChannel = new PacketChannel(interactionOutput))
+    {
+        var farmer = new ConnectedPlayer(Guid.NewGuid(), "Farmer",
+            Array.Empty<ProfileProperty>(), 180, interactionChannel,
+            stationWorld, null, itemsCatalog);
+        farmer.MarkReady();
+        farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
+        ShardItemDefinition bucket = default, fullBucket = default;
+        ShardItemDefinition shears = default, wool = default;
+        ShardEntityInstance milkTarget = default, shearTarget = default;
+        Check(itemsCatalog.TryGetByIdentifier("bucket", out bucket) &&
+            itemsCatalog.TryGetByIdentifier("milk_bucket", out fullBucket) &&
+            farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 1, true) &&
+            lootWorld.TrySpawn("cow", 11, 80, 12, out milkTarget),
+            "Prepare cow and bucket for interactive milking");
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
+        Check(farmer.Inventory.Held() == new ItemStack(fullBucket.ProtocolId, 1),
+            "Right-clicking a cow turns an empty bucket into a milk bucket");
+        Check(itemsCatalog.TryGetByIdentifier("emerald", out var clickReward) &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == clickReward.ProtocolId),
+            "Right-click dispatches an item-owned skill independently of onMilk");
+        Check(itemsCatalog.TryGetByIdentifier("diamond", out var milkReward) &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == milkReward.ProtocolId &&
+                d.X == milkTarget.X && d.Z == milkTarget.Z),
+            "Successful milking dispatches custom cross-Shard ~onMilk skills");
+        Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 2, true),
+            "Set up a stacked-bucket milking transaction");
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
+        var (milkSlots, _, _) = farmer.Inventory.Snapshot();
+        Check(milkSlots[36] == new ItemStack(bucket.ProtocolId, 1) &&
+            milkSlots.Any((stack) => stack.ItemId == fullBucket.ProtocolId),
+            "Milking stacked buckets preserves the remaining empties and inserts filled milk");
+        var beforeFar = farmer.Inventory.Snapshot().Slots;
+        farmer.SetPose(new PlayerPose(40, 80, 40, 0, 0, true));
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
+        Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(beforeFar),
+            "Server enforces interaction reach to prevent remote item duplication");
+
+        // A stacked bucket must not be consumed if a full inventory cannot
+        // receive the resulting filled milk bucket.
+        farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
+        Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 2, true),
+            "Prepare stacked buckets for a full-inventory check");
+        Check(itemsCatalog.TryGetByIdentifier("stone", out var fillerStone),
+            "Load the stackable test item");
+        foreach (int inventorySlot in Enumerable.Range(9, 36))
+        {
+            if (inventorySlot == 36) continue;
+            Check(farmer.Inventory.TryCreativeSet(inventorySlot, fillerStone.ProtocolId, 64, true),
+                "Fill inventory slot to block milk output");
+        }
+        var lockedInventory = farmer.Inventory.Snapshot().Slots;
+        int milkRewardsBefore = lootGame.GroundItemsForTests.Count(
+            d => d.ItemId == milkReward.ProtocolId);
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(milkTarget.EntityId, 0, false), CancellationToken.None);
+        Check(farmer.Inventory.Snapshot().Slots.SequenceEqual(lockedInventory) &&
+            lootGame.GroundItemsForTests.Count(d =>
+                d.ItemId == milkReward.ProtocolId) == milkRewardsBefore,
+            "Full inventory refuses milk conversion and emits no onMilk reward (onRightClick still fires)");
+
+        farmer.SetPose(new PlayerPose(11, 80, 12, 0, 0, true));
+        Check(itemsCatalog.TryGetByIdentifier("shears", out shears) &&
+            itemsCatalog.TryGetByIdentifier("white_wool", out wool) &&
+            farmer.Inventory.TryCreativeSet(36, shears.ProtocolId, 1, true) &&
+            lootWorld.TrySpawn("sheep", 11, 80, 12, out shearTarget),
+            "Prepare sheep and shears for triggered shearing");
+        int beforeWool = lootGame.GroundItemsForTests.Length;
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(shearTarget.EntityId, 0, false), CancellationToken.None);
+        var shearedWool = lootGame.GroundItemsForTests;
+        Check(lootWorld.IsSheared(shearTarget.EntityId) &&
+            shearedWool.Length > beforeWool &&
+            shearedWool.Any(d => d.ItemId == wool.ProtocolId && d.Count is >= 1 and <= 3),
+            "~onShear dispatches YAML dropItem mechanic to create real wool drops");
+        await lootGame.HandleEntityInteractionAsync(farmer,
+            new EntityInteraction(shearTarget.EntityId, 0, false), CancellationToken.None);
+        Check(lootGame.GroundItemsForTests.Length == shearedWool.Length,
+            "Repeated shearing cannot duplicate wool rewards");
+
+        // Click triggers are item-owner skills, separate from entity events.
+        Check(stationWorld.TrySetBlockState(11, 80, 12, 9, out _),
+            "Prepare a nearby block for item left-click");
+        int beforeLeft = lootGame.GroundItemsForTests.Length;
+        await lootGame.HandleBlockActionAsync(farmer, new PlayerBlockAction(
+            BlockInteractionProtocol.StartDestroyBlock, 11, 80, 12, 1, 88),
+            CancellationToken.None);
+        Check(itemsCatalog.TryGetByIdentifier("lapis_lazuli", out var leftReward) &&
+            lootGame.GroundItemsForTests.Length > beforeLeft &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == leftReward.ProtocolId),
+            "Left-clicking a valid block dispatches the held item's skill");
+
+        // Q drops a single item; Ctrl+Q drops the remainder of the stack.
+        // Both emit onDrop, but only Ctrl+Q additionally emits onStackDrop.
+        Check(farmer.Inventory.TryCreativeSet(36, bucket.ProtocolId, 3, true),
+            "Prepare a stack of buckets for real dropped-item actions");
+        int beforeSingle = lootGame.GroundItemsForTests.Length;
+        await lootGame.HandleBlockActionAsync(farmer, new PlayerBlockAction(
+            BlockInteractionProtocol.DropItem, 0, 0, 0, 0, 89),
+            CancellationToken.None);
+        Check(farmer.Inventory.Held() == new ItemStack(bucket.ProtocolId, 2) &&
+            itemsCatalog.TryGetByIdentifier("iron_ingot", out var droppedReward) &&
+            lootGame.GroundItemsForTests.Length == beforeSingle + 2 &&
+            lootGame.GroundItemsForTests.Any(d =>
+                d.ItemId == bucket.ProtocolId && d.Count == 1) &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == droppedReward.ProtocolId),
+            "Q drops exactly one held item and fires onDrop after inventory commit");
+
+        int beforeStack = lootGame.GroundItemsForTests.Length;
+        await lootGame.HandleBlockActionAsync(farmer, new PlayerBlockAction(
+            BlockInteractionProtocol.DropAllItems, 0, 0, 0, 0, 90),
+            CancellationToken.None);
+        Check(farmer.Inventory.Held() == ItemStack.Empty &&
+            itemsCatalog.TryGetByIdentifier("gold_ingot", out var stackReward) &&
+            lootGame.GroundItemsForTests.Length == beforeStack + 3 &&
+            lootGame.GroundItemsForTests.Any(d =>
+                d.ItemId == bucket.ProtocolId && d.Count == 2) &&
+            lootGame.GroundItemsForTests.Any(d => d.ItemId == stackReward.ProtocolId),
+            "Ctrl+Q drops the remaining stack, triggering onDrop and onStackDrop");
+    }
+
     using (var stream = new MemoryStream())
     {
         using var wire = new PacketChannel(stream);

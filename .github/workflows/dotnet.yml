@@ -21,6 +21,8 @@ jobs:
         run: dotnet build Amethyst.slnx -c Release --nologo
       - name: Shard lifecycle
         run: dotnet run --project tests/ShardTests/ShardTests.csproj -c Release --no-build
+      - name: Entity registry and runtime
+        run: dotnet run --project tests/EntityTests/EntityTests.csproj -c Release --no-build
       - name: Block interaction and persistence
         run: dotnet run --project tests/BlockTests/BlockTests.csproj -c Release --no-build
       - name: Enchantment skill and inventory tests
