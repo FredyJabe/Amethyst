@@ -24,9 +24,10 @@ try
         baseCatalog.TryGetByIdentifier("minecraft:zombie", out var zombie) &&
         zombie.ProtocolId >= 0 && zombie.Category == "monster",
         "Vanilla entity registry reads all 161 wire types");
+    ShardEntityDefinition vanillaZombie = default;
     Check(baseCatalog.TryGetByIdentifier("minecraft:cow", out var vanillaCow) &&
         vanillaCow.MaxHealth == 10 &&
-        baseCatalog.TryGetByIdentifier("minecraft:zombie", out var vanillaZombie) &&
+        baseCatalog.TryGetByIdentifier("minecraft:zombie", out vanillaZombie) &&
         vanillaZombie.MaxHealth == 20 &&
         baseCatalog.TryGetByIdentifier("minecraft:iron_golem", out var golem) &&
         golem.MaxHealth == 100 &&
