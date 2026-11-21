@@ -969,7 +969,7 @@ duplicate overrides, invalid max levels, unknown conditions and mechanics.
 
 ### Stats (items and enchantments)
 
-Use a top-level `Stats` list to assign **absolute numeric values**.
+Use a top-level `Stats` list to assign or modify numeric values.
 The preferred syntax works in both item definitions
 (`shards/data/items/definitions/*.yml`) and enchantment overrides
 (`shards/data/items/enchantments/*.yml`):
@@ -978,17 +978,36 @@ The preferred syntax works in both item definitions
 wooden_axe:
   Id: minecraft:wooden_axe
   Stats:
-    - damage 50
-    - attack_speed 2
+    - damage 50       # SET damage to exactly 50
+    - damage +10      # ADD 10 damage
+    - damage -5       # SUBTRACT 5 damage
+    - damage *1.5     # MULTIPLY damage by 1.5
+    - attack_speed 2  # SET attack_speed to exactly 2
 ```
 
-Each entry is `- stat_name number`. It uses **set**, not add:
-`damage 50` replaces the event-local damage value with exactly 50,
-regardless of its previous value. Decimal and negative numbers are
-supported. Names are case-insensitive, normalized to lowercase, and
-must match `[a-z][a-z0-9_]*` (up to 64 characters). A list can have
-at most 64 entries, and duplicate stat names are rejected.
-`Stats: []` removes previously configured stats for an override.
+Each entry is `- stat_name value`, with an optional operator directly
+before the number:
+
+| Syntax | Operation | Example |
+| --- | --- | --- |
+| `damage 50` | `set` | Replaces damage with 50 |
+| `damage +10` | `add` | Adds 10 to existing damage |
+| `damage -5` | `add` with a negative value | Subtracts 5 |
+| `damage *1.5` | `multiply` | Multiplies damage by 1.5 |
+| `damage =-5` | `set` | Explicitly sets a negative value |
+
+**Entries execute in YAML order**, even when the same stat appears
+multiple times. In the example above, final damage is
+`((50 + 10 - 5) * 1.5) = 82.5`. The `+`, `-`, and `*` operators
+are not event triggers; they apply when the shared stat pipeline
+evaluates the item.
+
+Stat values use invariant-culture floating-point numbers with a
+maximum absolute input magnitude of 1,000,000. Names are
+case-insensitive, normalized to lowercase, and must match
+`[a-z][a-z0-9_]*` (up to 64 characters). A list can contain at
+most 64 entries. `Stats: []` removes previously configured stats
+for an override.
 
 For enchantment formulas or explicitly conditional behavior, the
 existing advanced **mapping** syntax remains supported:
