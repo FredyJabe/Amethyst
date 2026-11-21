@@ -215,10 +215,11 @@ internal static class EntityInteractionFeatureTests
 
             ShardItemDefinition emptyBucket = default;
             ShardItemDefinition filledBucket = default;
+            ShardEntityInstance milkingCow = default;
             Check(items.TryGetByIdentifier("minecraft:bucket", out emptyBucket) &&
                 items.TryGetByIdentifier("minecraft:milk_bucket", out filledBucket) &&
                 mobManager.TrySpawn("cow", 2, 81, 1,
-                    out ShardEntityInstance milkingCow) &&
+                    out milkingCow) &&
                 actor.Inventory.TryCreativeSet(
                     36, emptyBucket.ProtocolId, 1, true),
                 "Prepare a generic cow for cancellable main-hand milking");
