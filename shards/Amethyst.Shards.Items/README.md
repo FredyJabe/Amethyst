@@ -81,9 +81,9 @@ bucket:
 | `~onDrop` | **Live:** a successful Q or Ctrl+Q world-item drop |
 | `~onStackDrop` | **Live:** additional event for a successful Ctrl+Q full-stack drop |
 | `~onPickup` | **Live:** successful world-item pickup; fires only for the number actually inserted into inventory |
-| `~onSwap` | Registered; pending offhand swap support (F key) |
-| `~onEquip` | Registered; pending armor/equipment slot transactions |
-| `~onUnequip` | Registered; pending armor/equipment slot transactions |
+| `~onSwap` | **Live:** validated F-key mainhand/offhand exchange; cancellable before mutation |
+| `~onEquip` | **Live:** accepted offhand/armor equip transactions, including creative and window clicks |
+| `~onUnequip` | **Live:** accepted offhand/armor removal; not re-fired on durability-only changes |
 
 Core now passes the server-authoritative item ID, count, and
 actor UUID in `ShardSkillEvent` (`ItemId`, `Count`,
@@ -98,8 +98,9 @@ The server persists the drop and removes the matching inventory
 amount before dispatching the event; failed or stale transactions
 roll back the new world stack. `~onDrop` always fires on successful
 drops, and `~onStackDrop` fires additionally on full-stack drops.
-Inventory-window Q/Ctrl+Q actions, offhand (F), armor, air-only
-use-item packets, and left-clicking entities are **not yet wired**.
+Inventory-window Q/Ctrl+Q and left-click item triggers for entities
+remain pending. F-key, offhand and armor-slot interactions are now
+validated and emitted by their Gameplay publishers.
 Only successfully processed interactions emit triggers; unknown
 mechanics and unregistered trigger names still fail YAML validation.
 
@@ -108,9 +109,11 @@ provides validated species and sheared-state interactions. Gameplay
 handles bucket-to-milk conversion and dispatches `~onMilk`; when
 a sheep is sheared, Gameplay dispatches `~onShear`, which runs
 the configured Items `dropItem` skill to spawn wool. Each sheep
-can be sheared once until regrowth is implemented. The vanilla
-starter sheep skill emits white wool; sheep colours and shears
-durability are not yet represented by the current item/entity data.
+can be sheared once until timed wool regrowth. The Entities Shard owns
+all 16 sheep colours, persisted sheared state and regrowth; Items YAML
+selects the matching wool, and Gameplay applies shears durability.
+Both `~onShear` and `~onMilk` now run before mutation, so
+`cancelEvent` can prevent the default action without skipping later skills.
 
 The Entities Shard emits a one-time death event on `TryKill` or
 lethal `TryDamage`. Gameplay dispatches `~onDeath` via
@@ -118,9 +121,9 @@ Core's shared `IShardSkillEngine`; the Items-owned `dropItem` mechanic
 calls Gameplay's `IShardItemDropSink` to spawn physical, pickable items.
 `entityremove` does not trigger skills. This is a starter
 event/skill engine, **not** a complete MythicMobs implementation:
-other registered game-specific triggers and mechanics, target selectors, AI, Minecraft loot conditions,
-Looting enchantments, cooking by fire, XP and rare-drop functions
-are not yet supported.
+some additional game-specific triggers and target selectors, full mob
+AI, and environment-specific loot contexts remain pending. Looting,
+fire-smelting and player-kill XP are partially integrated already.
 
 **Migration from earlier experimental Drops YAML:** Files in
 `shards/data/items/loot/` using `Drops:` are not loaded. If they
@@ -815,10 +818,10 @@ Gameplay also publishes `~onDrop`, `~onStackDrop` (Q vs Ctrl-Q), and
 `~onPickup`: cancellation of these events prevents respectively the
 ground drop or inventory pickup, while subsequent Skills still execute.
 Dropping stages the physical ground entity and rolls it back if the
-inventory transaction cannot consume the exact held stack. Remaining
-registered triggers (`onSwap`, `onEquip`, `onUnequip`) still require
-their corresponding Gameplay publishers; declarations alone do not
-activate them.
+inventory transaction cannot consume the exact held stack. F-key
+`onSwap`, armor/offhand `onEquip` and `onUnequip` now publish on
+validated transactions. Durability-only changes update visible
+equipment without faking an equip transition.
 Custom aliases have registered definitions, but physical stacks still
 need separate alias identity before their per-alias skills can fire.
 
@@ -901,15 +904,18 @@ Active effects persist in an `AMEFF001` save file, are re-sent on
 login, and are cleared on respawn. Resistance and Absorption now
 modify real combat damage after the invulnerability-frame check.
 
-**This remains partial Phase 4:** vanilla-exact food and potion presets,
-the general `minecraft:consumable` and `minecraft:food` component
-override behavior, full status-effect gameplay (such as speed,
-invisibility, environment effects), collision-safe chorus-fruit
-teleportation, all 26.3 loot modifier/predicate families, all entity
-types, and many complex vanilla item interactions (e.g. maps, books,
-buckets and equipment) still need implementation. The explicit
-`minecraft:potion` profiles are initial implementations rather than
-fully verified 26.3 behavior.
+**This remains partial Phase 4:** the general `minecraft:consumable`
+and `minecraft:food` per-stack overrides, vanilla-exact food and potion
+timing, all status effects (speed, invisibility, environment effects),
+full collision and fluid physics, and specialized item interactions
+are incomplete. Chorus fruit now uses conservative loaded-chunk
+collision checks, and splash potions retain custom per-stack effects.
+Basic source-water/lava bucket filling and placement are implemented;
+waterlogging, fish buckets, powder snow, maps, books, archaeology
+sherds, vehicles and specialized equipment still need work. Some loot
+tables require unimplemented exploration maps, decorated-pot dynamic
+context, biomes or block-entity services. None of this is a claim of
+full vanilla parity.
 
 ## YAML loot drops and `dropItem` (Phase 4)
 

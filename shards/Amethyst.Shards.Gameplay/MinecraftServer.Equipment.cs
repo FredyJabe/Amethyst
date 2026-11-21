@@ -39,11 +39,24 @@ public sealed partial class MinecraftServer
 
     private static bool SameEquipment(ItemStack before, ItemStack after) =>
         before.ItemId == after.ItemId &&
+        before.Count == after.Count &&
         before.Damage == after.Damage &&
         before.Unbreakable == after.Unbreakable &&
         before.Unbreaking == after.Unbreaking &&
         before.Mending == after.Mending &&
         before.RepairCost == after.RepairCost &&
+        string.Equals(before.EnchantmentData, after.EnchantmentData,
+            StringComparison.Ordinal) &&
+        string.Equals(before.ComponentData, after.ComponentData,
+            StringComparison.Ordinal);
+
+    /// <summary>Durability and stack-count changes need packet updates but
+    /// are not equip transitions; metadata/identity changes are.</summary>
+    private static bool SameEquippedIdentity(ItemStack before, ItemStack after) =>
+        before.ItemId == after.ItemId &&
+        before.Unbreaking == after.Unbreaking &&
+        before.Mending == after.Mending &&
+        before.Unbreakable == after.Unbreakable &&
         string.Equals(before.EnchantmentData, after.EnchantmentData,
             StringComparison.Ordinal) &&
         string.Equals(before.ComponentData, after.ComponentData,
@@ -70,12 +83,15 @@ public sealed partial class MinecraftServer
                 _ => throw new InvalidOperationException("Bad equipment slot.")
             };
             changed.Add(new EntityEquipment(equipmentId, added));
-            if (removed.Count > 0)
-                await EnchantmentEventAsync(removed, "onUnequip", ct,
-                    actor: player.PlayerUuid);
-            if (added.Count > 0)
-                await EnchantmentEventAsync(added, "onEquip", ct,
-                    actor: player.PlayerUuid);
+            if (!SameEquippedIdentity(removed, added))
+            {
+                if (removed.Count > 0)
+                    await EnchantmentEventAsync(removed, "onUnequip", ct,
+                        actor: player.PlayerUuid);
+                if (added.Count > 0)
+                    await EnchantmentEventAsync(added, "onEquip", ct,
+                        actor: player.PlayerUuid);
+            }
         }
         await BroadcastEquipmentAsync(player, changed, ct);
     }

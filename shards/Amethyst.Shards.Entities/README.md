@@ -123,11 +123,13 @@ sheep:
 
 Custom aliases inherit the underlying species' interaction rules.
 Any enabled Shard can register a skill using those event triggers;
-an additional action is only executed after successful, in-range
-interactions. Client packet 0x1A is validated, offhand remains
-unsupported until Gameplay models that slot, and a second shearing
-cannot duplicate drops. There is no sheep grazing/regrowth, coloured
-wool, sheared visual metadata or shears durability yet.
+milk and shear skill actions execute once after validating the real
+entity and reach, but before their default state/inventory mutation.
+The onRightClick, onMilk and onShear event publishers all respect
+cancelEvent while continuing remaining skills. Mainhand and offhand
+milking are supported; shearing has an authoritative sheared flag and
+cannot be duplicated. Sheep have all 16 wool colours, persisted wool
+state, timed regrowth, metadata updates and shears durability.
 
 ## Console commands
 
@@ -202,18 +204,39 @@ are atomically persisted, and the Entities Shard flushes all durable stores
 on disable. Entity IDs are reallocated at startup; UUIDs remain stable. Projectiles and fishing bobbers
 are intentionally not saved between restarts.
 
+## Configurable mob experience
+
+The bundled `entities-26.3.yml` includes fixed XP rewards for 45 mob
+definitions that are eligible for a player kill. Administrators can
+override the server-owned reward in an Entities YAML root:
+
+```yaml
+cow:
+  Health: 10
+  Experience: [1, 3]
+zombie:
+  Experience: 5
+```
+
+`Experience` is an exact nonnegative number or a bounded inclusive
+`[minimum, maximum]` range; values above 32,767 are rejected.
+Eligible melee and projectile deaths spawn one persistent Entities-owned
+XP orb. Console and plugin kills do not inherit player-only XP. The
+reward definition is separate from Items loot YAML, and it does not
+confer AI, natural spawn rules or vanilla parity on an otherwise inert mob.
+
 ## Current limits
 
-Entity instances do not currently perform natural spawning, wandering,
-pathfinding, gravity, collision, attacks, breeding, item drops, or automated
-healing. Configured Health and Invulnerable currently affect manager
-operations, not client-visible damage animations or a vanilla combat
-system. Configured Display is not yet sent as custom-name entity metadata.
+Generic entity instances do not currently perform natural spawning,
+wandering, pathfinding, gravity, collisions, automatic hostile attacks,
+breeding or healing. Player melee and projectile attacks already damage
+health-bearing generic mobs; their one-shot deaths run Items YAML and
+pinned vanilla loot with configurable player-kill XP. Configured Display
+is not yet sent as custom-name entity metadata.
 Generic YAML-spawned instances now use a separate atomic, world-scoped
 `AMGEN001` save file with stable UUIDs, authoritative health and positions,
-and fresh network IDs allocated at load. This does **not** implement natural
-spawning or AI. Sheep retain
-their color/sheared state and health through restart, and physical item
+and fresh network IDs allocated at load. This does **not** implement
+natural spawning or AI. Sheep retain their color/sheared state and health through restart, and physical item
 entities and XP orbs are persisted. Fishing bobbers and launched projectiles
 remain transient. Player authentication, inventory, movement and networking
 stay with Gameplay because they are player-session responsibilities.

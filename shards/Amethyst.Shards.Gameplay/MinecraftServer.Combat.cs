@@ -176,8 +176,12 @@ public sealed partial class MinecraftServer
         }
         if (!hit) return;
         if (attacker.Inventory.DamageHeld(weapon.ItemId, 1))
+        {
             await InventoryProtocol.SendSlotAsync(attacker.Connection,
                 attacker.Inventory, attacker.Inventory.SelectedSlot, ct);
+            await BroadcastEquipmentAsync(attacker,
+                [new EntityEquipment(0, attacker.Inventory.Held())], ct);
+        }
     }
 
     /// <summary>Broadcast the vanilla swing only when the preceding attack
@@ -240,8 +244,11 @@ public sealed partial class MinecraftServer
             return false;
         int durability = Math.Max(1, (int)Math.Ceiling(raw / 4));
         if (victim.Inventory.DamageArmor(durability) > 0)
+        {
             await InventoryProtocol.SendContentAsync(victim.Connection,
                 victim.Inventory, ct);
+            await NotifyEquipmentChangesAsync(victim, gear, ct);
+        }
         await CombatProtocol.SendHealthAsync(victim, ct);
         foreach (ConnectedPlayer observer in _players.Snapshot().Where(p =>
             p.Ready && p.ConnectionId != victim.ConnectionId))

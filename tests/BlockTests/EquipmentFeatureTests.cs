@@ -160,6 +160,17 @@ internal static class EquipmentFeatureTests
                 "Equipment notifications follow committed slots and offhand changes persist");
             Check(observerStream.Length > observerBeforeHelmet,
                 "Equipping armor sends a visible head-slot update to observers");
+            ItemStack[] beforeWear = player.Inventory.Snapshot().Slots;
+            int eventsBeforeWear = events.Count;
+            long beforeWearPackets = observerStream.Length;
+            Check(player.Inventory.DamageSlot(5, helmet.ProtocolId, 1),
+                "Apply legitimate durability wear to a worn helmet");
+            await server.NotifyEquipmentChangesAsync(
+                player, beforeWear, CancellationToken.None);
+            Check(events.Count == eventsBeforeWear &&
+                observerStream.Length > beforeWearPackets &&
+                player.Inventory.Snapshot().Slots[5].Damage == 1,
+                "Durability change broadcasts new equipment but does not fake unequip/equip skills");
         }
         finally
         {
