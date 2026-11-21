@@ -113,6 +113,8 @@ try
     var xpEntities = (IShardExperienceOrbs)authoritative;
     var fishingEntities = (IShardFishingWorld)authoritative;
     var projectiles = (IShardProjectileWorld)authoritative;
+    GroundItem dropped = default;
+    ExperienceOrb orb = default;
     Check(native.TrySpawnSheep(4, 80, 4, out LivingEntity redSheep, 14) &&
         native.TryShear(redSheep.EntityId, out var shearedRed) &&
         shearedRed.Sheared && shearedRed.Color == 14 &&
