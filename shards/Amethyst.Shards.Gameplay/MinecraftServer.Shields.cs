@@ -22,6 +22,7 @@ public sealed partial class MinecraftServer
         if (await HandleProjectileUseAsync(player, action, ct)) return;
         if (await HandleFishingUseAsync(player, action, ct)) return;
         if (await HandleElytraUseAsync(player, action, ct)) return;
+        if (await HandleConsumableUseAsync(player, action, ct)) return;
         await BlockInteractionProtocol.SendAckAsync(player.Connection,
             action.Sequence, ct);
     }
@@ -44,6 +45,7 @@ public sealed partial class MinecraftServer
     internal async Task ReleaseUsingItemAsync(ConnectedPlayer player,
         CancellationToken ct)
     {
+        CancelConsumableUse(player.PlayerUuid);
         await ReleaseProjectileChargeAsync(player, ct);
         if (player.UseState.ShieldHand >= 0)
         {

@@ -26,7 +26,8 @@ public sealed class GameplayShard : IShard, IShardGameplay
             context.GetService<IShardSkillEngine>(),
             context.GetService<IShardLootRegistry>(),
             context.GetService<IShardVanillaLootTables>(),
-            context.GetService<IShardVanillaBlockStates>());
+            context.GetService<IShardVanillaBlockStates>(),
+            context.GetService<IShardConsumableRegistry>());
         game.Start();
         _gameplay = game;
         context.RegisterService<IShardGameplay>(this);

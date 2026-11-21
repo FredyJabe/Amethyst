@@ -27,6 +27,7 @@ public sealed class ConnectedPlayer : IShardPlayer
     }
     public PlayerInventory Inventory { get; }
     public PlayerVitals Vitals { get; }
+    public PlayerActiveEffects ActiveEffects { get; } = new();
     public PlayerUseState UseState { get; } = new();
     public PlayerFlightState Flight { get; } = new();
     public PlayerExperience Experience { get; }

@@ -182,6 +182,23 @@ public sealed partial class PlayerInventory
             .Sum(s => s.ItemId == itemId ? s.Count : 0) >= count;
     }
 
+    /// <summary>Consume an item only if it is still exactly the stack
+    /// which began the use animation. Includes component patches, so moving
+    /// or replacing food cannot duplicate or consume unrelated inventory.</summary>
+    public bool TryConsumeExactSlot(int slot, ItemStack expected)
+    {
+        if (slot is < 36 or > 45 || expected.Count <= 0) return false;
+        lock (_sync)
+        {
+            if (_slots[slot] != expected) return false;
+            _slots[slot] = expected.Count == 1 ? ItemStack.Empty :
+                expected with { Count = expected.Count - 1 };
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = expected; throw; }
+            return true;
+        }
+    }
+
     /// <summary>Consume an expected stack from a particular hand/offhand.
     /// Used when throwing a trident, pearl, egg or snowball.</summary>
     public bool ConsumeSlot(int slot, int itemId, bool creative = false)

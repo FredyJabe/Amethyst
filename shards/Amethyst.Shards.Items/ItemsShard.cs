@@ -575,6 +575,10 @@ public sealed class ItemsShard : IShard
             Path.Combine(directory, "recipes-26.3.yml"), recipeDirectory);
         ctx.RegisterService<IShardItemRegistry>(catalog);
         ctx.RegisterService<IShardRecipeRegistry>(recipes);
+        string consumableDir = Path.Combine(ctx.DataDirectory, "consumables");
+        var consumables = new ConsumableCatalog(catalog,
+            Path.Combine(directory, "consumables-26.3.yml"), consumableDir);
+        ctx.RegisterService<IShardConsumableRegistry>(consumables);
         string enchantmentDirectory = Path.Combine(ctx.DataDirectory, "enchantments");
         Directory.CreateDirectory(enchantmentDirectory);
         string exampleEnchantment = Path.Combine(enchantmentDirectory, "example-enchantments.yml");
@@ -705,7 +709,8 @@ public sealed class ItemsShard : IShard
             $"{componentNodes.Nodes.Count} assigned, {componentNodes.PendingCount} pending; " +
             $"recipe overrides: {recipeDirectory}; " +
             $"enchantments: {enchantments.Count} (overrides: {enchantmentDirectory}); " +
-            $"loot owners: {loot.Count} (overrides: {lootDirectory}).");
+            $"loot owners: {loot.Count} (overrides: {lootDirectory}); " +
+            $"consumables: {consumables.Count} (overrides: {consumableDir}).");
         return Task.CompletedTask;
     }
 

@@ -151,6 +151,7 @@ finally
 }
 
 await DurabilityFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await ConsumableFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await CombatFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await ShieldFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await ProjectileFeatureTests.RunAsync(itemsCatalog, recipesCatalog);

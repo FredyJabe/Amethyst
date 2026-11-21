@@ -28,6 +28,7 @@ public sealed partial class MinecraftServer
     private readonly IShardLootRegistry? _loot;
     private readonly IShardVanillaLootTables? _vanillaLoot;
     private readonly IShardVanillaBlockStates? _vanillaBlockStates;
+    private readonly IShardConsumableRegistry? _consumables;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private readonly Dictionary<Guid, Dictionary<int, ExperienceOrb>> _experienceViews = new();
@@ -43,7 +44,8 @@ public sealed partial class MinecraftServer
         IShardEnchantmentRegistry? enchantments = null, IShardSkillEngine? skills = null,
         IShardLootRegistry? loot = null,
         IShardVanillaLootTables? vanillaLoot = null,
-        IShardVanillaBlockStates? vanillaBlockStates = null)
+        IShardVanillaBlockStates? vanillaBlockStates = null,
+        IShardConsumableRegistry? consumables = null)
     {
         _options = options;
         _world = world;
@@ -55,6 +57,7 @@ public sealed partial class MinecraftServer
         _loot = loot;
         _vanillaLoot = vanillaLoot;
         _vanillaBlockStates = vanillaBlockStates;
+        _consumables = consumables;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers);
         _operators = new OperatorStore(options.OperatorsFile);
@@ -187,6 +190,7 @@ public sealed partial class MinecraftServer
         // who completed login; rejected/half-loaded sessions must not overwrite
         // a valid previous save with the initial spawn placeholder.
         CloseStation(player);
+        CancelConsumableUse(player.PlayerUuid);
         _fishing?.Cancel(player.PlayerUuid);
         TrySavePosition(player);
         _players.Remove(player.ConnectionId);
@@ -1172,6 +1176,7 @@ public sealed partial class MinecraftServer
     {
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
         while (await ticker.WaitForNextTickAsync(ct))
+        {
             await TickGroundItemsAsync(ct);
             await TickExperienceOrbsAsync(ct);
             await TickLivingEntitiesAsync(ct);
@@ -1179,6 +1184,9 @@ public sealed partial class MinecraftServer
             await TickFishingAsync(ct);
             await TickWoolRegrowthAsync(ct);
             await TickElytraAsync(ct);
+            await TickConsumablesAsync(ct);
+            await TickActiveEffectsAsync(ct);
+        }
     }
 
     /// <summary>One authoritative 20Hz tick for loose items. Exposed internally

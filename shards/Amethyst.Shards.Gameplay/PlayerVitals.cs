@@ -66,13 +66,21 @@ public sealed class PlayerVitals
     {
         lock (_gate)
         {
-            float old = _health;
+            float old = _health, oldSat = _saturation, oldEx = _exhaustion;
+            int oldFood = _food;
+            long oldDamageAt = _lastDamageAt;
             _health = MaximumHealth;
             _food = 20;
             _saturation = 5;
+            _exhaustion = 0;
             _lastDamageAt = Environment.TickCount64;
             try { Persist(); }
-            catch { _health = old; throw; }
+            catch
+            {
+                _health = old; _food = oldFood; _saturation = oldSat;
+                _exhaustion = oldEx; _lastDamageAt = oldDamageAt;
+                throw;
+            }
         }
     }
 

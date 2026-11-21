@@ -16,7 +16,8 @@ public static class EnchantmentSkills
         "onProjectileCharge", "onFishing", "onMove", "onAirTick",
         "onExperiencePickup", "onItemDamage", "onUnequip", "onSmash",
         "onSweep", "onSpearAttack", "onLeftClick", "onRightClick",
-        "onDrop", "onStackDrop", "onSwap", "onPickup", "onEquip"
+        "onDrop", "onStackDrop", "onSwap", "onPickup", "onEquip",
+        "onConsume"
     ];
     private static readonly Regex Key = new(
         @"^[a-z][a-z0-9_]{0,63}$",

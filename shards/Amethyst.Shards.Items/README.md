@@ -733,6 +733,36 @@ not yet **complete vanilla parity**. The pinned dataset is the
 authoritative source for implementing and testing the remaining
 function families instead of guessing hard-coded results.
 
+## Consumables, server food, and status effects
+
+`consumables-26.3.yml` contains 42 version-pinned item use profiles
+(40 foods plus milk and potion), with nutrition, **absolute** saturation,
+a timed consumption duration, `AlwaysEdible`, item remainders, and
+optional effects. Overrides under `shards/data/items/consumables/*.yml`
+replace individual entries; all material names resolve through the
+Items Shard's item registry, independently of the 45 approved
+component alias names.
+
+Gameplay validates the original held stack through the use animation,
+does not consume food before the configured use duration, cancels on
+early release, and atomically decrements exactly that held stack.
+Successful consumption updates persisted hunger and saturation and
+returns bowls or bottles through inventory or as physical dropped
+items if full. Hunger exhaustion is persisted with backwards-readable
+`AMHP0002`. A server-side active-effects store synchronizes
+`update_mob_effect` and `remove_mob_effect` packets to Java 26.3,
+with the first periodic hooks for regeneration, poison and hunger.
+The food event `~onConsume` can be cancelled by an item skill.
+
+**This remains partial Phase 4:** accurate use effects from the
+per-stack `minecraft:consumable`, `minecraft:potion_contents`,
+`minecraft:suspicious_stew_effects` codecs, full absorption and
+resistance combat interactions, ender-safe random teleportation,
+all other status-effect gameplay hooks, and the rest of complex
+vanilla interactions still need implementation. Current
+`minecraft:potion` uses a basic profile and does not yet implement
+per-bottle potion effects.
+
 ## YAML loot drops and `dropItem` (Phase 4)
 
 `shards/Amethyst.Shards.Items/loot-26.3.yml` bundles initial
