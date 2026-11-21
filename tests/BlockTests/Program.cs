@@ -156,6 +156,7 @@ await CombatFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await ShieldFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await ProjectileFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await EntityInteractionFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await EquipmentFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await FishingFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 await ElytraFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
 

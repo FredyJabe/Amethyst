@@ -50,6 +50,33 @@ public sealed partial class PlayerInventory : IShardPickupInventory
         lock (_sync) _selected = index;
     }
 
+    /// <summary>Protocol 777 F-key transaction: swap the full selected
+    /// stack with the offhand atomically, preserving per-instance components.
+    /// Spectators are rejected by Gameplay before calling this method.</summary>
+    public bool TrySwapOffhand()
+    {
+        lock (_sync)
+        {
+            int main = 36 + _selected;
+            ItemStack originalMain = _slots[main];
+            ItemStack originalOffhand = _slots[45];
+            if (!ValidSlotStack(45, originalMain) ||
+                !ValidSlotStack(main, originalOffhand) ||
+                originalMain == originalOffhand)
+                return false;
+            _slots[main] = originalOffhand;
+            _slots[45] = originalMain;
+            try { Persist(); _revision++; }
+            catch
+            {
+                _slots[main] = originalMain;
+                _slots[45] = originalOffhand;
+                throw;
+            }
+            return true;
+        }
+    }
+
     public int SelectedSlot { get { lock (_sync) return 36 + _selected; } }
 
     public ItemStack Held()

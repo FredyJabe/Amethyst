@@ -451,8 +451,11 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                         CreativeSlotUpdate update = BlockInteractionProtocol.ReadCreativeSlot(packet.Value);
                         if (player.Ready)
                         {
+                            ItemStack[] oldEquipment = player.Inventory.Snapshot().Slots;
                             player.SetCreativeSlot(update.Slot, update.ItemId,
                                 update.Count, update.PlainItem);
+                            await NotifyEquipmentChangesAsync(player,
+                                oldEquipment, lifetime.Token);
                             await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
                         }
                         break;
@@ -462,6 +465,7 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                         InventoryClick click = InventoryProtocol.ReadClick(packet.Value);
                         if (player.Ready)
                         {
+                            ItemStack[] oldEquipment = player.Inventory.Snapshot().Slots;
                             if (_stations.GetMenu(player.PlayerUuid) is not null || click.Window != 0)
                                 await HandleStationClickAsync(player, click, lifetime.Token);
                             else
@@ -469,6 +473,8 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                                 player.Inventory.ApplyClick(click);
                                 await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
                             }
+                            await NotifyEquipmentChangesAsync(player,
+                                oldEquipment, lifetime.Token);
                         }
                         break;
                     }
@@ -594,6 +600,13 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         if (action.Status == BlockInteractionProtocol.ReleaseUseItem)
         {
             await ReleaseUsingItemAsync(player, ct);
+            await BlockInteractionProtocol.SendAckAsync(
+                player.Connection, action.Sequence, ct);
+            return;
+        }
+        if (action.Status == BlockInteractionProtocol.SwapItemWithOffhand)
+        {
+            await HandleOffhandSwapAsync(player, ct);
             await BlockInteractionProtocol.SendAckAsync(
                 player.Connection, action.Sequence, ct);
             return;
