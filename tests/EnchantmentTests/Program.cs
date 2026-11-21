@@ -286,6 +286,50 @@ try
             StringComparison.Ordinal),
         "Vanilla random, explicit and pinned-level enchantments yield valid per-stack components");
 
+    File.WriteAllText(Path.Combine(generatedLoot, "filtered.json"), """
+        {
+          "type":"minecraft:chest",
+          "pools":[
+            {
+              "rolls":1,
+              "entries":[{"type":"minecraft:item", "name":"minecraft:compass",
+                "modifier":[
+                  {"type":"minecraft:set_name", "target":"item_name",
+                    "name":{"translate":"item.minecraft.compass"}},
+                  {"type":"minecraft:filtered",
+                    "item_filter":{"items":"minecraft:compass"},
+                    "on_pass":{"type":"minecraft:set_count","count":2}}
+                ]}]
+            },
+            {
+              "rolls":1,
+              "entries":[{"type":"minecraft:item", "name":"minecraft:stick",
+                "modifier":{"type":"minecraft:filtered",
+                  "item_filter":{"items":"minecraft:compass"},
+                  "on_fail":{"type":"minecraft:discard"}}}]
+            },
+            {
+              "rolls":1,
+              "entries":[{"type":"minecraft:item", "name":"minecraft:stick",
+                "modifier":{"type":"minecraft:filtered",
+                  "item_filter":{"predicates":{"minecraft:map_id":{}}},
+                  "on_fail":{"type":"minecraft:discard"}}}]
+            }
+          ]
+        }
+        """);
+    var filteredLoot = generatedEnchanted.Roll("minecraft:filtered",
+        new ShardVanillaLootContext { Random = new Random(19) });
+    Check(items.TryGetByIdentifier("minecraft:compass", out var compass) &&
+        filteredLoot.Count == 1 &&
+        filteredLoot[0].ItemId == compass.ProtocolId &&
+        filteredLoot[0].Count == 2 &&
+        ItemStackComponents.IsValid(filteredLoot[0].ComponentData) &&
+        ItemStackComponents.Decode(filteredLoot[0].ComponentData)
+            .TryGetValue("minecraft:item_name", out var translatedName) &&
+        translatedName.Contains("item.minecraft.compass", StringComparison.Ordinal),
+        "Filtered and discarded loot is stack-specific; translated names survive the wire codec");
+
     File.WriteAllText(Path.Combine(temporary, "override.yml"), """
         sharpness:
           MaxLevel: 6
