@@ -558,11 +558,11 @@ try
         rightClick.Runtime.IsCancelled &&
         rightClick.Runtime.HasFlag("right_click_done"),
         "cancelEvent on an item suppresses vanilla use but executes later skills");
-    Check(items.TryGetByIdentifier("minecraft:diamond_pickaxe", out var pickaxe),
+    Check(items.TryGetByIdentifier("minecraft:diamond_pickaxe", out var wearPickaxe),
         "Durability test item is registered");
-    var enchantedTool = new ItemStack(pickaxe.ProtocolId, 1)
+    var enchantedTool = new ItemStack(wearPickaxe.ProtocolId, 1)
         { Damage = 7, Unbreaking = 3 };
-    var enchantedArmor = new ItemStack(pickaxe.ProtocolId, 1)
+    var enchantedArmor = new ItemStack(wearPickaxe.ProtocolId, 1)
         { Damage = 7, Unbreaking = 3 };
     Check(wearSkills.PreventsWear(enchantedTool, false, new ConstantRandom(0.6)) &&
         !wearSkills.PreventsWear(enchantedArmor, true, new ConstantRandom(0.6)) &&
@@ -570,10 +570,10 @@ try
         "Vanilla YAML independently controls tool and armor Unbreaking rolls");
     Check(!wearSkills.PreventsWear(enchantedTool with { Unbreaking = 0 }, false,
         new ConstantRandom(0.0)), "Without enchantment there is no durability protection");
-    Check(DurabilityRules.ApplyWear(enchantedTool, pickaxe.MaxDurability, 3,
+    Check(DurabilityRules.ApplyWear(enchantedTool, wearPickaxe.MaxDurability, 3,
             random: new ConstantRandom(0.0), preventsWear: wearSkills.PreventsWear)
             == enchantedTool &&
-        DurabilityRules.ApplyWear(enchantedTool, pickaxe.MaxDurability, 3,
+        DurabilityRules.ApplyWear(enchantedTool, wearPickaxe.MaxDurability, 3,
             random: new ConstantRandom(0.99), preventsWear: wearSkills.PreventsWear)
             .Damage == 10,
         "Actual durability wear uses the configured skill result for every point");

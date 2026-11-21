@@ -239,9 +239,10 @@ internal static class CombatFeatureTests
                 server.GroundItemsForTests.Any(x => x.ItemId == wool.ProtocolId),
                 "Killing a sheep commits the YAML-defined meat and wool skill drops");
 
+            ShardItemDefinition beef = default;
             Check(managedMobs.TrySpawn("cow", 1, 80, 0,
                     out ShardEntityInstance cow) && cow.Health == 4 &&
-                items.TryGetByIdentifier("minecraft:beef", out var beef),
+                items.TryGetByIdentifier("minecraft:beef", out beef),
                 "Spawn a YAML-configured cow in the shared Entities runtime");
             int beforeGeneric = server.GroundItemsForTests.Length;
             await Task.Delay(140);
