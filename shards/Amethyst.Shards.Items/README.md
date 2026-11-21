@@ -704,7 +704,9 @@ need separate alias identity before their per-alias skills can fire.
 extracted from Mojang's Java **26.3 / protocol 777** server jar.
 The submodule carries **1,447** `data/minecraft/loot_table/**/*.json`
 files plus `blocks.json` mapping every numeric block state to its
-canonical block and properties. The Items Shard installs these assets
+canonical block and properties, and 883 vanilla data-pack tags
+(including the item, enchantment and entity-type tags used by loot).
+The Items Shard installs these assets
 and registers `IShardVanillaLootTables` and
 `IShardVanillaBlockStates`. A normal `./run.sh` checkout initializes
 the submodule once. For an alternate checkout, run
@@ -725,7 +727,17 @@ does not mean that every loot function and predicate is implemented.
 The current evaluator supports common item, alternatives, group,
 sequence, nested-table entries and common conditions, weighted pools,
 set-count, ore Fortune, Looting count increase, explosion decay, item
-damage, simple potion components and furnace smelting. Some 26.3
+damage, simple potion components and furnace smelting. It also handles
+`match_block`, `match_tool` with pinned item tags,
+`random_chance_with_enchanted_bonus`, simple block-entity
+`copy_components` when an authoritative component source exists,
+`copy_state`, `set_components`, `set_enchantments`,
+`enchant_randomly` (for supported items), `set_stew_effect`,
+`set_ominous_bottle_amplifier`, and inline loot tables.
+The item/entity tag resolver handles nested `#minecraft:...` tags.
+The evaluator preflights native results for supported component codecs
+before spawning anything, preventing partially spawned invalid loot.
+Some 26.3
 specialized entry types, predicate trees and modifier types still
 raise a named `NotSupportedException`. Gameplay logs these and uses
 the existing explicitly approximate drop fallback. This behavior is
@@ -754,14 +766,25 @@ items if full. Hunger exhaustion is persisted with backwards-readable
 with the first periodic hooks for regeneration, poison and hunger.
 The food event `~onConsume` can be cancelled by an item skill.
 
-**This remains partial Phase 4:** accurate use effects from the
-per-stack `minecraft:consumable`, `minecraft:potion_contents`,
-`minecraft:suspicious_stew_effects` codecs, full absorption and
-resistance combat interactions, ender-safe random teleportation,
-all other status-effect gameplay hooks, and the rest of complex
-vanilla interactions still need implementation. Current
-`minecraft:potion` uses a basic profile and does not yet implement
-per-bottle potion effects.
+The built-in Java 26.3 potion (46) and mob-effect (40) network IDs
+are pinned exactly via `VanillaBuiltinIds`; effect IDs are **zero-based**.
+`minecraft:potion_contents`, `minecraft:potion_duration_scale`, and
+`minecraft:suspicious_stew_effects` have typed stack network codecs.
+Gameplay reads those per-stack values after the held-use duration to
+apply potion presets/custom effects and restore the glass bottle or bowl.
+Active effects persist in an `AMEFF001` save file, are re-sent on
+login, and are cleared on respawn. Resistance and Absorption now
+modify real combat damage after the invulnerability-frame check.
+
+**This remains partial Phase 4:** vanilla-exact food and potion presets,
+the general `minecraft:consumable` and `minecraft:food` component
+override behavior, full status-effect gameplay (such as speed,
+invisibility, environment effects), collision-safe chorus-fruit
+teleportation, all 26.3 loot modifier/predicate families, all entity
+types, and many complex vanilla item interactions (e.g. maps, books,
+buckets and equipment) still need implementation. The explicit
+`minecraft:potion` profiles are initial implementations rather than
+fully verified 26.3 behavior.
 
 ## YAML loot drops and `dropItem` (Phase 4)
 
