@@ -74,6 +74,10 @@ public sealed record ShardSkillEvent(
 {
     public Random Rng => Random ?? System.Random.Shared;
     public ShardSkillRuntime Runtime { get; init; } = new();
+    /// <summary>When true, the event publisher will spawn Runtime.Drops
+    /// after all mechanics finish. Legacy entity events use the fallback
+    /// drop sink instead, so their loot is never spawned twice.</summary>
+    public bool PublisherCommitsDrops { get; init; }
 }
 
 public delegate void ShardSkillValidator(ShardSkillInstruction skill);
