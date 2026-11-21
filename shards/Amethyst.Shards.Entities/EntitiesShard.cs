@@ -46,6 +46,8 @@ public sealed class EntitiesShard : IShard
         ctx.RegisterService<IShardEntityManager>(manager);
         ctx.RegisterService<IShardEntityInteractions>(manager);
         ctx.RegisterService<IShardLivingEntities>(manager);
+        ctx.RegisterService<IShardExperienceOrbs>(manager);
+        ctx.RegisterService<IShardFishingWorld>(manager);
         // The Entities Shard supplies these interaction event triggers to the
         // universal Core skill registry; it does not own skill parsing.
         ctx.RegisterSkillTrigger("onMilk");

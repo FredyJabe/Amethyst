@@ -4,7 +4,8 @@ namespace Amethyst.BuiltinShards;
 
 /// <summary>Thread-safe authoritative instance store. No automatic spawn,
 /// AI or physics: other Shards can implement those via the typed service.</summary>
-public sealed class EntityManager : IShardEntityManager, IShardEntityInteractions, IShardLivingEntities
+public sealed class EntityManager : IShardEntityManager, IShardEntityInteractions,
+    IShardLivingEntities, IShardExperienceOrbs, IShardFishingWorld
 {
     private const int MaximumEntities = 10_000;
     private const double MaximumCoordinate = 30_000_000;
@@ -15,12 +16,16 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
     private readonly object _gate = new();
     private int _nextEntityId;
     private LivingEntityStore _livestock;
+    private ExperienceOrbStore _experienceOrbs;
+    private readonly FishingWorld _fishing;
     private bool _worldBound;
 
     public EntityManager(IShardEntityRegistry definitions)
     {
         _definitions = definitions ?? throw new ArgumentNullException(nameof(definitions));
         _livestock = new LivingEntityStore(null, ".", AllocateEntityId);
+        _experienceOrbs = new ExperienceOrbStore(null, ".", AllocateEntityId);
+        _fishing = new FishingWorld(AllocateEntityId);
     }
 
     /// <summary>Bind persistence once to the actual Gameplay world directory.
@@ -32,6 +37,7 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
         {
             if (_worldBound) return;
             _livestock = new LivingEntityStore(directory, worldPath, AllocateEntityId);
+            _experienceOrbs = new ExperienceOrbStore(directory, worldPath, AllocateEntityId);
             _worldBound = true;
         }
     }
@@ -52,6 +58,35 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
     public LivingEntity[] Regrow(long nowMs, int requiredMs = 180_000) =>
         _livestock.Regrow(nowMs, requiredMs);
     public void Save() => _livestock.Save();
+
+    ExperienceOrb[] IShardExperienceOrbs.Snapshot() =>
+        _experienceOrbs.Snapshot();
+    bool IShardExperienceOrbs.TrySpawn(int value, double x, double y,
+        double z, out ExperienceOrb orb, long? nowMs) =>
+        _experienceOrbs.TrySpawn(value, x, y, z, out orb, nowMs);
+    void IShardExperienceOrbs.Simulate(IShardBlockWorld world, long? nowMs) =>
+        _experienceOrbs.Simulate(world, nowMs);
+    int IShardExperienceOrbs.TryCollect(int id, long? nowMs) =>
+        _experienceOrbs.TryCollect(id, nowMs);
+    void IShardExperienceOrbs.Save() => _experienceOrbs.Save();
+
+    FishingBobber[] IShardFishingWorld.Snapshot() => _fishing.Snapshot();
+    bool IShardFishingWorld.HasHook(Guid owner) => _fishing.HasHook(owner);
+    bool IShardFishingWorld.TryCast(Guid owner, int ownerEntityId,
+        PlayerPose pos, out FishingBobber bobber, int waitReductionSeconds) =>
+        _fishing.TryCast(owner, ownerEntityId, pos, out bobber,
+            waitReductionSeconds);
+    bool IShardFishingWorld.TryReel(Guid owner, out FishingReel result,
+        long? nowMilliseconds) => _fishing.TryReel(owner, out result,
+            nowMilliseconds);
+    bool IShardFishingWorld.Cancel(Guid owner) => _fishing.Cancel(owner);
+    FishingBobber[] IShardFishingWorld.Tick(IShardBlockWorld world,
+        long? nowMilliseconds, Random? random) =>
+        _fishing.Tick(world, nowMilliseconds, random);
+    bool IShardFishingWorld.CheckOpenWater(IShardBlockWorld world,
+        FishingBobber bobber) => _fishing.CheckOpenWater(world, bobber);
+    (string Item, int Xp) IShardFishingWorld.RollStarterLoot(Random? random) =>
+        _fishing.RollStarterLoot(random);
 
     private ShardEntityInstance FromLivestock(LivingEntity sheep)
     {

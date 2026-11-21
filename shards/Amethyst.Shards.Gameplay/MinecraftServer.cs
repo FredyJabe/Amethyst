@@ -18,7 +18,7 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     private readonly PlayerRegistry _players;
     private readonly OperatorStore _operators;
     private readonly GroundItemStore? _groundItems;
-    private readonly ExperienceOrbStore? _experienceOrbs;
+    private readonly IShardExperienceOrbs? _experienceOrbs;
     private readonly IShardLivingEntities? _livingEntities;
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
@@ -53,7 +53,9 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         IShardVanillaLootTables? vanillaLoot = null,
         IShardVanillaBlockStates? vanillaBlockStates = null,
         IShardConsumableRegistry? consumables = null,
-        IShardLivingEntities? livestock = null)
+        IShardLivingEntities? livestock = null,
+        IShardExperienceOrbs? experienceOrbs = null,
+        IShardFishingWorld? fishing = null)
     {
         _options = options;
         _world = world;
@@ -65,6 +67,8 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         _entityTypes = entityTypes;
         _interactions = interactions;
         _livingEntities = livestock;
+        _experienceOrbs = experienceOrbs;
+        _fishing = fishing;
         entities?.BindWorldEntities(inventoryDirectory, options.WorldPath);
         _enchantments = enchantments;
         _loot = loot;
@@ -82,10 +86,9 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         {
             _groundItems = new GroundItemStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId, items);
-            _experienceOrbs = new ExperienceOrbStore(inventoryDirectory,
-                options.WorldPath, _players.AllocateEntityId);
+            // XP orbs belong to the Entities Shard.
             _projectiles = new ProjectileWorld(_players.AllocateEntityId);
-            _fishing = new FishingWorld(_players.AllocateEntityId);
+            // Fishing bobbers belong to the Entities Shard.
         }
     }
 

@@ -1,25 +1,13 @@
 using Amethyst.Shards;
 
-namespace Amethyst;
+using Amethyst;
 
-public readonly record struct FishingBobber(
-    int EntityId, Guid Uuid, Guid Owner, int OwnerEntityId,
-    double X, double Y, double Z, double Vx, double Vy, double Vz,
-    bool InWater, bool Biting, long BiteAtMs, long BiteUntilMs,
-    int AgeTicks)
-{
-    /// <summary>Seconds deducted from each bite wait by the rod's Lure
-    /// Stats, bounded to preserve a positive bite interval.</summary>
-    public int WaitReductionSeconds { get; init; }
-}
-
-public readonly record struct FishingReel(bool Caught, bool WasInWater,
-    FishingBobber Bobber);
+namespace Amethyst.BuiltinShards;
 
 /// <summary>Server-authoritative one-bobber-per-player fishing state.
 /// Casts have physical trajectories and bite windows. Reeling only
 /// awards loot when the bobber is biting in water.</summary>
-public sealed class FishingWorld
+public sealed class FishingWorld : IShardFishingWorld
 {
     private readonly object _gate = new();
     private readonly Func<int> _allocate;
@@ -27,6 +15,12 @@ public sealed class FishingWorld
     public const int MaximumAgeTicks = 20 * 120;
 
     public FishingWorld(Func<int> allocateId) => _allocate = allocateId;
+    public bool CheckOpenWater(IShardBlockWorld world, FishingBobber bobber) =>
+        IsOpenWater(world, bobber);
+
+    public (string Item, int Xp) RollStarterLoot(Random? random = null) =>
+        RollLoot(random);
+
 
     public FishingBobber[] Snapshot()
     {

@@ -1,15 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Amethyst;
+using Amethyst;
+using Amethyst.Shards;
 
-public readonly record struct ExperienceOrb(
-    int EntityId, Guid Uuid, int Value, double X, double Y, double Z,
-    double VelocityY, bool OnGround, long CreatedAtMs);
+namespace Amethyst.BuiltinShards;
 
 /// <summary>Authoritative persisted XP orbs, independent of item stacks.
 /// XP is only awarded on real player collision, not when blocks break.</summary>
-public sealed class ExperienceOrbStore
+public sealed class ExperienceOrbStore : IShardExperienceOrbs
 {
     private static readonly byte[] Magic = "AMXPORB1"u8.ToArray();
     private readonly object _gate = new();

@@ -4,7 +4,7 @@ namespace Amethyst;
 
 public sealed partial class MinecraftServer
 {
-    private readonly FishingWorld? _fishing;
+    private readonly IShardFishingWorld? _fishing;
     private readonly Dictionary<Guid, Dictionary<int, FishingBobber>> _fishingViews = new();
 
     internal FishingBobber[] FishingHooksForTests => _fishing?.Snapshot() ?? [];
@@ -37,7 +37,7 @@ public sealed partial class MinecraftServer
                             // Open-water state is only approximate until all
                             // 26.3 collision/fluid and weather checks exist.
                             InOpenWater = _blocks is not null &&
-                                FishingWorld.IsOpenWater(_blocks, reel.Bobber)
+                                _fishing.CheckOpenWater(_blocks, reel.Bobber)
                         });
                 if (nativeCatch is not null)
                 {
@@ -68,7 +68,7 @@ public sealed partial class MinecraftServer
                 }
                 else if (!fishingEffects.IsCancelled)
                 {
-                    var (loot, _) = FishingWorld.RollLoot();
+                    var (loot, _) = _fishing.RollStarterLoot();
                     if (_groundItems is not null &&
                         _items.TryGetByIdentifier(loot, out var reward))
                         _groundItems.TrySpawn(reward.ProtocolId, 1,

@@ -23,6 +23,8 @@ public sealed class GameplayShard : IShard, IShardGameplay
         IShardEntityRegistry entityTypes = context.GetRequiredService<IShardEntityRegistry>();
         IShardEntityInteractions interactions = context.GetRequiredService<IShardEntityInteractions>();
         IShardLivingEntities livestock = context.GetRequiredService<IShardLivingEntities>();
+        IShardExperienceOrbs experienceOrbs = context.GetRequiredService<IShardExperienceOrbs>();
+        IShardFishingWorld fishing = context.GetRequiredService<IShardFishingWorld>();
         var game = new MinecraftServer(context.Options, world,
             context.GetRequiredService<IShardPacketBus>(), context.GetService<IShardBlockWorld>(),
             context.DataDirectory, items, recipes,
@@ -32,7 +34,8 @@ public sealed class GameplayShard : IShard, IShardGameplay
             context.GetService<IShardLootRegistry>(),
             context.GetService<IShardVanillaLootTables>(),
             context.GetService<IShardVanillaBlockStates>(),
-            context.GetService<IShardConsumableRegistry>(), livestock);
+            context.GetService<IShardConsumableRegistry>(), livestock,
+            experienceOrbs, fishing);
         game.Start();
         _gameplay = game;
         context.RegisterService<IShardGameplay>(this);
