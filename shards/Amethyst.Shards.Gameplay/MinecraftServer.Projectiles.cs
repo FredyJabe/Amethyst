@@ -6,7 +6,7 @@ public sealed partial class MinecraftServer
 {
     private readonly Dictionary<Guid, Dictionary<int, ProjectileEntity>>
         _projectileViews = new();
-    private readonly ProjectileWorld? _projectiles;
+    private readonly IShardProjectileWorld? _projectiles;
 
     internal ProjectileEntity[] ProjectilesForTests =>
         _projectiles?.Snapshot() ?? [];
@@ -136,7 +136,7 @@ public sealed partial class MinecraftServer
         if (projectileEffects.IsCancelled) return;
         damage = (float)Math.Clamp(projectileEffects.Number(
             "projectile_damage", damage), 0, 1000);
-        if (_projectiles.Snapshot().Length >= ProjectileWorld.MaximumProjectiles)
+        if (_projectiles.Snapshot().Length >= 1024)
             return;
         if (!creative)
         {
@@ -169,7 +169,9 @@ public sealed partial class MinecraftServer
         if (_projectiles is null || _blocks is null) return;
         ConnectedPlayer[] players = _players.Snapshot()
             .Where(p => p.Ready).ToArray();
-        ProjectileFrame frame = _projectiles.Tick(_blocks, players,
+        ProjectileFrame frame = _projectiles.Tick(_blocks,
+            players.Where(p => p.Ready && p.GameMode != PlayerGameMode.Spectator)
+                .Select(p => new ProjectilePlayer(p.PlayerUuid, p.Pose)).ToArray(),
             _livingEntities?.Snapshot() ?? []);
         ProjectileEntity[] present = frame.Moving;
         var online = players.Select(p => p.ConnectionId).ToHashSet();

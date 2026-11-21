@@ -17,7 +17,7 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     private readonly IShardPacketBus _packetBus;
     private readonly PlayerRegistry _players;
     private readonly OperatorStore _operators;
-    private readonly GroundItemStore? _groundItems;
+    private readonly IShardGroundItems? _groundItems;
     private readonly IShardExperienceOrbs? _experienceOrbs;
     private readonly IShardLivingEntities? _livingEntities;
     private readonly PlayerPositionStore _positions;
@@ -55,7 +55,9 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         IShardConsumableRegistry? consumables = null,
         IShardLivingEntities? livestock = null,
         IShardExperienceOrbs? experienceOrbs = null,
-        IShardFishingWorld? fishing = null)
+        IShardFishingWorld? fishing = null,
+        IShardGroundItems? groundItems = null,
+        IShardProjectileWorld? projectiles = null)
     {
         _options = options;
         _world = world;
@@ -69,7 +71,9 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         _livingEntities = livestock;
         _experienceOrbs = experienceOrbs;
         _fishing = fishing;
-        entities?.BindWorldEntities(inventoryDirectory, options.WorldPath);
+        _groundItems = groundItems;
+        _projectiles = projectiles;
+        entities?.BindWorldEntities(inventoryDirectory, options.WorldPath, items);
         _enchantments = enchantments;
         _loot = loot;
         _vanillaLoot = vanillaLoot;
@@ -84,10 +88,9 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             items, recipes ?? throw new ArgumentNullException(nameof(recipes)));
         if (_blocks is not null)
         {
-            _groundItems = new GroundItemStore(inventoryDirectory,
-                options.WorldPath, _players.AllocateEntityId, items);
+            // Ground items are persisted and simulated by the Entities Shard.
             // XP orbs belong to the Entities Shard.
-            _projectiles = new ProjectileWorld(_players.AllocateEntityId);
+            // Projectiles are simulated by the Entities Shard.
             // Fishing bobbers belong to the Entities Shard.
         }
     }

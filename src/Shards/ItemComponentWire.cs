@@ -10,7 +10,7 @@ namespace Amethyst;
 /// clientbound Slot format. Stack-specific wear/enchantments are written by
 /// InventoryProtocol after the definition patch. All send paths (menus, entity
 /// metadata, inventory) use the same codec.</summary>
-internal static class ItemComponentWire
+public static class ItemComponentWire
 {
     public static void AddDefinition(
         IDictionary<int, Action<PacketWriter>> added, ISet<int> removed,

@@ -5,7 +5,8 @@ namespace Amethyst.BuiltinShards;
 /// <summary>Thread-safe authoritative instance store. No automatic spawn,
 /// AI or physics: other Shards can implement those via the typed service.</summary>
 public sealed class EntityManager : IShardEntityManager, IShardEntityInteractions,
-    IShardLivingEntities, IShardExperienceOrbs, IShardFishingWorld
+    IShardLivingEntities, IShardExperienceOrbs, IShardFishingWorld,
+    IShardGroundItems, IShardProjectileWorld
 {
     private const int MaximumEntities = 10_000;
     private const double MaximumCoordinate = 30_000_000;
@@ -17,7 +18,9 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
     private int _nextEntityId;
     private LivingEntityStore _livestock;
     private ExperienceOrbStore _experienceOrbs;
+    private GroundItemStore _groundItems;
     private readonly FishingWorld _fishing;
+    private readonly ProjectileWorld _projectiles;
     private bool _worldBound;
 
     public EntityManager(IShardEntityRegistry definitions)
@@ -25,19 +28,23 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
         _definitions = definitions ?? throw new ArgumentNullException(nameof(definitions));
         _livestock = new LivingEntityStore(null, ".", AllocateEntityId);
         _experienceOrbs = new ExperienceOrbStore(null, ".", AllocateEntityId);
+        _groundItems = new GroundItemStore(null, ".", AllocateEntityId);
         _fishing = new FishingWorld(AllocateEntityId);
+        _projectiles = new ProjectileWorld(AllocateEntityId);
     }
 
     /// <summary>Bind persistence once to the actual Gameplay world directory.
     /// Entities owns the store; Gameplay supplies the already-established save
     /// path so AMLIVE01 worlds remain readable after the Shard migration.</summary>
-    public void BindWorldEntities(string? directory, string worldPath)
+    public void BindWorldEntities(string? directory, string worldPath,
+        IShardItemRegistry? items = null)
     {
         lock (_gate)
         {
             if (_worldBound) return;
             _livestock = new LivingEntityStore(directory, worldPath, AllocateEntityId);
             _experienceOrbs = new ExperienceOrbStore(directory, worldPath, AllocateEntityId);
+            _groundItems = new GroundItemStore(directory, worldPath, AllocateEntityId, items);
             _worldBound = true;
         }
     }
@@ -69,6 +76,33 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
     int IShardExperienceOrbs.TryCollect(int id, long? nowMs) =>
         _experienceOrbs.TryCollect(id, nowMs);
     void IShardExperienceOrbs.Save() => _experienceOrbs.Save();
+
+    GroundItem[] IShardGroundItems.Snapshot() => _groundItems.Snapshot();
+    bool IShardGroundItems.TrySpawn(int itemId, int count, double x, double y,
+        double z, out GroundItem entity, long? nowMilliseconds) =>
+        _groundItems.TrySpawn(itemId, count, x, y, z, out entity, nowMilliseconds);
+    bool IShardGroundItems.TrySpawn(ItemStack stack, double x, double y,
+        double z, out GroundItem entity, long? nowMilliseconds) =>
+        _groundItems.TrySpawn(stack, x, y, z, out entity, nowMilliseconds);
+    bool IShardGroundItems.TryRemove(int entityId) => _groundItems.TryRemove(entityId);
+    bool IShardGroundItems.TryDiscard(int entityId) => _groundItems.TryDiscard(entityId);
+    void IShardGroundItems.Simulate(IShardBlockWorld world, long? nowMs) =>
+        _groundItems.Simulate(world, nowMs);
+    int IShardGroundItems.TryCollect(int entityId, IShardPickupInventory inventory,
+        out GroundItem remaining, long? nowMs) =>
+        _groundItems.TryCollect(entityId, inventory, out remaining, nowMs);
+    void IShardGroundItems.Save() => _groundItems.Save();
+
+    ProjectileEntity[] IShardProjectileWorld.Snapshot() => _projectiles.Snapshot();
+    bool IShardProjectileWorld.TryLaunch(Guid owner, ProjectileKind kind,
+        PlayerPose source, double speed, float damage,
+        ItemStack recoverable, out ProjectileEntity projectile) =>
+        _projectiles.TryLaunch(owner, kind, source, speed, damage, recoverable,
+            out projectile);
+    ProjectileFrame IShardProjectileWorld.Tick(IShardBlockWorld world,
+        IReadOnlyList<ProjectilePlayer> players,
+        IReadOnlyList<LivingEntity> mobs) =>
+        _projectiles.Tick(world, players, mobs);
 
     FishingBobber[] IShardFishingWorld.Snapshot() => _fishing.Snapshot();
     bool IShardFishingWorld.HasHook(Guid owner) => _fishing.HasHook(owner);

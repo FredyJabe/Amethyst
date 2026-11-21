@@ -1,32 +1,15 @@
 using Amethyst.Shards;
 
-namespace Amethyst;
+using Amethyst;
+
+namespace Amethyst.BuiltinShards;
 
 /// <summary>Supported physical projectile families for Java 26.3.</summary>
-public enum ProjectileKind : byte
-{
-    Arrow, SpectralArrow, Trident, Snowball, Egg, EnderPearl, SplashPotion
-}
-
-public readonly record struct ProjectileEntity(
-    int EntityId, Guid Uuid, Guid Owner, ProjectileKind Kind,
-    double X, double Y, double Z, double Vx, double Vy, double Vz,
-    float Damage, int AgeTicks, ItemStack Recoverable)
-{
-    public bool CanRecover => Recoverable.Count > 0;
-}
-
-public readonly record struct ProjectileImpact(ProjectileEntity Projectile,
-    Guid PlayerHit, int MobHit, bool HitBlock);
-
-public readonly record struct ProjectileFrame(ProjectileEntity[] Moving,
-    ProjectileImpact[] Impacts);
-
 /// <summary>20Hz server-authoritative projectiles. Trajectories are ray-marched
 /// to avoid tunneling, with collision against blocks, players and livestock.
 /// Projectiles are transient; recoverable arrows/tridents become normal
 /// persistent ground items when they land.</summary>
-public sealed class ProjectileWorld
+public sealed class ProjectileWorld : IShardProjectileWorld
 {
     private readonly object _gate = new();
     private readonly Func<int> _allocate;
@@ -69,7 +52,7 @@ public sealed class ProjectileWorld
     }
 
     public ProjectileFrame Tick(IShardBlockWorld world,
-        IReadOnlyList<ConnectedPlayer> players,
+        IReadOnlyList<ProjectilePlayer> players,
         IReadOnlyList<LivingEntity> mobs)
     {
         var moving = new List<ProjectileEntity>();
@@ -107,11 +90,9 @@ public sealed class ProjectileWorld
                         blockHit = true;
                         break;
                     }
-                    foreach (ConnectedPlayer candidate in players)
+                    foreach (ProjectilePlayer candidate in players)
                     {
-                        if (!candidate.Ready ||
-                            candidate.GameMode == PlayerGameMode.Spectator ||
-                            candidate.PlayerUuid == old.Owner) continue;
+                        if (candidate.PlayerUuid == old.Owner) continue;
                         PlayerPose p = candidate.Pose;
                         double dx = p.X - x, dz = p.Z - z;
                         if (dx * dx + dz * dz < 0.45 * 0.45 &&

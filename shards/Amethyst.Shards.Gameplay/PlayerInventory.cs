@@ -6,7 +6,7 @@ namespace Amethyst;
 /// <summary>Simple server-authoritative player inventory. Supports main slots
 /// 9..35 and hotbar 36..44; armor/crafting/offhand are reserved for later.
 /// All edits are persisted atomically under Gameplay's Shard data directory.</summary>
-public sealed partial class PlayerInventory
+public sealed partial class PlayerInventory : IShardPickupInventory
 {
     private static readonly byte[] Magic = "AMINV006"u8.ToArray();
     private static readonly byte[] EnchantmentMagic = "AMINV005"u8.ToArray();

@@ -1,27 +1,18 @@
 using System.Text;
 using Amethyst.Shards;
 
-namespace Amethyst;
+using Amethyst;
+using Amethyst.Shards;
+
+namespace Amethyst.BuiltinShards;
 
 /// <summary>A plain item entity in the Overworld. Coordinates are world-space,
 /// Y is the bottom of the entity's 0.25-block bounding box.</summary>
-public readonly record struct GroundItem(
-    int EntityId, Guid Uuid, int ItemId, int Count,
-    double X, double Y, double Z, double VelocityY, bool OnGround, long CreatedAtMs)
-{
-    /// <summary>Full authoritative stack. Null/default means an old
-    /// ID/count-only drop created before the durability milestone.</summary>
-    public ItemStack Data { get; init; }
-    public ItemStack ResolvedStack => Data.Count == 0
-        ? new ItemStack(ItemId, Count)
-        : Data with { Count = Count };
-}
-
 /// <summary>Owns loose item entities and atomically persists them, separately from
 /// player inventories. Packet visibility is managed by the Gameplay Shard.
 /// First milestone physics models gravity and full-block floors; fluids, damage,
 /// merging, partial collision shapes and hopper interaction are not included.</summary>
-public sealed class GroundItemStore
+public sealed class GroundItemStore : IShardGroundItems
 {
     private static readonly byte[] Magic = "AMDROP03"u8.ToArray();
     private static readonly byte[] PreviousMagic = "AMDROP02"u8.ToArray();
@@ -174,7 +165,7 @@ public sealed class GroundItemStore
     /// <summary>Complete or partial pickup. Inventory insertion is authoritative
     /// and persisted before the loose stack is adjusted. Uninserted items stay
     /// on the ground, including when the player is full.</summary>
-    public int TryCollect(int entityId, PlayerInventory inventory,
+    public int TryCollect(int entityId, IShardPickupInventory inventory,
         out GroundItem remaining, long? nowMilliseconds = null)
     {
         remaining = default;
