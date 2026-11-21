@@ -749,10 +749,29 @@ public sealed class ItemsShard : IShard
                 (ids.Length == 30 ? " … (showing first 30)" : ""));
             return Task.CompletedTask;
         });
-            $"recipe overrides: {recipeDirectory}; " +
-            $"enchantments: {enchantments.Count} (overrides: {enchantmentDirectory}); " +
-            $"loot owners: {loot.Count} (overrides: {lootDirectory}); " +
-            $"consumables: {consumables.Count} (overrides: {consumableDir}).");
+        ctx.RegisterConsoleCommand("skillinfo", (args, token) =>
+        {
+            string key = args.Trim();
+            if (!skillEngine.TryGetSkills(key, out var selected))
+                ctx.Log("Usage: skillinfo <entity-id|item-id> (configured skills)");
+            else
+                ctx.Log($"Skills {key}: " + (selected.Count == 0 ? "(none)" :
+                    string.Join(", ", selected.Select(skill =>
+                        $"{skill.Mechanic}{{{string.Join(";", skill.Arguments.Select(arg =>
+                            $"{arg.Key}={arg.Value}"))}}} " +
+                        (skill.Target is null ? "" : $"@{skill.Target} ") +
+                        $"~{skill.Trigger}"))));
+            return Task.CompletedTask;
+        });
+        ctx.Log($"Registered {catalog.Count} Java {catalog.MinecraftVersion} items, " +
+            $"{recipes.RecipeCount} recipes, {enchantments.Count} enchantments, " +
+            $"{loot.Count} loot owners, {consumables.Count} consumables; " +
+            $"Core skills: {skillEngine.Definitions.Count} instructions; " +
+            $"fixed component nodes: {componentNodes.Nodes.Count} assigned, " +
+            $"{componentNodes.PendingCount} pending. " +
+            $"Item overrides: {definitions}; recipe overrides: {recipeDirectory}; " +
+            $"enchantment overrides: {enchantmentDirectory}; " +
+            $"loot overrides: {lootDirectory}; consumable overrides: {consumableDir}.");
         return Task.CompletedTask;
     }
 
