@@ -61,9 +61,11 @@ public sealed partial class MinecraftServer
             }
             if (effect.Id == "minecraft:clear_poison")
             {
-                if (player.ActiveEffects.Remove("minecraft:poison"))
+                if (player.ActiveEffects.Remove("minecraft:poison") &&
+                    StatusEffectProtocol.TryGetId("minecraft:poison",
+                        out int poisonId))
                     await StatusEffectProtocol.RemoveAsync(player.Connection,
-                        player.EntityId, 19, ct);
+                        player.EntityId, poisonId, ct);
                 continue;
             }
             if (effect.Id == "minecraft:random_teleport")
