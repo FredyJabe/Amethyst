@@ -85,43 +85,58 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
             if (!_files.TryGetValue(id, out string? path))
                 throw new InvalidDataException($"Unknown 26.3 loot table {id}.");
             using var document = JsonDocument.Parse(File.ReadAllText(path));
-            JsonElement root = document.RootElement;
-            if (root.TryGetProperty("pools", out JsonElement pools))
+            EvaluateRoot(document.RootElement, c, output, visiting, depth);
+        }
+        finally { visiting.Remove(id); }
+    }
+
+    /// <summary>Inline loot-table entries have exactly the same structure as
+    /// named files but do not have a separate table key in the registry.</summary>
+    private void EvaluateRoot(JsonElement root, ShardVanillaLootContext c,
+        List<Drop> output, HashSet<string> visiting, int depth)
+    {
+        if (depth > 16)
+            throw new InvalidDataException("Nested 26.3 loot table too deep.");
+        var tableDrops = new List<Drop>();
+        if (root.TryGetProperty("pools", out JsonElement pools))
+        {
+            foreach (JsonElement pool in pools.EnumerateArray())
             {
-                foreach (JsonElement pool in pools.EnumerateArray())
+                if (!Pass(pool, c)) continue;
+                double bonus = pool.TryGetProperty("bonus_rolls", out var extra)
+                    ? Sample(extra, c) * c.Luck : 0;
+                double count = Sample(pool.GetProperty("rolls"), c) + bonus;
+                int rolls = (int)Math.Clamp(Math.Floor(count) +
+                    (c.Random.NextDouble() < count - Math.Floor(count) ? 1 : 0),
+                    0, 256);
+                for (int roll = 0; roll < rolls; roll++)
                 {
-                    if (!Pass(pool, c)) continue;
-                    double bonus = pool.TryGetProperty("bonus_rolls", out var extra)
-                        ? Sample(extra, c) * c.Luck : 0;
-                    double count = Sample(pool.GetProperty("rolls"), c) + bonus;
-                    int rolls = (int)Math.Clamp(Math.Floor(count) +
-                        (c.Random.NextDouble() < count - Math.Floor(count) ? 1 : 0),
-                        0, 256);
-                    for (int roll = 0; roll < rolls; roll++)
+                    var entries = pool.GetProperty("entries").EnumerateArray()
+                        .Where(e => Pass(e, c)).ToArray();
+                    int total = 0;
+                    foreach (JsonElement entry in entries)
+                        total = checked(total + EffectiveWeight(entry, c));
+                    if (total == 0) continue;
+                    int selected = c.Random.Next(total);
+                    foreach (JsonElement entry in entries)
                     {
-                        var entries = pool.GetProperty("entries").EnumerateArray()
-                            .Where(e => Pass(e, c)).ToArray();
-                        int total = 0;
-                        foreach (JsonElement entry in entries)
-                            total = checked(total + EffectiveWeight(entry, c));
-                        if (total == 0) continue;
-                        int selected = c.Random.Next(total);
-                        foreach (JsonElement entry in entries)
+                        int weight = EffectiveWeight(entry, c);
+                        if (selected >= weight)
                         {
-                            int weight = EffectiveWeight(entry, c);
-                            if (selected >= weight) { selected -= weight; continue; }
-                            var generated = new List<Drop>();
-                            Emit(entry, c, generated, visiting, depth);
-                            ApplyModifiers(pool, c, generated);
-                            output.AddRange(generated);
-                            break;
+                            selected -= weight;
+                            continue;
                         }
+                        var generated = new List<Drop>();
+                        Emit(entry, c, generated, visiting, depth);
+                        ApplyModifiers(pool, c, generated);
+                        tableDrops.AddRange(generated);
+                        break;
                     }
                 }
             }
-            ApplyModifiers(root, c, output);
         }
-        finally { visiting.Remove(id); }
+        ApplyModifiers(root, c, tableDrops);
+        output.AddRange(tableDrops);
     }
 
     private static int EffectiveWeight(JsonElement entry, ShardVanillaLootContext c)
@@ -153,10 +168,14 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
             }
             case "minecraft:loot_table":
             {
-                var value = entry.GetProperty("value");
-                if (value.ValueKind != JsonValueKind.String)
-                    throw new NotSupportedException("26.3 inline/tag loot_table entries need context expansion.");
-                Evaluate(value.GetString()!, c, generated, visiting, depth + 1);
+                JsonElement value = entry.GetProperty("value");
+                if (value.ValueKind == JsonValueKind.String)
+                    Evaluate(value.GetString()!, c, generated, visiting, depth + 1);
+                else if (value.ValueKind == JsonValueKind.Object)
+                    EvaluateRoot(value, c, generated, visiting, depth + 1);
+                else
+                    throw new NotSupportedException(
+                        "26.3 tag loot_table references need registry tag expansion.");
                 break;
             }
             case "minecraft:alternatives":
@@ -219,6 +238,52 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
             case "minecraft:killed_by_player": return c.KilledByPlayer;
             case "minecraft:entity_properties":
                 return EntityProperties(cond, c);
+            case "minecraft:match_block":
+            {
+                JsonElement blocks = cond.GetProperty("blocks");
+                bool match = blocks.ValueKind switch
+                {
+                    JsonValueKind.String =>
+                        string.Equals(blocks.GetString(), c.BlockId,
+                            StringComparison.Ordinal),
+                    JsonValueKind.Array => blocks.EnumerateArray().Any(
+                        b => string.Equals(b.GetString(), c.BlockId,
+                            StringComparison.Ordinal)),
+                    _ => throw new NotSupportedException(
+                        "Block tag selection needs a full block tag registry.")
+                };
+                if (!match) return false;
+                if (!cond.TryGetProperty("state", out var state)) return true;
+                foreach (JsonProperty property in state.EnumerateObject())
+                {
+                    if (c.BlockProperties is null ||
+                        !c.BlockProperties.TryGetValue(property.Name,
+                            out string? actual))
+                        throw new NotSupportedException(
+                            $"Loot predicate needs block state {property.Name}.");
+                    if (!string.Equals(actual, property.Value.ToString(),
+                        StringComparison.Ordinal))
+                        return false;
+                }
+                return true;
+            }
+            case "minecraft:random_chance_with_enchanted_bonus":
+            {
+                string enchantment = cond.GetProperty("enchantment")
+                    .GetString() ?? "";
+                int level = enchantment switch
+                {
+                    "minecraft:looting" => c.Looting,
+                    "minecraft:fortune" => c.Fortune,
+                    _ => throw new NotSupportedException(
+                        $"Unsupported enchanted loot chance {enchantment}.")
+                };
+                double probability = level <= 0
+                    ? Sample(cond.GetProperty("unenchanted_chance"), c)
+                    : SampleEnchantedChance(cond.GetProperty(
+                        "enchanted_chance"), c, level);
+                return c.Random.NextDouble() < Math.Clamp(probability, 0, 1);
+            }
             case "minecraft:block_state_property":
             {
                 string block = cond.GetProperty("block").GetString() ?? "";
@@ -355,6 +420,111 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
                 }
                 break;
             }
+            case "minecraft:set_enchantments":
+            {
+                JsonElement configured = modifier.GetProperty("enchantments");
+                foreach (var drop in drops)
+                {
+                    if (!_items.TryGetById(drop.ItemId, out var definition))
+                        continue;
+                    bool book = definition.Identifier == "minecraft:book";
+                    string component = book
+                        ? "minecraft:stored_enchantments"
+                        : "minecraft:enchantments";
+                    if (book)
+                    {
+                        if (!_items.TryGetByIdentifier(
+                            "minecraft:enchanted_book", out var converted))
+                            throw new InvalidDataException(
+                                "Missing vanilla enchanted_book registry item.");
+                        drop.ItemId = converted.ProtocolId;
+                    }
+                    var enchantments = new SortedDictionary<string, int>(
+                        StringComparer.Ordinal);
+                    if (drop.Components.TryGetValue(component, out var current))
+                    {
+                        using var json = JsonDocument.Parse(current);
+                        foreach (JsonProperty old in json.RootElement.EnumerateObject())
+                            enchantments[old.Name] = old.Value.GetInt32();
+                    }
+                    foreach (JsonProperty enchantment in configured.EnumerateObject())
+                    {
+                        _ = VanillaRegistries.IndexOf(
+                            "minecraft:enchantment", enchantment.Name);
+                        int level = enchantment.Value.GetInt32();
+                        if (level is < 0 or > 255)
+                            throw new InvalidDataException(
+                                "Invalid set_enchantments level.");
+                        if (level == 0) enchantments.Remove(enchantment.Name);
+                        else enchantments[enchantment.Name] = level;
+                    }
+                    drop.Components[component] =
+                        JsonSerializer.Serialize(enchantments);
+                }
+                break;
+            }
+            case "minecraft:set_components":
+            {
+                JsonElement configured = modifier.GetProperty("components");
+                foreach (var drop in drops)
+                    foreach (JsonProperty property in configured.EnumerateObject())
+                    {
+                        if (!ShardItemComponentIds.TryGetId(
+                            property.Name, out _))
+                            throw new InvalidDataException(
+                                $"Unknown 26.3 loot item component {property.Name}.");
+                        drop.Components[property.Name] = property.Value.GetRawText();
+                    }
+                break;
+            }
+            case "minecraft:set_ominous_bottle_amplifier":
+            {
+                int amplifier = (int)Math.Clamp(Math.Floor(Sample(
+                    modifier.GetProperty("amplifier"), c)), 0, 4);
+                foreach (var drop in drops)
+                    drop.Components["minecraft:ominous_bottle_amplifier"] =
+                        JsonSerializer.Serialize(amplifier);
+                break;
+            }
+            case "minecraft:set_stew_effect":
+            {
+                JsonElement[] options = modifier.GetProperty("effects")
+                    .EnumerateArray().ToArray();
+                if (options.Length == 0)
+                    throw new InvalidDataException("Empty suspicious stew effect pool.");
+                JsonElement chosen = options[c.Random.Next(options.Length)];
+                string effect = chosen.GetProperty("type").GetString() ?? "";
+                _ = VanillaBuiltinIds.IndexOf("minecraft:mob_effect", effect);
+                int ticks = (int)Math.Clamp(Math.Round(
+                    Sample(chosen.GetProperty("duration"), c) * 20), 0, 72000);
+                foreach (var drop in drops)
+                    drop.Components["minecraft:suspicious_stew_effects"] =
+                        JsonSerializer.Serialize(new[] {
+                            new { id = effect, duration = ticks }
+                        });
+                break;
+            }
+            case "minecraft:copy_state":
+            {
+                string block = modifier.GetProperty("block").GetString() ?? "";
+                if (!string.Equals(c.BlockId, block, StringComparison.Ordinal) ||
+                    c.BlockProperties is null)
+                    throw new NotSupportedException(
+                        "Loot copy_state requires the actual block and properties.");
+                var selected = new SortedDictionary<string, string>(
+                    StringComparer.Ordinal);
+                foreach (JsonElement property in modifier.GetProperty("properties")
+                    .EnumerateArray())
+                {
+                    string name = property.GetString() ?? "";
+                    if (c.BlockProperties.TryGetValue(name, out string? value))
+                        selected.Add(name, value);
+                }
+                foreach (var drop in drops)
+                    drop.Components["minecraft:block_state"] =
+                        JsonSerializer.Serialize(selected);
+                break;
+            }
             case "minecraft:explosion_decay":
                 if (c.ExplosionRadius is double radius && radius > 0)
                     foreach (var drop in drops)
@@ -441,6 +611,21 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
             min >= 0 && max < int.MaxValue)
             return c.Random.Next((int)min, (int)max + 1);
         return min + c.Random.NextDouble() * (max - min);
+    }
+
+    private static double SampleEnchantedChance(JsonElement provider,
+        ShardVanillaLootContext context, int level)
+    {
+        if (provider.ValueKind == JsonValueKind.Number)
+            return provider.GetDouble();
+        string type = Type(provider);
+        if (type != "minecraft:linear")
+            return Sample(provider, context);
+        double basis = Sample(provider.GetProperty("base"), context);
+        double increment = provider.TryGetProperty("per_level_above_first",
+            out JsonElement per)
+            ? Sample(per, context) : 0;
+        return basis + increment * Math.Max(0, level - 1);
     }
 
     private static double Binomial(JsonElement provider,

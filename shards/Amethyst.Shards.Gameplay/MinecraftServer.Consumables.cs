@@ -73,6 +73,7 @@ public sealed partial class MinecraftServer
                 continue;
             ItemStack held = player.Inventory.Snapshot().Slots[use.Slot];
             if (held != use.Stack || held.Count == 0 ||
+                use.Slot != 45 && player.Inventory.SelectedSlot != use.Slot ||
                 use.Definition.Nutrition > 0 &&
                 player.Vitals.Snapshot().Food == 20 &&
                 !use.Definition.AlwaysEdible) continue;
@@ -109,7 +110,7 @@ public sealed partial class MinecraftServer
             // Effect recipients are server-owned. The next stage connects
             // these validated effect definitions to a complete status engine.
             await ApplyConsumedEffectsAsync(player,
-                use.Definition.Effects, ct);
+                ConsumableEffects.ForStack(held, use.Definition.Effects), ct);
             await InventoryProtocol.SendContentAsync(player.Connection,
                 player.Inventory, ct);
             await CombatProtocol.SendHealthAsync(player, ct);

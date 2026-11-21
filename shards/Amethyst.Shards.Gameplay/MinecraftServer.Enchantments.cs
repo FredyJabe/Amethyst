@@ -44,6 +44,21 @@ public sealed partial class MinecraftServer
                 foreach (var property in data.RootElement.EnumerateObject())
                     active[property.Name] = property.Value.GetInt32();
         }
+        // Per-instance enchantment components from loot tables, custom
+        // items, or smithing override the definition defaults. Legacy
+        // ItemStack enchantment fields remain authoritative on top.
+        if (item.Components.TryGetValue("minecraft:enchantments",
+            out string? stackEnchantments))
+        {
+            using var data = JsonDocument.Parse(stackEnchantments);
+            if (data.RootElement.ValueKind == JsonValueKind.Object &&
+                data.RootElement.TryGetProperty("Remove", out _))
+                active.Clear();
+            else if (data.RootElement.ValueKind == JsonValueKind.Object &&
+                !data.RootElement.TryGetProperty("WireHex", out _))
+                foreach (JsonProperty entry in data.RootElement.EnumerateObject())
+                    active[entry.Name] = entry.Value.GetInt32();
+        }
         foreach (var (id, level) in item.AllEnchantments())
             active[id] = level;
         foreach (var (id, level) in active)

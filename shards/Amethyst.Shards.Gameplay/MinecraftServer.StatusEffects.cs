@@ -45,6 +45,10 @@ public sealed partial class MinecraftServer
             {
                 if (effect.Id == "minecraft:instant_health")
                     player.Vitals.Heal(4 * (1 << Math.Min(8, effect.Amplifier)));
+                else if (effect.Id == "minecraft:instant_damage")
+                    player.Vitals.TryDamage(
+                        6 * (1 << Math.Min(8, effect.Amplifier)),
+                        Environment.TickCount64, out _, bypassIFrames: true);
                 else if (effect.Id == "minecraft:saturation")
                     player.Vitals.TryEat(
                         Math.Min(20, 2 * (1 << Math.Min(8, effect.Amplifier))),

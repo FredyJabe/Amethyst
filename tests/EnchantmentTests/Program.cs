@@ -101,6 +101,36 @@ Check(nativeTables.Roll("minecraft:blocks/stone",
         new ShardVanillaLootContext { SilkTouch = true })[0].ItemId ==
     items.All.Single(x => x.Identifier == "minecraft:stone").ProtocolId,
     "Stone drops its own block with Silk Touch");
+if (!items.TryGetByIdentifier("minecraft:acacia_door", out var acaciaDoor))
+    throw new InvalidDataException("Missing vanilla acacia door.");
+var lowerDoor = nativeTables.Roll("minecraft:blocks/acacia_door",
+    new ShardVanillaLootContext
+    {
+        BlockId = "minecraft:acacia_door",
+        BlockProperties = new Dictionary<string, string>
+            { ["half"] = "lower" }
+    });
+var upperDoor = nativeTables.Roll("minecraft:blocks/acacia_door",
+    new ShardVanillaLootContext
+    {
+        BlockId = "minecraft:acacia_door",
+        BlockProperties = new Dictionary<string, string>
+            { ["half"] = "upper" }
+    });
+Check(lowerDoor.Count == 1 && lowerDoor[0].ItemId == acaciaDoor.ProtocolId &&
+    upperDoor.Count == 0,
+    "Official 26.3 match_block drops only the door's lower half");
+if (!items.TryGetByIdentifier("minecraft:copper_ingot", out var drownedCopper))
+    throw new InvalidDataException("Missing vanilla copper ingot.");
+var drownedLoot = nativeTables.Roll("minecraft:entities/drowned",
+    new ShardVanillaLootContext
+    {
+        Looting = 3, KilledByPlayer = true,
+        Random = new ConstantRandom(0.01)
+    });
+Check(drownedLoot.Any(d => d.ItemId == drownedCopper.ProtocolId),
+    "Looting changes random_chance_with_enchanted_bonus on drowned kills");
+
 Check(items.TryGetByIdentifier("minecraft:diamond_ore", out var ore) &&
     nativeTables.Roll("minecraft:blocks/diamond_ore",
         new ShardVanillaLootContext { SilkTouch = true })[0].ItemId ==

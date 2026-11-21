@@ -62,6 +62,7 @@ internal static class ItemComponentWire
                 case "minecraft:damage":
                 case "minecraft:enchantable":
                 case "minecraft:map_id":
+                case "minecraft:ominous_bottle_amplifier":
                     int number = value.GetInt32();
                     added[id] = w => w.WriteVarInt(number);
                     break;
@@ -129,7 +130,67 @@ internal static class ItemComponentWire
                         foreach (int entry in colors) w.WriteInt32(entry);
                     };
                     break;
+                case "minecraft:block_state":
+                {
+                    if (value.ValueKind != JsonValueKind.Object)
+                        throw new InvalidDataException("Item block_state must be a mapping.");
+                    var properties = value.EnumerateObject().Select(
+                        p => (p.Name, Value: p.Value.GetString()!)).ToArray();
+                    if (properties.Length > 64)
+                        throw new InvalidDataException("Too many block state properties.");
+                    var payload = new PacketWriter();
+                    payload.WriteVarInt(properties.Length);
+                    foreach (var (property, state) in properties)
+                    {
+                        payload.WriteString(property);
+                        payload.WriteString(state);
+                    }
+                    byte[] encodedState = payload.ToArray();
+                    added[id] = w => w.WriteBytes(encodedState);
+                    break;
+                }
+                case "minecraft:potion_contents":
+                {
+                    var payloadWriter = new PacketWriter();
+                    WritePotionContents(payloadWriter, value);
+                    byte[] potionPayload = payloadWriter.ToArray();
+                    added[id] = w => w.WriteBytes(potionPayload);
+                    break;
+                }
+                case "minecraft:potion_duration_scale":
+                {
+                    float scale = value.GetSingle();
+                    if (!float.IsFinite(scale) || scale < 0)
+                        throw new InvalidDataException("Invalid potion duration scale.");
+                    added[id] = w => w.WriteFloat(scale);
+                    break;
+                }
+                case "minecraft:suspicious_stew_effects":
+                {
+                    if (value.ValueKind != JsonValueKind.Array)
+                        throw new InvalidDataException("Stew effects must be an array.");
+                    var entries = value.EnumerateArray().ToArray();
+                    if (entries.Length > 16)
+                        throw new InvalidDataException("Too many suspicious stew effects.");
+                    var payloadWriter = new PacketWriter();
+                    payloadWriter.WriteVarInt(entries.Length);
+                    foreach (var entry in entries)
+                    {
+                        string effect = entry.GetProperty("id").GetString() ??
+                            throw new InvalidDataException("Invalid stew effect ID.");
+                        payloadWriter.WriteVarInt(
+                            VanillaBuiltinIds.IndexOf("minecraft:mob_effect", effect));
+                        int duration = entry.GetProperty("duration").GetInt32();
+                        if (duration is < 0 or > 72000)
+                            throw new InvalidDataException("Invalid stew effect duration.");
+                        payloadWriter.WriteVarInt(duration);
+                    }
+                    byte[] stewPayload = payloadWriter.ToArray();
+                    added[id] = w => w.WriteBytes(stewPayload);
+                    break;
+                }
                 case "minecraft:enchantments":
+                case "minecraft:stored_enchantments":
                     var levels = value.EnumerateObject()
                         .Select(property => (Id: VanillaRegistries.IndexOf(
                             "minecraft:enchantment", property.Name),
@@ -167,6 +228,74 @@ internal static class ItemComponentWire
                         "use WireHex or Remove in its YAML node.");
             }
         }
+    }
+
+    /// <summary>Java 26.3 potion_contents STREAM_CODEC, including optional
+    /// vanilla potion holder, custom color, effects and custom name.
+    /// All network ids come from the pinned 777 static registries.</summary>
+    private static void WritePotionContents(PacketWriter writer, JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("Potion contents must be an object.");
+        foreach (JsonProperty entry in value.EnumerateObject())
+            if (entry.Name is not ("potion" or "custom_color" or
+                "custom_effects" or "custom_name"))
+                throw new InvalidDataException(
+                    $"Unknown 26.3 potion contents property {entry.Name}.");
+        bool hasPotion = value.TryGetProperty("potion", out var potion);
+        writer.WriteBool(hasPotion);
+        if (hasPotion)
+            writer.WriteVarInt(VanillaBuiltinIds.IndexOf(
+                "minecraft:potion", potion.GetString()!));
+        bool hasColor = value.TryGetProperty("custom_color", out var color);
+        writer.WriteBool(hasColor);
+        if (hasColor) writer.WriteInt32(color.GetInt32());
+        JsonElement[] customEffects =
+            value.TryGetProperty("custom_effects", out var effectsValue)
+                ? effectsValue.EnumerateArray().ToArray() : [];
+        if (customEffects.Length > 64)
+            throw new InvalidDataException("Too many potion effects.");
+        writer.WriteVarInt(customEffects.Length);
+        foreach (JsonElement effect in customEffects)
+        {
+            writer.WriteVarInt(VanillaBuiltinIds.IndexOf(
+                "minecraft:mob_effect",
+                effect.GetProperty("id").GetString()!));
+            WritePotionEffectDetails(writer, effect, 0);
+        }
+        bool hasName = value.TryGetProperty("custom_name", out var name);
+        writer.WriteBool(hasName);
+        if (hasName)
+        {
+            string text = name.GetString() ?? "";
+            if (text.Length > 256)
+                throw new InvalidDataException("Potion custom name too long.");
+            writer.WriteString(text);
+        }
+    }
+
+    private static void WritePotionEffectDetails(
+        PacketWriter writer, JsonElement value, int depth)
+    {
+        if (depth > 8 || value.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("Invalid nested potion effect.");
+        int amplifier = value.TryGetProperty("amplifier", out var amp)
+            ? amp.GetInt32() : 0;
+        int duration = value.TryGetProperty("duration", out var dur)
+            ? dur.GetInt32() : 0;
+        if (amplifier is < 0 or > 255 || duration is < 0 or > 72000)
+            throw new InvalidDataException("Invalid potion effect value.");
+        writer.WriteVarInt(amplifier);
+        writer.WriteVarInt(duration);
+        writer.WriteBool(value.TryGetProperty("ambient", out var ambient) &&
+            ambient.GetBoolean());
+        writer.WriteBool(!value.TryGetProperty("show_particles", out var particles) ||
+            particles.GetBoolean());
+        writer.WriteBool(!value.TryGetProperty("show_icon", out var icon) ||
+            icon.GetBoolean());
+        bool hidden = value.TryGetProperty("hidden_effect", out var child);
+        writer.WriteBool(hidden);
+        if (hidden) WritePotionEffectDetails(writer, child, depth + 1);
     }
 
     // 26.3 text components use unnamed network NBT. The common Mythic-style

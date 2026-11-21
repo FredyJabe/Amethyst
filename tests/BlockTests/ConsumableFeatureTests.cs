@@ -31,6 +31,73 @@ internal static class ConsumableFeatureTests
             stewFood.RemainderItemId > 0,
             "42 26.3 consumable profiles load; bread and stew have correct nutrition/remainders");
 
+        Check(VanillaBuiltinIds.IndexOf("minecraft:potion",
+                "minecraft:water") == 0 &&
+            VanillaBuiltinIds.IndexOf("minecraft:potion",
+                "minecraft:healing") >= 0 &&
+            VanillaBuiltinIds.IndexOf("minecraft:mob_effect",
+                "minecraft:speed") == 0 &&
+            VanillaBuiltinIds.IndexOf("minecraft:mob_effect",
+                "minecraft:poison") == 18 &&
+            StatusEffectProtocol.TryGetId("minecraft:poison",
+                out int poisonId) && poisonId == 18,
+            "Potion and status effect IDs match the actual zero-based 26.3 registries");
+
+        if (!items.TryGetByIdentifier("minecraft:potion", out var potionItem))
+            throw new InvalidDataException("Missing potion item.");
+        string potionContents = System.Text.Json.JsonSerializer.Serialize(
+            new
+            {
+                potion = "minecraft:healing",
+                custom_effects = new[]
+                {
+                    new { id = "minecraft:speed", amplifier = 1, duration = 80 }
+                }
+            });
+        var potionPatch = ItemStackComponents.Encode(
+            new Dictionary<string, string>
+            {
+                ["minecraft:potion_contents"] = potionContents,
+                ["minecraft:potion_duration_scale"] = "0.5"
+            });
+        var customPotion = new ItemStack(potionItem.ProtocolId, 1)
+            { ComponentData = potionPatch };
+        var potionEffects = ConsumableEffects.ForStack(customPotion, []);
+        Check(ItemStackComponents.IsValid(potionPatch) &&
+            potionEffects.Any(e => e.Id == "minecraft:instant_health" &&
+                e.DurationTicks == 0) &&
+            potionEffects.Any(e => e.Id == "minecraft:speed" &&
+                e.DurationTicks == 40 && e.Amplifier == 1),
+            "Per-stack potion_contents and duration scale drive item effects");
+
+        var slotWriter = new PacketWriter();
+        InventoryProtocol.WriteStack(slotWriter, customPotion, items);
+        var slot = new PacketReader(slotWriter.ToArray());
+        int slotCount = slot.ReadVarInt(), slotMaterial = slot.ReadVarInt();
+        int addedComponents = slot.ReadVarInt(), removedComponents = slot.ReadVarInt();
+        Check(slotCount == 1 && slotMaterial == potionItem.ProtocolId &&
+            addedComponents == 2 && removedComponents == 0 &&
+            ShardItemComponentIds.TryGetId("minecraft:potion_contents",
+                out int potionComponentId) &&
+            slot.ReadVarInt() == potionComponentId &&
+            slot.ReadByte() == 1 && // Has potion
+            slot.ReadVarInt() == VanillaBuiltinIds.IndexOf("minecraft:potion",
+                "minecraft:healing") &&
+            slot.ReadByte() == 0 && // No custom RGB
+            slot.ReadVarInt() == 1 && // One custom effect
+            slot.ReadVarInt() == 0 && // Speed id
+            slot.ReadVarInt() == 1 && // Amplifier II
+            slot.ReadVarInt() == 80 && // Duration before component scale
+            slot.ReadByte() == 0 && slot.ReadByte() == 1 &&
+            slot.ReadByte() == 1 && slot.ReadByte() == 0 &&
+            slot.ReadByte() == 0 && // No custom potion name
+            ShardItemComponentIds.TryGetId("minecraft:potion_duration_scale",
+                out int scaleComponentId) &&
+            slot.ReadVarInt() == scaleComponentId &&
+            Math.Abs(slot.ReadFloat() - 0.5f) < 0.0001 &&
+            slot.Remaining == 0,
+            "Potion contents use the exact Java 26.3 slot network format");
+
         string folder = Path.Combine(Path.GetTempPath(),
             "amethyst-consumables-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
@@ -112,6 +179,22 @@ internal static class ConsumableFeatureTests
             Check(player.ActiveEffects.Remove("minecraft:regeneration") &&
                 !player.ActiveEffects.Has("minecraft:regeneration"),
                 "Status effect removal updates server state");
+            // A custom potion's per-stack component data must survive the
+            // inventory transaction and apply its custom effects, including
+            // minecraft:potion_duration_scale. It returns a glass bottle.
+            Check(player.Inventory.GiveStack(customPotion) == 1 &&
+                await server.HandleConsumableUseAsync(player,
+                    new UseItemAction(0, 44, 0, 0), CancellationToken.None),
+                "Customized potion use begins with original component patch");
+            await server.TickConsumablesAsync(CancellationToken.None,
+                nowMilliseconds: Environment.TickCount64 + 4000);
+            Check(player.ActiveEffects.Snapshot().Any(e =>
+                    e.Id == "minecraft:speed" && e.RemainingTicks == 40) &&
+                items.TryGetByIdentifier("minecraft:glass_bottle",
+                    out var emptyBottle) &&
+                player.Inventory.Snapshot().Slots.Any(v =>
+                    v.ItemId == emptyBottle.ProtocolId && v.Count > 0),
+                "Potion consumption applies configured effects and returns bottle");
         }
         finally
         {
