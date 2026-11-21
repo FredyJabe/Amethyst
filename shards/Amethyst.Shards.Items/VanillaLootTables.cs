@@ -8,7 +8,7 @@ namespace Amethyst.BuiltinShards;
 /// Mojang. The upstream dataset is pinned by the git submodule. Unknown
 /// conditions, entry types, and modifiers are intentionally rejected:
 /// silently ignoring them would mint invalid items.</summary>
-public sealed class VanillaLootTables : IShardVanillaLootTables
+public sealed partial class VanillaLootTables : IShardVanillaLootTables
 {
     private readonly Dictionary<string, string> _files = new(StringComparer.Ordinal);
     private readonly IShardItemRegistry _items;
@@ -25,6 +25,8 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
         _items = items ?? throw new ArgumentNullException(nameof(items));
         _recipes = recipes;
         _enchantments = enchantments;
+        _enchantmentDataDirectory = Path.GetFullPath(Path.Combine(
+            directory, "..", "enchantment"));
         string candidateTags = tagsDirectory ??
             Path.GetFullPath(Path.Combine(directory, "..", "tags"));
         if (Directory.Exists(candidateTags))
@@ -542,6 +544,9 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
                 }
                 break;
             }
+            case "minecraft:enchant_with_levels":
+                EnchantWithLevels(modifier, c, drops);
+                break;
             case "minecraft:enchant_randomly":
             {
                 if (_enchantments is null)
