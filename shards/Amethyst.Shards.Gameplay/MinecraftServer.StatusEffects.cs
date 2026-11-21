@@ -92,7 +92,8 @@ public sealed partial class MinecraftServer
                         Math.Clamp(intensity, 0, 1));
                     if (amount > 0 && player.Vitals.TryDamage(amount,
                             Environment.TickCount64, out bool killed,
-                            bypassIFrames: true) && killed)
+                            bypassIFrames: true,
+                            mitigation: player.ActiveEffects.Mitigate) && killed)
                         await CombatProtocol.SendDeathAsync(
                             player.Connection, player.EntityId, ct);
                 }
@@ -136,7 +137,8 @@ public sealed partial class MinecraftServer
                         if (player.Vitals.Snapshot().Health > 1)
                         {
                             player.Vitals.TryDamage(1, Environment.TickCount64,
-                                out _, bypassIFrames: true);
+                                out _, bypassIFrames: true,
+                                mitigation: player.ActiveEffects.Mitigate);
                             await CombatProtocol.SendHealthAsync(player, ct);
                         }
                         break;

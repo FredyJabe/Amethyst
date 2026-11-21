@@ -231,8 +231,12 @@ public sealed partial class MinecraftServer
         if (hurt.IsCancelled) return false;
         damage = (float)Math.Clamp(hurt.Number("damage", damage), 0, 1000);
         if (damage <= 0) return false;
+        // Apply Resistance and consume absorption hearts only after the
+        // target's invulnerability-frame check. This is used for both melee
+        // and ranged damage, and never spends absorption on rejected hits.
         if (!victim.Vitals.TryDamage(damage, Environment.TickCount64,
-            out bool killed)) return false;
+            out bool killed, mitigation: victim.ActiveEffects.Mitigate))
+            return false;
         int durability = Math.Max(1, (int)Math.Ceiling(raw / 4));
         if (victim.Inventory.DamageArmor(durability) > 0)
             await InventoryProtocol.SendContentAsync(victim.Connection,

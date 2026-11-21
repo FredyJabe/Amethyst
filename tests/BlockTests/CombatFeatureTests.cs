@@ -357,6 +357,21 @@ internal static class CombatFeatureTests
                     x.ItemId == rewardDiamond.ProtocolId && x.Count == 2) &&
                 !server.GroundItemsForTests.Any(x => x.ItemId == 55),
                 "onBlockDrop cancelEvent suppresses the dirt drop but commits later dropItem skills");
+
+            player2.SetGameMode(PlayerGameMode.Survival);
+            Check(player2.ActiveEffects.Apply("minecraft:resistance", 200, 0) &&
+                player2.ActiveEffects.Apply("minecraft:absorption", 200, 0) &&
+                Math.Abs(player2.ActiveEffects.Absorption - 4) < 0.01,
+                "Set up Resistance I and four absorption hearts on a real player");
+            float beforeMitigated = player2.Vitals.Snapshot().Health;
+            await Task.Delay(520);
+            bool mitigated = await server.DamagePlayerAsync(
+                player2, 10, null, CancellationToken.None);
+            Check(mitigated &&
+                Math.Abs(player2.Vitals.Snapshot().Health -
+                    (beforeMitigated - 4)) < 0.01 &&
+                Math.Abs(player2.ActiveEffects.Absorption) < 0.01,
+                "Gameplay damage applies 20% Resistance and absorbs four hearts before health");
         }
         finally
         {
