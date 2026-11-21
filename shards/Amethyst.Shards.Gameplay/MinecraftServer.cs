@@ -291,6 +291,9 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                             EntityInteractionProtocol.Read(packet.Value);
                         await HandleEntityInteractAsync(player, interaction,
                             lifetime.Token);
+                        if (player.Ready && _entities is not null)
+                            await HandleEntityInteractionAsync(player, interaction,
+                                lifetime.Token);
                         break;
                     }
                     case 0x1C: // KeepAlive reply
@@ -447,13 +450,6 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                     {
                         PlayerBlockAction action = BlockInteractionProtocol.ReadAction(packet.Value);
                         await HandleBlockActionAsync(player, action, lifetime.Token);
-                        break;
-                    }
-                    case EntityInteractionProtocol.ServerboundInteract:
-                    {
-                        EntityInteraction hit = EntityInteractionProtocol.Read(packet.Value);
-                        if (player.Ready)
-                            await HandleEntityInteractionAsync(player, hit, lifetime.Token);
                         break;
                     }
                     case BlockInteractionProtocol.ServerboundUseItemOn:
