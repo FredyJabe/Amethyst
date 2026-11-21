@@ -24,7 +24,8 @@ public sealed partial class MinecraftServer
             var evt = new ShardSkillEvent(foundItem.Identifier, trigger,
                 ActorUuid: actor, ItemId: item.ItemId, Count: item.Count,
                 EnchantmentLevel: 1, TargetKind: targetKind, DamageType: damageType)
-                { Runtime = runtime };
+                { Runtime = runtime, PublisherCommitsDrops =
+                    trigger is "onBlockDrop" or "onEntityDrop" or "onFishing" or "onDeath" };
             if (_skills is not null)
                 await _skills.DispatchAsync(evt, ct);
             foreach (var stat in foundItem.Stats ?? [])
@@ -67,7 +68,8 @@ public sealed partial class MinecraftServer
             var evt = new ShardSkillEvent(id, trigger, ActorUuid: actor,
                 ItemId: item.ItemId, Count: item.Count,
                 EnchantmentLevel: level, TargetKind: targetKind,
-                DamageType: damageType) { Runtime = runtime };
+                DamageType: damageType) { Runtime = runtime, PublisherCommitsDrops =
+                    trigger is "onBlockDrop" or "onEntityDrop" or "onFishing" or "onDeath" };
             await _skills.DispatchAsync(evt, ct);
             foreach (var stat in enchantment.Stats)
                 stat.Apply(evt, _skills);

@@ -97,7 +97,8 @@ public sealed partial class MinecraftServer
                     await _skills.DispatchAsync(new ShardSkillEvent(
                         mob.Kind, "onDeath", mob.X, mob.Y, mob.Z,
                         EntityId: mob.EntityId, ActorUuid: attacker.PlayerUuid,
-                        TargetKind: "sheep") { Runtime = lootRuntime }, ct);
+                        TargetKind: "sheep") { Runtime = lootRuntime,
+                        PublisherCommitsDrops = true }, ct);
                     SpawnLoot(lootRuntime.Drops, mob.X, mob.Y + 0.25, mob.Z);
                 }
                 else if (_groundItems is not null && _items is not null)

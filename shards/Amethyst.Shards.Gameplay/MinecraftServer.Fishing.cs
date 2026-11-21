@@ -61,7 +61,8 @@ public sealed partial class MinecraftServer
                         "minecraft:fishing", "onFishing", reel.Bobber.X,
                         reel.Bobber.Y, reel.Bobber.Z,
                         ActorUuid: player.PlayerUuid)
-                        { Runtime = fishingEffects }, ct);
+                        { Runtime = fishingEffects,
+                            PublisherCommitsDrops = true }, ct);
                     SpawnLoot(fishingEffects.Drops, reel.Bobber.X,
                         reel.Bobber.Y + 0.4, reel.Bobber.Z);
                 }
