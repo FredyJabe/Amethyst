@@ -125,6 +125,24 @@ Check(nativeSheared.All(d => d.ItemId != blueFromNative.ProtocolId),
 Check(nativeTables.Roll("minecraft:gameplay/fishing/fish",
     new ShardVanillaLootContext()).Count == 1,
     "Vanilla fishing sub-table selects exactly one weighted fish");
+if (!items.TryGetByIdentifier("minecraft:name_tag", out var nameTag))
+    throw new InvalidDataException("Missing 26.3 name tag.");
+var nativeTreasure = nativeTables.Roll("minecraft:gameplay/fishing",
+    new ShardVanillaLootContext
+    {
+        Luck = 3, InOpenWater = true, Random = new TreasureRandom()
+    });
+Check(nativeTreasure.Count == 1 &&
+    nativeTreasure[0].ItemId == nameTag.ProtocolId,
+    "Official 26.3 fishing weights select nested treasure in open water");
+var nativeClosed = nativeTables.Roll("minecraft:gameplay/fishing",
+    new ShardVanillaLootContext
+    {
+        Luck = 3, InOpenWater = false, Random = new TreasureRandom()
+    });
+Check(nativeClosed.Count == 1 &&
+    nativeClosed[0].ItemId != nameTag.ProtocolId,
+    "Vanilla fishing treasure is blocked by non-open-water predicate");
 
 string temporary = Path.Combine(Path.GetTempPath(),
     "amethyst-enchant-tests-" + Guid.NewGuid().ToString("N"));
@@ -524,4 +542,10 @@ sealed class TestSkillContext(SkillEngine engine) : IShardContext
 sealed class ConstantRandom(double fraction) : Random
 {
     public override double NextDouble() => fraction;
+}
+
+sealed class TreasureRandom : Random
+{
+    public override double NextDouble() => 0.99;
+    public override int Next(int maxValue) => maxValue > 50 ? 6 : 0;
 }

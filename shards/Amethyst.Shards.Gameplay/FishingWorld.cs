@@ -169,6 +169,28 @@ public sealed class FishingWorld
         }
     }
 
+    /// <summary>Conservative 5x5 open-water check for the native fishing
+    /// table's treasure predicate. A complete vanilla check also accounts
+    /// for fluid-state properties and allowed surface vegetation.</summary>
+    public static bool IsOpenWater(IShardBlockWorld world, FishingBobber bobber)
+    {
+        int centerX = (int)Math.Floor(bobber.X);
+        int centerY = (int)Math.Floor(bobber.Y);
+        int centerZ = (int)Math.Floor(bobber.Z);
+        if (centerY is < -62 or > 317) return false;
+        for (int x = centerX - 2; x <= centerX + 2; x++)
+        for (int z = centerZ - 2; z <= centerZ + 2; z++)
+        {
+            for (int y = centerY - 1; y <= centerY; y++)
+                if (world.GetBlockState(x, y, z) is < 89 or > 104)
+                    return false;
+            for (int y = centerY + 1; y <= centerY + 2; y++)
+                if (world.GetBlockState(x, y, z) != 0)
+                    return false;
+        }
+        return true;
+    }
+
     public static (string Item, int Xp) RollLoot(Random? random = null)
     {
         random ??= Random.Shared;

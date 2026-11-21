@@ -65,6 +65,18 @@ internal static class FishingFeatureTests
                 fishing.Cancel(player),
                 "Lure Stats can reduce the simulated bite delay to one second");
 
+            // Approximate 26.3 open-water check uses a 5x5 full-water
+            // volume with unobstructed air above the bobber.
+            var openHook = first with { X = 8.5, Y = 81.82, Z = 8.5 };
+            Check(!FishingWorld.IsOpenWater(world, openHook),
+                "One isolated water source does not count as open water");
+            for (int x = 6; x <= 10; x++)
+            for (int z = 6; z <= 10; z++)
+            for (int y = 80; y <= 81; y++)
+                world.TrySetBlockState(x, y, z, 89, out _);
+            Check(FishingWorld.IsOpenWater(world, openHook),
+                "Full 5x5 water pool with clear headroom allows treasure eligibility");
+
             var (item, xp) = FishingWorld.RollLoot(new PredictableRandom());
             Check(item == "minecraft:cod" && xp == 1,
                 "Fishing loot selects a version-pinned fish and bounded XP");

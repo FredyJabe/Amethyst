@@ -791,20 +791,22 @@ Sheep's 16 wool colors are chosen by `?flag{name=color_<color>}`;
 modify drop rolls. `Skills: []` in an override disables that entity's
 bundled drops (it does not restore hardcoded defaults).
 
-Currently the shipped loot YAML covers **sheep**, the only persistent
-living mob implemented in Gameplay, plus a starter `minecraft:fishing`
-loot pack. Fishing uses six mutually exclusive `?range{name=loot_roll;
-min=...;max=...}` conditions for catches. Gameplay applies the rod's
-`~onFishing` Stats: Lure reduces the bobber wait interval, and a
-bounded Luck of the Sea adjustment increases the current starter
-treasure chance. These formulas are initial behavior, **not** fully
-verified vanilla 26.3 fishing weights. Server-default fishing loot
-without an Items loot registry remains available for isolated tests. This is a data-driven foundation,
-**not** a complete vanilla loot table importer: other entities, block
-loot predicates, burning-state cooked drops, complex vanilla loot
-functions and other item interactions are pending. The old built-in
-sheep fallback remains only for direct Gameplay constructors that do
-not supply an Items Shard loot registry.
+The bundled YAML skills cover **sheep** and a compatibility
+`minecraft:fishing` loot pack. With the pinned vanilla dataset installed,
+fishing now first evaluates the actual
+`minecraft:gameplay/fishing` table and its weighted fish, junk, and
+treasure pools, with the rod's `fishing_luck` Stats as the luck parameter.
+Treasure eligibility uses a conservative 5x5 water-volume test with
+clear air above the bobber; complete 26.3 fluid-state rules and weather
+modifiers still need to be implemented. Unknown specialized loot
+modifiers trigger a logged fallback to the bundled fishing YAML.
+
+The six mutually exclusive `?range{name=loot_roll;min=...;max=...}`
+rules are retained as that fallback and for isolated tests. Explicit
+user `minecraft:fishing` YAML overrides always take precedence. Lure
+continues to reduce the fishing wait interval. This is a data-driven
+foundation, **not** complete vanilla loot-function coverage; many
+specialized tables still need interpreters and world context.
 
 ## Skill-based enchantments (Java 26.3)
 

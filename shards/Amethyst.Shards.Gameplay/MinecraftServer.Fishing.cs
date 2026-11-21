@@ -26,12 +26,31 @@ public sealed partial class MinecraftServer
             {
                 var fishingEffects = await EnchantmentEventAsync(held,
                     "onFishing", ct, actor: player.PlayerUuid);
-                if (_loot?.HasDefinition("minecraft:fishing") == true &&
-                    _skills is not null)
+                bool hasOverride = _loot?.HasOverride("minecraft:fishing") == true;
+                IReadOnlyList<ShardItemDrop>? nativeCatch =
+                    hasOverride || fishingEffects.IsCancelled ? null :
+                    TryVanillaLoot("minecraft:gameplay/fishing",
+                        new ShardVanillaLootContext
+                        {
+                            Luck = Math.Clamp(
+                                fishingEffects.Number("fishing_luck"), 0, 3),
+                            // Open-water state is only approximate until all
+                            // 26.3 collision/fluid and weather checks exist.
+                            InOpenWater = _blocks is not null &&
+                                FishingWorld.IsOpenWater(_blocks, reel.Bobber)
+                        });
+                if (nativeCatch is not null)
+                {
+                    SpawnLoot(nativeCatch, reel.Bobber.X,
+                        reel.Bobber.Y + 0.4, reel.Bobber.Z);
+                }
+                else if (_loot?.HasDefinition("minecraft:fishing") == true &&
+                    _skills is not null &&
+                    (hasOverride || !fishingEffects.IsCancelled))
                 {
                     int roll = Random.Shared.Next(100);
-                    // A bounded initial Luck of the Sea bonus. Full vanilla
-                    // treasure/junk tables and weighted functions are pending.
+                    // Compatibility YAML distribution when a specialized
+                    // native loot modifier is not yet supported.
                     double luck = Math.Clamp(
                         fishingEffects.Number("fishing_luck"), 0, 3);
                     if (luck > 0 &&
@@ -43,16 +62,11 @@ public sealed partial class MinecraftServer
                         reel.Bobber.Y, reel.Bobber.Z,
                         ActorUuid: player.PlayerUuid)
                         { Runtime = fishingEffects }, ct);
-                    if (_groundItems is not null)
-                        foreach (ShardItemDrop drop in fishingEffects.Drops)
-                            _groundItems.TrySpawn(drop.ItemId, drop.Count,
-                                reel.Bobber.X, reel.Bobber.Y + 0.4,
-                                reel.Bobber.Z, out _);
+                    SpawnLoot(fishingEffects.Drops, reel.Bobber.X,
+                        reel.Bobber.Y + 0.4, reel.Bobber.Z);
                 }
                 else if (!fishingEffects.IsCancelled)
                 {
-                    // Compatibility for Gameplay tests without the Items
-                    // loot registry. Live catches use the YAML skill pack.
                     var (loot, _) = FishingWorld.RollLoot();
                     if (_groundItems is not null &&
                         _items.TryGetByIdentifier(loot, out var reward))
