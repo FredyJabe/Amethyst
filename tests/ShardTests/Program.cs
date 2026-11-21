@@ -59,6 +59,36 @@ try
           Ingredients: [dirt]
           Result: { Id: iron_shovel, Amount: 1 }
         """);
+    string skillDir = Path.Combine(temp, "shards", "items", "skills");
+    Directory.CreateDirectory(skillDir);
+    File.WriteAllText(Path.Combine(skillDir, "custom.yml"), """
+        cow:
+          Skills:
+            - 'dropItem{item=minecraft:diamond;amount=1} ~onDeath'
+        diamond_pickaxe:
+          Skills:
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onLeftClick'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onRightClick'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onDrop'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onStackDrop'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onSwap'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onPickup'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onEquip'
+            - 'dropItem{item=minecraft:diamond;chance=0} ~onUnequip'
+        """);
+    string entityDir = Path.Combine(temp, "shards", "entities", "definitions");
+    Directory.CreateDirectory(entityDir);
+    File.WriteAllText(Path.Combine(entityDir, "custom.yml"), """
+        cow:
+          Display: "Farm Cow"
+          Health: 30
+        guardian_cow:
+          Id: minecraft:cow
+          Display: "Guardian Cow"
+          Options:
+            Health: 50
+            Invulnerable: true
+        """);
     // Exercise every Java 26.3 recipe serializer through the real Shard
     // loader. Special recipes remain registered but are not executable with
     // Gameplay's current component-free ItemStack.
@@ -147,6 +177,76 @@ try
     await host.LoadAsync();
     Check(host.GetService<IShardWorld>() is not null, "default overworld provider enabled");
     Check(host.GetService<IShardGameplay>() is not null, "gameplay enabled with world provider");
+    IShardSkillEngine skillEngine = host.GetService<IShardSkillEngine>() ??
+        throw new Exception("FAIL: Core skill engine not registered");
+    var dropSink = host.GetService<IShardItemDropSink>() ??
+        throw new Exception("FAIL: Gameplay item drop sink not registered");
+    Check(skillEngine.OwnerCount >= 10 &&
+        skillEngine.TryGetSkills("minecraft:cow", out var configuredSkills) &&
+        configuredSkills.Count == 1 &&
+        configuredSkills[0].Mechanic == "dropItem" &&
+        host.RegisteredConsoleCommands.Contains("skillinfo") &&
+        await host.TryExecuteConsoleAsync("skillinfo cow", CancellationToken.None),
+        "Core skill engine is shared and Items registers its dropItem mechanic");
+    string[] itemEvents = [
+        "onLeftClick", "onRightClick", "onDrop", "onStackDrop",
+        "onSwap", "onPickup", "onEquip", "onUnequip"
+    ];
+    Check(skillEngine.TryGetSkills("minecraft:diamond_pickaxe", out var itemSkills) &&
+        itemSkills.Count == itemEvents.Length &&
+        itemEvents.All(evt => itemSkills.Any(skill =>
+            string.Equals(skill.Trigger, evt, StringComparison.OrdinalIgnoreCase))) &&
+        itemEvents.All(evt => skillEngine.DispatchAsync(
+            new ShardSkillEvent("minecraft:diamond_pickaxe", evt)).GetAwaiter().GetResult()),
+        "Items Shard registers all eight configurable event triggers through Core");
+    IShardEntityRegistry entityTypes = host.GetService<IShardEntityRegistry>() ??
+        throw new Exception("FAIL: Entities Shard service not registered");
+    IShardEntityManager entityWorld = host.GetService<IShardEntityManager>() ??
+        throw new Exception("FAIL: Entities runtime service not registered");
+    IShardEntityInteractions entityActions = host.GetService<IShardEntityInteractions>() ??
+        throw new Exception("FAIL: Entities interaction service not registered");
+    Check(entityActions is not null &&
+        skillEngine.TryGetSkills("sheep", out var shearSkills) &&
+        shearSkills.Any(s => s.Trigger.Equals("onShear", StringComparison.OrdinalIgnoreCase)),
+        "Entities registers ~onMilk/~onShear before Items loads sheep skills");
+    ShardEntityDefinition cowType = default;
+    ShardEntityInstance spawned = default, guardian = default;
+    Check(entityTypes.MinecraftVersion == "26.3" && entityTypes.Count == 161 &&
+        entityTypes.All.Count == 161 &&
+        entityTypes.TryGetById(72, out var itemEntity) &&
+        itemEntity.Identifier == "minecraft:item" &&
+        entityTypes.TryGetByIdentifier("cow", out cowType) &&
+        cowType.Display == "Farm Cow" && cowType.MaxHealth == 30,
+        "Entities Shard exposes pinned 26.3 entity IDs and YAML overrides");
+    Check(entityTypes.TryGetByIdentifier("guardian_cow", out var guardianType) &&
+        guardianType.ProtocolId == cowType.ProtocolId &&
+        guardianType.Identifier == "amethyst:guardian_cow" &&
+        guardianType.MaxHealth == 50 && guardianType.Invulnerable,
+        "Mythic-style entity aliases retain the vanilla network type");
+    Check(!entityWorld.TrySpawn("item", 0, 70, 0, out _) &&
+        !entityWorld.TrySpawn("not_a_real_mob", 0, 70, 0, out _) &&
+        !entityWorld.TrySpawn("cow", double.NaN, 70, 0, out _) &&
+        entityWorld.TrySpawn("cow", 2, 70, 3, out spawned) &&
+        entityWorld.TrySpawn("guardian_cow", 3, 70, 4, out guardian) &&
+        spawned.EntityId != guardian.EntityId &&
+        spawned.ProtocolId == cowType.ProtocolId &&
+        entityWorld.AllocateEntityId() > guardian.EntityId,
+        "Entity instances validate spawn types and allocate collision-free IDs");
+    Check(entityWorld.TryDamage(spawned.EntityId, 5, out var injured) &&
+        injured.Health == 25 &&
+        !entityWorld.TryDamage(guardian.EntityId, 1, out _) &&
+        entityWorld.TryTeleport(spawned.EntityId, 5, 71, 6, 90, 0) &&
+        entityWorld.Snapshot().Any(e => e.EntityId == spawned.EntityId &&
+            e.X == 5 && e.Yaw == 90) &&
+        entityWorld.TryRemove(spawned.EntityId) &&
+        !entityWorld.TryRemove(spawned.EntityId),
+        "Entity manager supports controlled damage, teleport, and removal");
+    Check(host.RegisteredConsoleCommands.Contains("entityinfo") &&
+        host.RegisteredConsoleCommands.Contains("entityspawn") &&
+        await host.TryExecuteConsoleAsync("entityinfo cow", CancellationToken.None) &&
+        await host.TryExecuteConsoleAsync("entityspawn cow 0 75 0", CancellationToken.None) &&
+        entityWorld.Snapshot().Length == 2,
+        "Entity Shard registers informational and spawn commands");
     IShardItemRegistry items = host.GetService<IShardItemRegistry>() ??
         throw new Exception("FAIL: Items Shard service not registered");
     Check(items.MinecraftVersion == "26.3" && items.Count == 1658 &&
@@ -321,14 +421,29 @@ try
     catch (InvalidOperationException) { itemsBlocked = true; }
     Check(itemsBlocked, "Gameplay dependency protects the Items Shard from being disabled");
 
+    bool entitiesBlocked = false;
+    try { await host.DisableAsync("entities"); }
+    catch (InvalidOperationException) { entitiesBlocked = true; }
+    Check(entitiesBlocked, "Gameplay dependency protects entity runtime provider");
+
     await host.DisableAsync("gameplay");
     Check(host.GetService<IShardGameplay>() is null, "gameplay service removed");
     await host.DisableAsync("items");
     Check(host.GetService<IShardItemRegistry>() is null &&
         host.GetService<IShardRecipeRegistry>() is null &&
+        host.GetService<IShardSkillEngine>() == skillEngine &&
+        skillEngine.OwnerCount == 0 &&
+        host.GetService<IShardItemDropSink>() is null &&
+        !host.RegisteredConsoleCommands.Contains("skillinfo") &&
         !host.RegisteredConsoleCommands.Contains("recipes") &&
         !host.RegisteredConsoleCommands.Contains("iteminfo"),
         "Disabling Items Shard unregisters its definitions and iteminfo command");
+    await host.DisableAsync("entities");
+    Check(host.GetService<IShardEntityManager>() is null &&
+        host.GetService<IShardEntityRegistry>() is null &&
+        host.GetService<IShardEntityInteractions>() is null &&
+        !host.RegisteredConsoleCommands.Contains("entityspawn"),
+        "Disabling Entities Shard unregisters its services and commands");
     await host.DisableAsync("overworld");
     Check(host.GetService<IShardWorld>() is null, "world service removed");
 
@@ -336,8 +451,16 @@ try
     Check(host.GetService<IShardWorld>() is not null &&
         host.GetService<IShardGameplay>() is not null &&
         host.GetService<IShardItemRegistry>() is not null &&
-        host.GetService<IShardRecipeRegistry>() is not null,
-        "Enabling Gameplay automatically enables World, Items, and Recipe providers");
+        host.GetService<IShardRecipeRegistry>() is not null &&
+        host.GetService<IShardSkillEngine>() == skillEngine &&
+        host.GetService<IShardItemDropSink>() is not null &&
+        skillEngine.OwnerCount >= 10 &&
+        skillEngine.TryGetSkills("diamond_pickaxe", out var reloadedItemSkills) &&
+        reloadedItemSkills.Count == 8 &&
+        host.GetService<IShardEntityManager>() is not null &&
+        host.GetService<IShardEntityRegistry>() is not null &&
+        host.GetService<IShardEntityInteractions>() is not null,
+        "Enabling Gameplay automatically enables World, Items, Recipe and Entity providers");
 }
 finally
 {

@@ -100,6 +100,20 @@ public sealed class GroundItemStore
         }
     }
 
+    /// <summary>Rollback an uncommitted player-item drop. The item must not
+    /// have been delivered to a collector; the normal pickup delay prevents
+    /// an immediate collection before the inventory commit.</summary>
+    public bool TryRemove(int entityId)
+    {
+        lock (_gate)
+        {
+            if (!_entities.Remove(entityId, out GroundItem removed)) return false;
+            try { Persist(); }
+            catch { _entities.Add(entityId, removed); throw; }
+            return true;
+        }
+    }
+
     public void Simulate(IShardBlockWorld world, long? nowMilliseconds = null)
     {
         long now = nowMilliseconds ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

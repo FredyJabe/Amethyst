@@ -11,5 +11,6 @@
     <ProjectReference Include="../../shards/Amethyst.Shards.Overworld/Amethyst.Shards.Overworld.csproj" />
     <ProjectReference Include="../../shards/Amethyst.Shards.Gameplay/Amethyst.Shards.Gameplay.csproj" />
     <ProjectReference Include="../../shards/Amethyst.Shards.Items/Amethyst.Shards.Items.csproj" />
+    <ProjectReference Include="../../shards/Amethyst.Shards.Entities/Amethyst.Shards.Entities.csproj" />
   </ItemGroup>
 </Project>
