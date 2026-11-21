@@ -145,13 +145,13 @@ public sealed class SkillEngine : IShardSkillEngine
                 if (pack.TryGetValue(group.Key, out var previous))
                 {
                     if (previous.Count == 0) continue; // explicit Skills: []
-                    if (previous.Count + incoming.Length > 32)
+                    if (previous.Count + incoming.Length > 128)
                         throw new InvalidDataException($"Too many skills for '{group.Key}'.");
                     pack[group.Key] = Array.AsReadOnly(previous.Concat(incoming).ToArray());
                 }
                 else
                 {
-                    if (incoming.Length > 32)
+                    if (incoming.Length > 128)
                         throw new InvalidDataException($"Too many skills for '{group.Key}'.");
                     pack.Add(group.Key, Array.AsReadOnly(incoming));
                 }
