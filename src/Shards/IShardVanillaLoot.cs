@@ -21,6 +21,11 @@ public sealed record ShardVanillaLootContext
     /// required for data-pack match_tool and certain entity predicates.</summary>
     public string? ToolIdentifier { get; init; }
     public string? AttackerKind { get; init; }
+    /// <summary>Server-observed damage type and direct damaging entity.
+    /// Needed for projectile-specific native loot predicates, never from
+    /// untrusted client declarations.</summary>
+    public string? DamageTypeIdentifier { get; init; }
+    public string? DirectDamagerKind { get; init; }
     /// <summary>JSON-encoded component values read from an authoritative
     /// block entity, not untrusted item data.</summary>
     public IReadOnlyDictionary<string, string>? BlockEntityComponents { get; init; }
