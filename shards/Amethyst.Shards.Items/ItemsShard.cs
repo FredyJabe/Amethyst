@@ -605,18 +605,9 @@ public sealed class ItemsShard : IShard
                         $"Legacy loot YAML '{file}' requires migration to the Items Shard Skills format: " +
                         "dropItem{item=...;amount=...} ~onDeath. See Items Shard README.");
         // LootSkills already owns the shared dropItem mechanic and cancellation semantics.
-        // Item-originated events are owned by Items even though Gameplay
-        // detects packet/inventory actions and Core dispatches their skills.
-        // Register every trigger before loading administrator YAML so unknown
-        // actions are still rejected but valid new triggers can be configured.
-        foreach (string trigger in new[]
-        {
-            "onLeftClick", "onRightClick", "onDrop", "onSwap",
-            "onStackDrop", "onPickup", "onEquip", "onUnequip"
-        })
-            ctx.RegisterSkillTrigger(trigger);
-        ctx.RegisterSkillDefinitions(Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
-        IShardSkillEngine skills = ctx.GetRequiredService<IShardSkillEngine>();
+        // EnchantmentSkills registers the item events for both YAML packs.
+        // Register their bundled and administrator skills after the mechanic and
+        // condition providers have been registered below.
         ctx.RegisterService<IShardItemRegistry>(catalog);
         ctx.RegisterService<IShardRecipeRegistry>(recipes);
         string consumableDir = Path.Combine(ctx.DataDirectory, "consumables");
@@ -643,6 +634,7 @@ public sealed class ItemsShard : IShard
             Path.Combine(directory, "enchantments-26.3.yml"), enchantmentDirectory);
         EnchantmentSkills.Register(ctx);
         LootSkills.Register(ctx, catalog);
+        ctx.RegisterSkillDefinitions(Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
         string lootDirectory = Path.Combine(ctx.DataDirectory, "loot");
         var loot = new LootCatalog(Path.Combine(directory, "loot-26.3.yml"),
             lootDirectory);
