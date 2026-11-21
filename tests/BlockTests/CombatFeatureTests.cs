@@ -321,7 +321,8 @@ internal static class CombatFeatureTests
             overridePlayer.MarkReady();
             overridePlayer.SetGameMode(PlayerGameMode.Survival);
             overridePlayer.SetPose(new PlayerPose(0, 80, 0, 0, 0, true));
-            Check(items.TryGetByIdentifier("minecraft:emerald", out var emerald) &&
+            ShardItemDefinition emerald = default;
+            Check(items.TryGetByIdentifier("minecraft:emerald", out emerald) &&
                 overridePlayer.Inventory.TryCreativeSet(
                     36, sword.ProtocolId, 1, true) &&
                 overriddenMobs.TrySpawn("cow", 1, 80, 0, out var overrideCow),
