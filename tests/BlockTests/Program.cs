@@ -1682,9 +1682,10 @@ try
 
         // The Entities Shard owns sheep color, and Items YAML chooses the
         // matching wool material through the ?flag skill condition.
+        ShardItemDefinition redWool = default;
         Check(lootWorld.TrySpawnSheep(11, 80, 12,
                 out LivingEntity redSheep, color: 14) &&
-            itemsCatalog.TryGetByIdentifier("minecraft:red_wool", out var redWool),
+            itemsCatalog.TryGetByIdentifier("minecraft:red_wool", out redWool),
             "Spawn a colored native sheep through the Entities Shard");
         await lootGame.HandleEntityInteractionAsync(farmer,
             new EntityInteraction(redSheep.EntityId, 0, false),
