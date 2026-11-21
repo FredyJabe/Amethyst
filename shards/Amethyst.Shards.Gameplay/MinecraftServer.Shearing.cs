@@ -11,6 +11,40 @@ public sealed partial class MinecraftServer
         "cyan", "purple", "blue", "brown", "green", "red", "black"
     ];
 
+    /// <summary>One validated entity right-click publisher for both native
+    /// sheep and generic entities. Item/enchantment Skills execute before any
+    /// milk/shear mutation. A cancellation suppresses the default interaction,
+    /// but does not interrupt remaining skill instructions.</summary>
+    internal async Task<bool> HandleValidatedEntityInteractionAsync(
+        ConnectedPlayer player, EntityInteraction action, CancellationToken ct)
+    {
+        if (!player.Ready || player.GameMode == PlayerGameMode.Spectator ||
+            action.Hand is < 0 or > 1 || _entities is null)
+            return false;
+        ShardEntityInstance target = default;
+        foreach (ShardEntityInstance candidate in _entities.Snapshot())
+            if (candidate.EntityId == action.EntityId)
+            {
+                target = candidate;
+                break;
+            }
+        if (target.EntityId <= 0) return false;
+        PlayerPose position = player.Pose;
+        double dx = target.X - position.X, dz = target.Z - position.Z;
+        double dy = target.Y + 0.8 - (position.Y + 1.62);
+        if (dx * dx + dy * dy + dz * dz > 25) return false;
+        ItemStack[] slots = player.Inventory.Snapshot().Slots;
+        ItemStack held = slots[action.Hand == 0
+            ? player.Inventory.SelectedSlot : 45];
+        var runtime = await EnchantmentEventAsync(held, "onRightClick", ct,
+            actor: player.PlayerUuid);
+        if (runtime.IsCancelled) return true;
+        bool handled = await HandleEntityInteractAsync(player, action, ct);
+        if (!handled)
+            await HandleEntityInteractionAsync(player, action, ct);
+        return true;
+    }
+
     /// <summary>Interact with a real, server-known sheep. A client may only
     /// send an entity ID and hand; the server checks distance, gamemode,
     /// inventory and whether the sheep actually has wool.</summary>

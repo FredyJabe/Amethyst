@@ -326,11 +326,8 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                     {
                         EntityInteraction interaction =
                             EntityInteractionProtocol.Read(packet.Value);
-                        await HandleEntityInteractAsync(player, interaction,
-                            lifetime.Token);
-                        if (player.Ready && _entities is not null)
-                            await HandleEntityInteractionAsync(player, interaction,
-                                lifetime.Token);
+                        await HandleValidatedEntityInteractionAsync(
+                            player, interaction, lifetime.Token);
                         break;
                     }
                     case 0x1C: // KeepAlive reply
@@ -1114,7 +1111,8 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         if (dx * dx + dy * dy + dz * dz > 25) return;
         ItemStack held = player.Inventory.Held();
         if (held.Count < 1) return;
-        await DispatchItemSkillAsync(player, held.ItemId, "onRightClick", ct);
+        // onRightClick was already dispatched once by the validated
+        // publisher before a milk/shear mutation can be committed.
         string? trigger = null;
         if (_items.TryGetByIdentifier("minecraft:bucket", out var bucket) &&
             _items.TryGetByIdentifier("minecraft:milk_bucket", out var milk) &&

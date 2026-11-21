@@ -60,8 +60,33 @@ internal static class EntityInteractionFeatureTests
             await using var world = new TerrainWorld(settings);
             using var stream = new MemoryStream();
             using var channel = new PacketChannel(stream);
+            bool cancelRightClick = false;
+            int rightClickRuns = 0;
+            var interactionSkills = new SkillEngine();
+            interactionSkills.RegisterTrigger("interact-tests", "onRightClick");
+            interactionSkills.RegisterMechanic("interact-tests", "testCancel",
+                skill => { },
+                (skill, evt, ct) =>
+                {
+                    if (cancelRightClick) evt.Runtime.Cancel();
+                    return ValueTask.CompletedTask;
+                });
+            interactionSkills.RegisterMechanic("interact-tests", "testRecord",
+                skill => { },
+                (skill, evt, ct) =>
+                {
+                    rightClickRuns++;
+                    return ValueTask.CompletedTask;
+                });
+            interactionSkills.RegisterInstructions("interact-tests", [
+                SkillEngine.Parse("minecraft:shears",
+                    "testCancel @self ~onRightClick"),
+                SkillEngine.Parse("minecraft:shears",
+                    "testRecord @self ~onRightClick")
+            ]);
             var server = TestServerFactory.Create(settings, world,
-                null!, world, items: items, recipes: recipes);
+                null!, world, items: items, recipes: recipes,
+                skills: interactionSkills);
             Guid id = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(id, "SheepTester", []),
                 channel, 0, out _), "Player can join sheep interaction test");
@@ -94,6 +119,36 @@ internal static class EntityInteractionFeatureTests
                     CancellationToken.None) &&
                 actor.Inventory.Held().Damage == 1,
                 "Creative shearing transforms sheep without consuming durability");
+
+            actor.SetGameMode(PlayerGameMode.Survival);
+            Check(server.SummonSheepAt(actor),
+                "Prepare an extra sheep to test cancellable entity interactions");
+            LivingEntity toCancel = server.LivingEntitiesForTests.Last();
+            int dropsBeforeCancel = server.GroundItemsForTests.Length;
+            int wearBeforeCancel = actor.Inventory.Held().Damage;
+            cancelRightClick = true;
+            Check(await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(toCancel.EntityId, 0, false),
+                    CancellationToken.None) &&
+                !server.LivingEntitiesForTests.Single(x =>
+                    x.EntityId == toCancel.EntityId).Sheared &&
+                actor.Inventory.Held().Damage == wearBeforeCancel &&
+                server.GroundItemsForTests.Length == dropsBeforeCancel &&
+                rightClickRuns == 1,
+                "onRightClick cancellation prevents shearing but executes later item skills once");
+            cancelRightClick = false;
+            Check(await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(toCancel.EntityId, 0, false),
+                    CancellationToken.None) &&
+                server.LivingEntitiesForTests.Single(x =>
+                    x.EntityId == toCancel.EntityId).Sheared &&
+                actor.Inventory.Held().Damage == wearBeforeCancel + 1 &&
+                rightClickRuns == 2,
+                "Accepted right-click shears the authoritative sheep and dispatches once");
+            Check(!await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(int.MaxValue, 0, false),
+                    CancellationToken.None) && rightClickRuns == 2,
+                "Forged entity IDs cannot trigger item skills or spawn loot");
         }
         finally
         {
