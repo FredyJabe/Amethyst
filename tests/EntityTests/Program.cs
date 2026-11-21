@@ -121,8 +121,8 @@ try
         authoritative.Snapshot().Any(x => x.EntityId == redSheep.EntityId) &&
         items.TryGetByIdentifier("minecraft:diamond", out var diamond) &&
         itemEntities.TrySpawn(diamond.ProtocolId, 2, 4, 80, 4,
-            out GroundItem dropped) &&
-        xpEntities.TrySpawn(5, 4, 80, 4, out ExperienceOrb orb),
+            out dropped) &&
+        xpEntities.TrySpawn(5, 4, 80, 4, out orb),
         "Entities owns colored sheep, ground items and XP with one allocator");
     Guid fisher = Guid.NewGuid();
     var launchPose = new PlayerPose(4, 80, 4, 0, 0, true);
