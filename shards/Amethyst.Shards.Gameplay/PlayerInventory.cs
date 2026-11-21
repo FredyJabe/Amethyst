@@ -8,7 +8,8 @@ namespace Amethyst;
 /// All edits are persisted atomically under Gameplay's Shard data directory.</summary>
 public sealed class PlayerInventory
 {
-    private static readonly byte[] Magic = "AMINV002"u8.ToArray();
+    private static readonly byte[] Magic = "AMINV003"u8.ToArray();
+    private static readonly byte[] LegacyMagic = "AMINV002"u8.ToArray();
     private readonly object _sync = new();
     private readonly ItemStack[] _slots = new ItemStack[46];
     private readonly string? _path;
@@ -60,6 +61,30 @@ public sealed class PlayerInventory
         }
     }
 
+    /// <summary>Damage the exact currently-held tool after a committed
+    /// survival block break. Returns true when a tool was damaged or broke.
+    /// Never mutates the stack on a failed or rejected mining attempt.</summary>
+    public bool DamageHeld(int expectedItemId, int damage)
+    {
+        if (damage <= 0) return false;
+        lock (_sync)
+        {
+            int slot = 36 + _selected;
+            ItemStack held = _slots[slot];
+            if (held.Count != 1 || held.ItemId != expectedItemId ||
+                _items is null ||
+                !_items.TryGetById(held.ItemId, out var item) ||
+                item.MaxDurability <= 0) return false;
+            // A tool is removed when its accumulated damage reaches the max.
+            int next = held.Damage + damage;
+            _slots[slot] = next >= item.MaxDurability ? ItemStack.Empty :
+                held with { Damage = next };
+            try { Persist(); _revision++; }
+            catch { _slots[slot] = held; throw; }
+            return true;
+        }
+    }
+
     /// <summary>Remove one placed item, if held. Creative mode never consumes.</summary>
     public bool ConsumeHeld(bool creative, int expectedItem)
     {
@@ -90,7 +115,8 @@ public sealed class PlayerInventory
             foreach (int index in Enumerable.Range(36, 9).Concat(Enumerable.Range(9, 27)))
             {
                 ItemStack stack = _slots[index];
-                if (stack.ItemId != itemId || stack.Count == 0 || stack.Count >= maximum) continue;
+                if (stack.ItemId != itemId || stack.Damage != 0 ||
+                    stack.Count == 0 || stack.Count >= maximum) continue;
                 int delta = Math.Min(maximum - stack.Count, remaining);
                 _slots[index] = stack with { Count = stack.Count + delta };
                 remaining -= delta;
@@ -147,10 +173,20 @@ public sealed class PlayerInventory
         return itemId <= 1657 ? 64 : 0;
     }
 
-    private bool ValidStack(ItemStack s) =>
-        _items?.IsValidStack(s.ItemId, s.Count) ??
-        (s.Count is >= 0 and <= 64 && s.ItemId is >= 0 and <= 1657 &&
-         (s.Count == 0) == (s.ItemId == 0));
+    private bool ValidStack(ItemStack s)
+    {
+        if (s.Damage < 0) return false;
+        if (_items is null)
+            return s.Damage == 0 &&
+                (s.Count is >= 0 and <= 64 && s.ItemId is >= 0 and <= 1657 &&
+                (s.Count == 0) == (s.ItemId == 0));
+        if (!_items.IsValidStack(s.ItemId, s.Count)) return false;
+        if (s.Count == 0) return s.Damage == 0;
+        if (!_items.TryGetById(s.ItemId, out var item)) return false;
+        return s.Damage == 0 ||
+            (item.MaxDurability > 0 && s.Count == 1 &&
+             s.Damage < item.MaxDurability);
+    }
 
     private static bool ValidSlot(int slot) => slot is >= 9 and <= 44;
 
@@ -171,7 +207,8 @@ public sealed class PlayerInventory
             {
                 if (click.Button == 0)
                 {
-                    if (_cursor.Count == 0 || here.Count == 0 || _cursor.ItemId != here.ItemId)
+                    if (_cursor.Count == 0 || here.Count == 0 ||
+                        _cursor.ItemId != here.ItemId || _cursor.Damage != here.Damage)
                     {
                         (_slots[slot], _cursor) = (_cursor, here);
                         changed = true;
@@ -196,10 +233,10 @@ public sealed class PlayerInventory
                         changed = true;
                     }
                     else if (_cursor.Count > 0 &&
-                        (here.Count == 0 || (here.ItemId == _cursor.ItemId &&
+                        (here.Count == 0 || (here.ItemId == _cursor.ItemId && here.Damage == _cursor.Damage &&
                             here.Count < MaxStack(_cursor.ItemId))))
                     {
-                        _slots[slot] = new ItemStack(_cursor.ItemId, here.Count + 1);
+                        _slots[slot] = _cursor with { Count = here.Count + 1 };
                         _cursor = _cursor.Count == 1 ? ItemStack.Empty :
                             _cursor with { Count = _cursor.Count - 1 };
                         changed = true;
@@ -219,8 +256,8 @@ public sealed class PlayerInventory
                 for (int i = low; i <= high && remaining > 0; i++)
                 {
                     ItemStack other = _slots[i];
-                    if (other.ItemId != here.ItemId || other.Count == 0 ||
-                        other.Count >= MaxStack(here.ItemId)) continue;
+                    if (other.ItemId != here.ItemId || other.Damage != here.Damage ||
+                        other.Count == 0 || other.Count >= MaxStack(here.ItemId)) continue;
                     int moved = Math.Min(remaining, MaxStack(here.ItemId) - other.Count);
                     _slots[i] = other with { Count = other.Count + moved };
                     remaining -= moved;
@@ -229,7 +266,7 @@ public sealed class PlayerInventory
                 {
                     if (_slots[i].Count != 0) continue;
                     int moved = Math.Min(MaxStack(here.ItemId), remaining);
-                    _slots[i] = new ItemStack(here.ItemId, moved);
+                    _slots[i] = here with { Count = moved };
                     remaining -= moved;
                 }
                 if (remaining != here.Count)
@@ -262,20 +299,27 @@ public sealed class PlayerInventory
         if (_path is null || !File.Exists(_path)) return;
         using var stream = File.OpenRead(_path);
         using var reader = new BinaryReader(stream, Encoding.UTF8);
-        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic) ||
+        byte[] magic = reader.ReadBytes(Magic.Length);
+        bool legacy = magic.SequenceEqual(LegacyMagic);
+        if (!legacy && !magic.SequenceEqual(Magic) ||
             reader.ReadInt32() != _slots.Length)
             throw new InvalidDataException($"Bad player inventory header in {_path}");
         for (int i = 0; i < _slots.Length; i++)
         {
             int item = reader.ReadInt32(), count = reader.ReadInt32();
-            if (!ValidStack(new ItemStack(item, count)))
+            int damage = legacy ? 0 : reader.ReadInt32();
+            var stack = new ItemStack(item, count) { Damage = damage };
+            if (!ValidStack(stack))
                 throw new InvalidDataException($"Corrupted inventory slot {i} in {_path}");
-            _slots[i] = new ItemStack(item, count);
+            _slots[i] = stack;
         }
         int cursorItem = reader.ReadInt32(), cursorCount = reader.ReadInt32();
-        if (!ValidStack(new ItemStack(cursorItem, cursorCount)))
+        int cursorDamage = legacy ? 0 : reader.ReadInt32();
+        var cursorStack = new ItemStack(cursorItem, cursorCount)
+            { Damage = cursorDamage };
+        if (!ValidStack(cursorStack))
             throw new InvalidDataException($"Corrupted carried item in {_path}");
-        _cursor = new ItemStack(cursorItem, cursorCount);
+        _cursor = cursorStack;
         if (stream.Position != stream.Length)
             throw new InvalidDataException($"Unexpected inventory data in {_path}");
     }
@@ -298,9 +342,11 @@ public sealed class PlayerInventory
                 {
                     writer.Write(slot.ItemId);
                     writer.Write(slot.Count);
+                    writer.Write(slot.Damage);
                 }
                 writer.Write(_cursor.ItemId);
                 writer.Write(_cursor.Count);
+                writer.Write(_cursor.Damage);
                 writer.Flush();
                 stream.Flush(flushToDisk: true);
             }

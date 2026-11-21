@@ -15,6 +15,9 @@ public readonly record struct ShardItemDefinition(
     public IReadOnlyList<string>? Lore { get; init; }
     public int? CustomModelData { get; init; }
     public bool Hidden { get; init; }
+    /// <summary>Java 26.3 default max damage; zero means non-damageable.
+    /// Physical durability is pinned to the vanilla item identity.</summary>
+    public int MaxDurability { get; init; }
 }
 
 /// <summary>Read-only item registry supplied by exactly one enabled Items

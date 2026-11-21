@@ -450,6 +450,7 @@ public sealed class MinecraftServer
             CanEditAt(player, action.X, action.Y, action.Z);
         ushort state = valid ? _blocks!.GetBlockState(action.X, action.Y, action.Z) : (ushort)0;
         bool changed = false;
+        bool toolWearChanged = false;
         bool survival = player.GameMode == PlayerGameMode.Survival;
         string outcome = valid ? "no change" : "invalid target / range / mode / not ready";
         switch (action.Status)
@@ -524,13 +525,16 @@ public sealed class MinecraftServer
 
         if (changed)
         {
+            // The last point of durability may break a tool, but this block
+            // must still yield drops based on the tool that mined it.
+            int miningTool = player.Inventory.Held().ItemId;
             if (WorkstationManager.FromBlockState(state) is not null)
                 await BreakStationAsync(action.X, action.Y, action.Z, ct);
             await BroadcastBlockChangeAsync(player, action.X, action.Y, action.Z, 0, ct);
             if (survival)
             {
                 MiningRules.BlockInfo info = MiningRules.ForState(state);
-                if (info.DropItem > 0 && MiningRules.IsHarvestable(info, player.Inventory.Held().ItemId))
+                if (info.DropItem > 0 && MiningRules.IsHarvestable(info, miningTool))
                 {
                     // A break produces a world item. The player receives it
                     // only after touching the item and after its pickup delay.
@@ -540,6 +544,9 @@ public sealed class MinecraftServer
                         Console.WriteLine($"[items] No capacity to spawn drop {info.DropItem} " +
                             $"at {action.X},{action.Y},{action.Z}");
                 }
+                int wear = MiningRules.DurabilityCostForBlock(state, miningTool, _items);
+                toolWearChanged = wear > 0 &&
+                    player.Inventory.DamageHeld(miningTool, wear);
             }
         }
         else if (valid && action.Status == BlockInteractionProtocol.StopDestroyBlock)
@@ -558,6 +565,9 @@ public sealed class MinecraftServer
                 $"changed={changed} {outcome}");
         }
         await BlockInteractionProtocol.SendAckAsync(player.Connection, action.Sequence, ct);
+        if (toolWearChanged)
+            await InventoryProtocol.SendSlotAsync(player.Connection,
+                player.Inventory, player.Inventory.SelectedSlot, ct);
     }
 
     private async Task OpenStationAsync(ConnectedPlayer player,

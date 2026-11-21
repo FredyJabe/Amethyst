@@ -1353,6 +1353,26 @@ public static class MiningRules
             held.Kind == block.ToolKind;
     }
 
+    /// <summary>Survival block-break wear. Only successfully broken blocks
+    /// can damage tools; hardness-zero blocks cost nothing.</summary>
+    public static int DurabilityCostForBlock(ushort state, int heldItem,
+        Amethyst.Shards.IShardItemRegistry? items)
+    {
+        if (items is null || !items.TryGetById(heldItem, out var item) ||
+            item.MaxDurability <= 0 || state == 0)
+            return 0;
+        BlockInfo block = ForState(state);
+        if (block.Hardness < 0) return 0;
+        // Unlike ordinary tools, vanilla shears also wear on instant-hand
+        // blocks. Fire and soul fire are the exceptions.
+        if (item.Identifier == "minecraft:shears")
+            return state is >= 4931 and <= 5443 ? 0 : 1;
+        if (block.Hardness == 0) return 0;
+        if (Tools.ContainsKey(heldItem)) return 1;
+        if (item.Identifier.EndsWith("_sword", StringComparison.Ordinal)) return 2;
+        return 0;
+    }
+
     public static int RequiredMilliseconds(ushort state, int heldItem)
     {
         BlockInfo info = ForState(state);

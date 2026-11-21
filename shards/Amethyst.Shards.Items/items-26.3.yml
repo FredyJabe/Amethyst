@@ -5832,12 +5832,14 @@ carrot_on_a_stick:
   Id: minecraft:carrot_on_a_stick
   ProtocolId: 971
   MaxStackSize: 1
+  MaxDurability: 25
   Options:
     BlockItem: false
 warped_fungus_on_a_stick:
   Id: minecraft:warped_fungus_on_a_stick
   ProtocolId: 972
   MaxStackSize: 1
+  MaxDurability: 100
   Options:
     BlockItem: false
 phantom_membrane:
@@ -5850,6 +5852,7 @@ elytra:
   Id: minecraft:elytra
   ProtocolId: 974
   MaxStackSize: 1
+  MaxDurability: 432
   Options:
     BlockItem: false
 oak_boat:
@@ -6012,6 +6015,7 @@ turtle_helmet:
   Id: minecraft:turtle_helmet
   ProtocolId: 1001
   MaxStackSize: 1
+  MaxDurability: 275
   Options:
     BlockItem: false
 turtle_scute:
@@ -6030,12 +6034,14 @@ wolf_armor:
   Id: minecraft:wolf_armor
   ProtocolId: 1004
   MaxStackSize: 1
+  MaxDurability: 64
   Options:
     BlockItem: false
 flint_and_steel:
   Id: minecraft:flint_and_steel
   ProtocolId: 1005
   MaxStackSize: 1
+  MaxDurability: 64
   Options:
     BlockItem: false
 bowl:
@@ -6054,6 +6060,7 @@ bow:
   Id: minecraft:bow
   ProtocolId: 1008
   MaxStackSize: 1
+  MaxDurability: 384
   Options:
     BlockItem: false
 arrow:
@@ -6156,210 +6163,245 @@ wooden_sword:
   Id: minecraft:wooden_sword
   ProtocolId: 1025
   MaxStackSize: 1
+  MaxDurability: 59
   Options:
     BlockItem: false
 wooden_shovel:
   Id: minecraft:wooden_shovel
   ProtocolId: 1026
   MaxStackSize: 1
+  MaxDurability: 59
   Options:
     BlockItem: false
 wooden_pickaxe:
   Id: minecraft:wooden_pickaxe
   ProtocolId: 1027
   MaxStackSize: 1
+  MaxDurability: 59
   Options:
     BlockItem: false
 wooden_axe:
   Id: minecraft:wooden_axe
   ProtocolId: 1028
   MaxStackSize: 1
+  MaxDurability: 59
   Options:
     BlockItem: false
 wooden_hoe:
   Id: minecraft:wooden_hoe
   ProtocolId: 1029
   MaxStackSize: 1
+  MaxDurability: 59
   Options:
     BlockItem: false
 copper_sword:
   Id: minecraft:copper_sword
   ProtocolId: 1030
   MaxStackSize: 1
+  MaxDurability: 190
   Options:
     BlockItem: false
 copper_shovel:
   Id: minecraft:copper_shovel
   ProtocolId: 1031
   MaxStackSize: 1
+  MaxDurability: 190
   Options:
     BlockItem: false
 copper_pickaxe:
   Id: minecraft:copper_pickaxe
   ProtocolId: 1032
   MaxStackSize: 1
+  MaxDurability: 190
   Options:
     BlockItem: false
 copper_axe:
   Id: minecraft:copper_axe
   ProtocolId: 1033
   MaxStackSize: 1
+  MaxDurability: 190
   Options:
     BlockItem: false
 copper_hoe:
   Id: minecraft:copper_hoe
   ProtocolId: 1034
   MaxStackSize: 1
+  MaxDurability: 190
   Options:
     BlockItem: false
 stone_sword:
   Id: minecraft:stone_sword
   ProtocolId: 1035
   MaxStackSize: 1
+  MaxDurability: 131
   Options:
     BlockItem: false
 stone_shovel:
   Id: minecraft:stone_shovel
   ProtocolId: 1036
   MaxStackSize: 1
+  MaxDurability: 131
   Options:
     BlockItem: false
 stone_pickaxe:
   Id: minecraft:stone_pickaxe
   ProtocolId: 1037
   MaxStackSize: 1
+  MaxDurability: 131
   Options:
     BlockItem: false
 stone_axe:
   Id: minecraft:stone_axe
   ProtocolId: 1038
   MaxStackSize: 1
+  MaxDurability: 131
   Options:
     BlockItem: false
 stone_hoe:
   Id: minecraft:stone_hoe
   ProtocolId: 1039
   MaxStackSize: 1
+  MaxDurability: 131
   Options:
     BlockItem: false
 golden_sword:
   Id: minecraft:golden_sword
   ProtocolId: 1040
   MaxStackSize: 1
+  MaxDurability: 32
   Options:
     BlockItem: false
 golden_shovel:
   Id: minecraft:golden_shovel
   ProtocolId: 1041
   MaxStackSize: 1
+  MaxDurability: 32
   Options:
     BlockItem: false
 golden_pickaxe:
   Id: minecraft:golden_pickaxe
   ProtocolId: 1042
   MaxStackSize: 1
+  MaxDurability: 32
   Options:
     BlockItem: false
 golden_axe:
   Id: minecraft:golden_axe
   ProtocolId: 1043
   MaxStackSize: 1
+  MaxDurability: 32
   Options:
     BlockItem: false
 golden_hoe:
   Id: minecraft:golden_hoe
   ProtocolId: 1044
   MaxStackSize: 1
+  MaxDurability: 32
   Options:
     BlockItem: false
 iron_sword:
   Id: minecraft:iron_sword
   ProtocolId: 1045
   MaxStackSize: 1
+  MaxDurability: 250
   Options:
     BlockItem: false
 iron_shovel:
   Id: minecraft:iron_shovel
   ProtocolId: 1046
   MaxStackSize: 1
+  MaxDurability: 250
   Options:
     BlockItem: false
 iron_pickaxe:
   Id: minecraft:iron_pickaxe
   ProtocolId: 1047
   MaxStackSize: 1
+  MaxDurability: 250
   Options:
     BlockItem: false
 iron_axe:
   Id: minecraft:iron_axe
   ProtocolId: 1048
   MaxStackSize: 1
+  MaxDurability: 250
   Options:
     BlockItem: false
 iron_hoe:
   Id: minecraft:iron_hoe
   ProtocolId: 1049
   MaxStackSize: 1
+  MaxDurability: 250
   Options:
     BlockItem: false
 diamond_sword:
   Id: minecraft:diamond_sword
   ProtocolId: 1050
   MaxStackSize: 1
+  MaxDurability: 1561
   Options:
     BlockItem: false
 diamond_shovel:
   Id: minecraft:diamond_shovel
   ProtocolId: 1051
   MaxStackSize: 1
+  MaxDurability: 1561
   Options:
     BlockItem: false
 diamond_pickaxe:
   Id: minecraft:diamond_pickaxe
   ProtocolId: 1052
   MaxStackSize: 1
+  MaxDurability: 1561
   Options:
     BlockItem: false
 diamond_axe:
   Id: minecraft:diamond_axe
   ProtocolId: 1053
   MaxStackSize: 1
+  MaxDurability: 1561
   Options:
     BlockItem: false
 diamond_hoe:
   Id: minecraft:diamond_hoe
   ProtocolId: 1054
   MaxStackSize: 1
+  MaxDurability: 1561
   Options:
     BlockItem: false
 netherite_sword:
   Id: minecraft:netherite_sword
   ProtocolId: 1055
   MaxStackSize: 1
+  MaxDurability: 2031
   Options:
     BlockItem: false
 netherite_shovel:
   Id: minecraft:netherite_shovel
   ProtocolId: 1056
   MaxStackSize: 1
+  MaxDurability: 2031
   Options:
     BlockItem: false
 netherite_pickaxe:
   Id: minecraft:netherite_pickaxe
   ProtocolId: 1057
   MaxStackSize: 1
+  MaxDurability: 2031
   Options:
     BlockItem: false
 netherite_axe:
   Id: minecraft:netherite_axe
   ProtocolId: 1058
   MaxStackSize: 1
+  MaxDurability: 2031
   Options:
     BlockItem: false
 netherite_hoe:
   Id: minecraft:netherite_hoe
   ProtocolId: 1059
   MaxStackSize: 1
+  MaxDurability: 2031
   Options:
     BlockItem: false
 stick:
@@ -6414,168 +6456,196 @@ leather_helmet:
   Id: minecraft:leather_helmet
   ProtocolId: 1068
   MaxStackSize: 1
+  MaxDurability: 55
   Options:
     BlockItem: false
 leather_chestplate:
   Id: minecraft:leather_chestplate
   ProtocolId: 1069
   MaxStackSize: 1
+  MaxDurability: 80
   Options:
     BlockItem: false
 leather_leggings:
   Id: minecraft:leather_leggings
   ProtocolId: 1070
   MaxStackSize: 1
+  MaxDurability: 75
   Options:
     BlockItem: false
 leather_boots:
   Id: minecraft:leather_boots
   ProtocolId: 1071
   MaxStackSize: 1
+  MaxDurability: 65
   Options:
     BlockItem: false
 copper_helmet:
   Id: minecraft:copper_helmet
   ProtocolId: 1072
   MaxStackSize: 1
+  MaxDurability: 121
   Options:
     BlockItem: false
 copper_chestplate:
   Id: minecraft:copper_chestplate
   ProtocolId: 1073
   MaxStackSize: 1
+  MaxDurability: 176
   Options:
     BlockItem: false
 copper_leggings:
   Id: minecraft:copper_leggings
   ProtocolId: 1074
   MaxStackSize: 1
+  MaxDurability: 165
   Options:
     BlockItem: false
 copper_boots:
   Id: minecraft:copper_boots
   ProtocolId: 1075
   MaxStackSize: 1
+  MaxDurability: 143
   Options:
     BlockItem: false
 chainmail_helmet:
   Id: minecraft:chainmail_helmet
   ProtocolId: 1076
   MaxStackSize: 1
+  MaxDurability: 165
   Options:
     BlockItem: false
 chainmail_chestplate:
   Id: minecraft:chainmail_chestplate
   ProtocolId: 1077
   MaxStackSize: 1
+  MaxDurability: 240
   Options:
     BlockItem: false
 chainmail_leggings:
   Id: minecraft:chainmail_leggings
   ProtocolId: 1078
   MaxStackSize: 1
+  MaxDurability: 225
   Options:
     BlockItem: false
 chainmail_boots:
   Id: minecraft:chainmail_boots
   ProtocolId: 1079
   MaxStackSize: 1
+  MaxDurability: 195
   Options:
     BlockItem: false
 iron_helmet:
   Id: minecraft:iron_helmet
   ProtocolId: 1080
   MaxStackSize: 1
+  MaxDurability: 165
   Options:
     BlockItem: false
 iron_chestplate:
   Id: minecraft:iron_chestplate
   ProtocolId: 1081
   MaxStackSize: 1
+  MaxDurability: 240
   Options:
     BlockItem: false
 iron_leggings:
   Id: minecraft:iron_leggings
   ProtocolId: 1082
   MaxStackSize: 1
+  MaxDurability: 225
   Options:
     BlockItem: false
 iron_boots:
   Id: minecraft:iron_boots
   ProtocolId: 1083
   MaxStackSize: 1
+  MaxDurability: 195
   Options:
     BlockItem: false
 diamond_helmet:
   Id: minecraft:diamond_helmet
   ProtocolId: 1084
   MaxStackSize: 1
+  MaxDurability: 363
   Options:
     BlockItem: false
 diamond_chestplate:
   Id: minecraft:diamond_chestplate
   ProtocolId: 1085
   MaxStackSize: 1
+  MaxDurability: 528
   Options:
     BlockItem: false
 diamond_leggings:
   Id: minecraft:diamond_leggings
   ProtocolId: 1086
   MaxStackSize: 1
+  MaxDurability: 495
   Options:
     BlockItem: false
 diamond_boots:
   Id: minecraft:diamond_boots
   ProtocolId: 1087
   MaxStackSize: 1
+  MaxDurability: 429
   Options:
     BlockItem: false
 golden_helmet:
   Id: minecraft:golden_helmet
   ProtocolId: 1088
   MaxStackSize: 1
+  MaxDurability: 77
   Options:
     BlockItem: false
 golden_chestplate:
   Id: minecraft:golden_chestplate
   ProtocolId: 1089
   MaxStackSize: 1
+  MaxDurability: 112
   Options:
     BlockItem: false
 golden_leggings:
   Id: minecraft:golden_leggings
   ProtocolId: 1090
   MaxStackSize: 1
+  MaxDurability: 105
   Options:
     BlockItem: false
 golden_boots:
   Id: minecraft:golden_boots
   ProtocolId: 1091
   MaxStackSize: 1
+  MaxDurability: 91
   Options:
     BlockItem: false
 netherite_helmet:
   Id: minecraft:netherite_helmet
   ProtocolId: 1092
   MaxStackSize: 1
+  MaxDurability: 407
   Options:
     BlockItem: false
 netherite_chestplate:
   Id: minecraft:netherite_chestplate
   ProtocolId: 1093
   MaxStackSize: 1
+  MaxDurability: 592
   Options:
     BlockItem: false
 netherite_leggings:
   Id: minecraft:netherite_leggings
   ProtocolId: 1094
   MaxStackSize: 1
+  MaxDurability: 555
   Options:
     BlockItem: false
 netherite_boots:
   Id: minecraft:netherite_boots
   ProtocolId: 1095
   MaxStackSize: 1
+  MaxDurability: 481
   Options:
     BlockItem: false
 flint:
@@ -7122,6 +7192,7 @@ fishing_rod:
   Id: minecraft:fishing_rod
   ProtocolId: 1186
   MaxStackSize: 1
+  MaxDurability: 64
   Options:
     BlockItem: false
 clock:
@@ -7536,6 +7607,7 @@ shears:
   Id: minecraft:shears
   ProtocolId: 1255
   MaxStackSize: 1
+  MaxDurability: 238
   Options:
     BlockItem: false
 melon_slice:
@@ -8250,6 +8322,7 @@ mace:
   Id: minecraft:mace
   ProtocolId: 1374
   MaxStackSize: 1
+  MaxDurability: 500
   Options:
     BlockItem: false
 item_frame:
@@ -8682,48 +8755,56 @@ shield:
   Id: minecraft:shield
   ProtocolId: 1446
   MaxStackSize: 1
+  MaxDurability: 336
   Options:
     BlockItem: false
 wooden_spear:
   Id: minecraft:wooden_spear
   ProtocolId: 1447
   MaxStackSize: 1
+  MaxDurability: 59
   Options:
     BlockItem: false
 stone_spear:
   Id: minecraft:stone_spear
   ProtocolId: 1448
   MaxStackSize: 1
+  MaxDurability: 131
   Options:
     BlockItem: false
 copper_spear:
   Id: minecraft:copper_spear
   ProtocolId: 1449
   MaxStackSize: 1
+  MaxDurability: 190
   Options:
     BlockItem: false
 iron_spear:
   Id: minecraft:iron_spear
   ProtocolId: 1450
   MaxStackSize: 1
+  MaxDurability: 250
   Options:
     BlockItem: false
 golden_spear:
   Id: minecraft:golden_spear
   ProtocolId: 1451
   MaxStackSize: 1
+  MaxDurability: 32
   Options:
     BlockItem: false
 diamond_spear:
   Id: minecraft:diamond_spear
   ProtocolId: 1452
   MaxStackSize: 1
+  MaxDurability: 1561
   Options:
     BlockItem: false
 netherite_spear:
   Id: minecraft:netherite_spear
   ProtocolId: 1453
   MaxStackSize: 1
+  MaxDurability: 2031
   Options:
     BlockItem: false
 totem_of_undying:
@@ -8904,6 +8985,7 @@ trident:
   Id: minecraft:trident
   ProtocolId: 1483
   MaxStackSize: 1
+  MaxDurability: 250
   Options:
     BlockItem: false
 nautilus_shell:
@@ -8952,6 +9034,7 @@ crossbow:
   Id: minecraft:crossbow
   ProtocolId: 1491
   MaxStackSize: 1
+  MaxDurability: 465
   Options:
     BlockItem: false
 suspicious_stew:
@@ -9474,6 +9557,7 @@ brush:
   Id: minecraft:brush
   ProtocolId: 1578
   MaxStackSize: 1
+  MaxDurability: 64
   Options:
     BlockItem: false
 netherite_upgrade_smithing_template:

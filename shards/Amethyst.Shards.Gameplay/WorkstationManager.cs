@@ -46,7 +46,8 @@ public sealed class StationState
 /// client state IDs and never trust client-supplied item contents.</summary>
 public sealed class WorkstationManager
 {
-    private static readonly byte[] Magic = "AMSTAT01"u8.ToArray();
+    private static readonly byte[] Magic = "AMSTAT02"u8.ToArray();
+    private static readonly byte[] LegacyMagic = "AMSTAT01"u8.ToArray();
     private readonly object _gate = new();
     private readonly Dictionary<StationPos, StationState> _stations = [];
     private readonly Dictionary<Guid, StationMenu> _menus = [];
@@ -109,10 +110,19 @@ public sealed class WorkstationManager
         return id <= 1657 ? 64 : 0; // direct legacy unit tests without ShardHost
     }
 
-    private bool ValidStack(ItemStack stack) =>
-        _items?.IsValidStack(stack.ItemId, stack.Count) ??
-        (stack.ItemId is >= 0 and <= 1657 && stack.Count is >= 0 and <= 64 &&
-         (stack.ItemId == 0) == (stack.Count == 0));
+    private bool ValidStack(ItemStack stack)
+    {
+        if (stack.Damage < 0) return false;
+        if (_items is null)
+            return stack.Damage == 0 &&
+                (stack.ItemId is >= 0 and <= 1657 &&
+                stack.Count is >= 0 and <= 64 &&
+                (stack.ItemId == 0) == (stack.Count == 0));
+        if (!_items.IsValidStack(stack.ItemId, stack.Count)) return false;
+        if (stack.Damage == 0) return true;
+        return stack.Count == 1 && _items.TryGetById(stack.ItemId, out var item) &&
+            item.MaxDurability > stack.Damage;
+    }
 
     public static StationKind? FromBlockState(ushort state) =>
         state switch
@@ -309,8 +319,9 @@ public sealed class WorkstationManager
                 {
                     if (cursor.Count != 0 &&
                         (cursor.ItemId != available.ItemId ||
+                         cursor.Damage != available.Damage ||
                          cursor.Count + available.Count > MaxStack(available.ItemId))) return false;
-                    cursor = new ItemStack(available.ItemId, cursor.Count + available.Count);
+                    cursor = available with { Count = cursor.Count + available.Count };
                 }
                 if (menu.Kind == StationKind.Crafting)
                 {
@@ -339,7 +350,7 @@ public sealed class WorkstationManager
                         Put(click.Slot, cursor);
                         cursor = ItemStack.Empty;
                     }
-                    else if (here.ItemId == cursor.ItemId &&
+                    else if (here.ItemId == cursor.ItemId && here.Damage == cursor.Damage &&
                         here.Count < MaxStack(cursor.ItemId))
                     {
                         if (!CanInsert(click.Slot, cursor)) return false;
@@ -360,14 +371,15 @@ public sealed class WorkstationManager
                     {
                         if (here.Count == 0) return false;
                         int take = (here.Count + 1) / 2;
-                        cursor = new ItemStack(here.ItemId, take);
+                        cursor = here with { Count = take };
                         Put(click.Slot, Decrement(here, take));
                     }
-                    else if (here.Count == 0 || here.ItemId == cursor.ItemId &&
+                    else if (here.Count == 0 ||
+                        here.ItemId == cursor.ItemId && here.Damage == cursor.Damage &&
                         here.Count < MaxStack(cursor.ItemId))
                     {
                         if (!CanInsert(click.Slot, cursor)) return false;
-                        Put(click.Slot, new ItemStack(cursor.ItemId, here.Count + 1));
+                        Put(click.Slot, cursor with { Count = here.Count + 1 });
                         cursor = Decrement(cursor, 1);
                     }
                     else
@@ -395,11 +407,13 @@ public sealed class WorkstationManager
                         out _, out _) ? 0 : StationRecipes.FuelTicks(here.ItemId) > 0 ? 1 : -1;
                     if (target < 0) return false;
                     ItemStack stationStack = local[target];
-                    if (stationStack.Count != 0 && stationStack.ItemId != here.ItemId)
+                    if (stationStack.Count != 0 &&
+                        (stationStack.ItemId != here.ItemId ||
+                         stationStack.Damage != here.Damage))
                         return false;
                     int moved = Math.Min(MaxStack(here.ItemId) - stationStack.Count, here.Count);
                     if (moved <= 0) return false;
-                    local[target] = new ItemStack(here.ItemId, stationStack.Count + moved);
+                    local[target] = here with { Count = stationStack.Count + moved };
                     Put(click.Slot, Decrement(here, moved));
                 }
                 changed = true;
@@ -448,7 +462,8 @@ public sealed class WorkstationManager
     {
         int remaining = incoming.Count;
         for (int i = 9; i <= 44 && remaining > 0; i++)
-            if (slots[i].ItemId == incoming.ItemId && slots[i].Count > 0 && slots[i].Count < MaxStack(incoming.ItemId))
+            if (slots[i].ItemId == incoming.ItemId && slots[i].Damage == incoming.Damage &&
+                slots[i].Count > 0 && slots[i].Count < MaxStack(incoming.ItemId))
             {
                 int added = Math.Min(remaining, MaxStack(incoming.ItemId) - slots[i].Count);
                 slots[i] = slots[i] with { Count = slots[i].Count + added };
@@ -458,7 +473,7 @@ public sealed class WorkstationManager
             if (slots[i].Count == 0)
             {
                 int added = Math.Min(MaxStack(incoming.ItemId), remaining);
-                slots[i] = new ItemStack(incoming.ItemId, added);
+                slots[i] = incoming with { Count = added };
                 remaining -= added;
             }
         return remaining;
@@ -537,7 +552,9 @@ public sealed class WorkstationManager
         if (_path is null || !File.Exists(_path)) return;
         using var stream = File.OpenRead(_path);
         using var reader = new BinaryReader(stream, Encoding.UTF8);
-        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic) ||
+        byte[] magic = reader.ReadBytes(Magic.Length);
+        bool legacy = magic.SequenceEqual(LegacyMagic);
+        if (!legacy && !magic.SequenceEqual(Magic) ||
             reader.ReadInt64() != _world.Seed || reader.ReadString() != _world.DimensionId)
             throw new InvalidDataException("Invalid station store header/world identity.");
         int count = reader.ReadInt32();
@@ -558,9 +575,11 @@ public sealed class WorkstationManager
             for (int slot = 0; slot < 3; slot++)
             {
                 int itemId = reader.ReadInt32(), amount = reader.ReadInt32();
-                if (!ValidStack(new ItemStack(itemId, amount)))
+                int damage = legacy ? 0 : reader.ReadInt32();
+                var item = new ItemStack(itemId, amount) { Damage = damage };
+                if (!ValidStack(item))
                     throw new InvalidDataException("Invalid persisted station inventory.");
-                state.Slots[slot] = new ItemStack(itemId, amount);
+                state.Slots[slot] = item;
             }
             if (state.BurnRemaining is < 0 or > 100000 || state.BurnTotal is < 0 or > 100000 ||
                 state.CookProgress is < 0 or > 10000 || state.CookTotal is < 0 or > 10000)
@@ -604,6 +623,7 @@ public sealed class WorkstationManager
                     {
                         writer.Write(stack.ItemId);
                         writer.Write(stack.Count);
+                        writer.Write(stack.Damage);
                     }
                 }
                 writer.Flush();

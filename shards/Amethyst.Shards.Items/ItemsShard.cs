@@ -44,8 +44,12 @@ public sealed class ItemCatalog : IShardItemRegistry
             int max = options.MaxStackSize.Value;
             if (max is not (1 or 16 or 64))
                 throw new InvalidDataException($"Invalid 26.3 max stack size for {root}.");
+            int maxDurability = options.MaxDurability ?? 0;
+            if (maxDurability is < 0 or > 32767 ||
+                (maxDurability > 0 && max != 1))
+                throw new InvalidDataException($"Invalid vanilla durability for {root}.");
             var item = new ShardItemDefinition(options.ProtocolId.Value, key,
-                max, options.BlockItem.Value);
+                max, options.BlockItem.Value) { MaxDurability = maxDurability };
             if (_byName.ContainsKey(key) || _byName.ContainsKey(root))
                 throw new InvalidDataException($"Duplicate vanilla item {key}.");
             definitions.Add(item);
@@ -103,6 +107,10 @@ public sealed class ItemCatalog : IShardItemRegistry
                 throw new InvalidDataException($"'{root}' in {file} cannot change its vanilla Id.");
             if (fields.ProtocolId is int supplied && supplied != original.ProtocolId)
                 throw new InvalidDataException($"'{root}' in {file} cannot change ProtocolId.");
+            if (fields.MaxDurability is int changedDurability &&
+                changedDurability != original.MaxDurability)
+                throw new InvalidDataException(
+                    $"'{root}' in {file} cannot change vanilla MaxDurability.");
             int max = fields.MaxStackSize ?? original.MaxStackSize;
             if (max < 1 || max > VanillaMax(original.ProtocolId))
                 throw new InvalidDataException(
@@ -131,6 +139,8 @@ public sealed class ItemCatalog : IShardItemRegistry
             throw new InvalidDataException(
                 $"Custom item '{root}' cannot assign a new protocol ID.");
         if (fields.MaxStackSize is int aliasMax && aliasMax != material.MaxStackSize ||
+            fields.MaxDurability is int aliasDurability &&
+                aliasDurability != material.MaxDurability ||
             fields.BlockItem is bool block && block != material.IsBlockItem)
             throw new InvalidDataException(
                 $"Custom alias '{root}' cannot override physical stack or block properties; " +
@@ -197,6 +207,7 @@ public sealed class ItemCatalog : IShardItemRegistry
         public string? Id;
         public int? ProtocolId;
         public int? MaxStackSize;
+        public int? MaxDurability;
         public bool? BlockItem;
         public string? Display;
         public string? ItemName;
@@ -240,6 +251,9 @@ public sealed class ItemCatalog : IShardItemRegistry
                 {
                     case "id": fields.Id = Scalar(field.Value, path, key); break;
                     case "protocolid": fields.ProtocolId = Integer(field.Value, path, key); break;
+                    case "maxdurability":
+                        fields.MaxDurability = Integer(field.Value, path, key);
+                        break;
                     case "maxstacksize":
                         if (fields.MaxStackSize.HasValue)
                             throw new InvalidDataException($"Specify MaxStackSize / Options.StackSize only once in {key}.");
@@ -400,7 +414,7 @@ public sealed class ItemsShard : IShard
             bool Report(ShardItemDefinition item)
             {
                 ctx.Log($"{item.Identifier} | protocol ID {item.ProtocolId} | " +
-                    $"max stack {item.MaxStackSize} | block item: {item.IsBlockItem}" +
+                    $"max stack {item.MaxStackSize} | max durability: {item.MaxDurability} | block item: {item.IsBlockItem}" +
                     (item.Display is null ? "" : $" | display: {item.Display}"));
                 return true;
             }
