@@ -101,6 +101,14 @@ internal static class CombatFeatureTests
                 solutionRoot = solutionRoot.Parent;
             if (solutionRoot is null)
                 throw new InvalidOperationException("Amethyst.slnx not found.");
+            string healthDir = Path.Combine(root, "entity-definitions");
+            Directory.CreateDirectory(healthDir);
+            File.WriteAllText(Path.Combine(healthDir, "health.yml"),
+                "cow:\n  Health: 4\n");
+            var mobTypes = new EntityCatalog(Path.Combine(
+                solutionRoot.FullName, "shards", "Amethyst.Shards.Entities",
+                "entities-26.3.yml"), healthDir);
+            var managedMobs = new EntityManager(mobTypes);
             var enchantments = new EnchantmentCatalog(Path.Combine(
                 solutionRoot.FullName, "shards", "Amethyst.Shards.Items",
                 "enchantments-26.3.yml"));
@@ -116,10 +124,13 @@ internal static class CombatFeatureTests
                 SkillEngine.Parse("minecraft:diamond_sword",
                     "cancelEvent @self ~onBlockDrop"),
                 SkillEngine.Parse("minecraft:diamond_sword",
-                    "dropItem{item=minecraft:diamond;amount=2} @self ~onBlockDrop")
+                    "dropItem{item=minecraft:diamond;amount=2} @self ~onBlockDrop"),
+                SkillEngine.Parse("minecraft:cow",
+                    "dropItem{item=minecraft:beef;amount=1} @self ~onDeath")
             ]));
             var server = TestServerFactory.Create(settings, world,
                 null!, world, items: items, recipes: recipes,
+                entities: managedMobs, entityTypes: mobTypes,
                 enchantments: enchantments, skills: skills, loot: loot);
             Guid id1 = Guid.NewGuid(), id2 = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(id1, "FighterOne", []),
@@ -221,6 +232,25 @@ internal static class CombatFeatureTests
                 server.GroundItemsForTests.Any(x => x.ItemId == mutton.ProtocolId) &&
                 server.GroundItemsForTests.Any(x => x.ItemId == wool.ProtocolId),
                 "Killing a sheep commits the YAML-defined meat and wool skill drops");
+
+            Check(managedMobs.TrySpawn("cow", 1, 80, 0,
+                    out ShardEntityInstance cow) && cow.Health == 4 &&
+                items.TryGetByIdentifier("minecraft:beef", out var beef),
+                "Spawn a YAML-configured cow in the shared Entities runtime");
+            int beforeGeneric = server.GroundItemsForTests.Length;
+            await Task.Delay(140);
+            await server.HandleAttackAsync(player1, cow.EntityId,
+                CancellationToken.None);
+            Check(!managedMobs.Snapshot().Any(e => e.EntityId == cow.EntityId) &&
+                server.GroundItemsForTests.Length == beforeGeneric + 1 &&
+                server.GroundItemsForTests.Any(drop =>
+                    drop.ItemId == beef.ProtocolId && drop.Count == 1) &&
+                managedMobs.DrainDeaths().Length == 0,
+                "Validated melee kills a generic mob and commits one YAML death reward");
+            await server.TickEntitiesAsync(CancellationToken.None);
+            Check(server.GroundItemsForTests.Length == beforeGeneric + 1,
+                "Generic melee kill cannot award the same death loot twice");
+
             Check(items.TryGetByIdentifier("minecraft:diamond", out var rewardDiamond) &&
                 world.TrySetBlockState(0, 81, 1, 10, out _),
                 "Prepare a Survival dirt block for onBlockDrop custom skills");

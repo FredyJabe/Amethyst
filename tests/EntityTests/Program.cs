@@ -96,6 +96,16 @@ try
         entities.DrainDeaths() is { Length: 1 } &&
         !entities.TryKill(toKill.EntityId, out _),
         "Explicit kill reports death exactly once");
+    Check(entities.TrySpawn("cow", 3, 80, 3, out var combatCow) &&
+        entities.TryDamageAndTakeDeath(combatCow.EntityId, 3,
+            out var wounded, out bool initiallyKilled) &&
+        !initiallyKilled && wounded.Health == 37 &&
+        entities.TryDamageAndTakeDeath(combatCow.EntityId, 100,
+            out var combatDeath, out bool wasKilled) &&
+        wasKilled && combatDeath.Health == 0 &&
+        !entities.TryTakeDeath(combatCow.EntityId, out _) &&
+        entities.DrainDeaths().Length == 0,
+        "Atomic melee damage preserves surviving mobs and consumes each kill once");
     string skillVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
         "skills-26.3.yml");
     string itemVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
