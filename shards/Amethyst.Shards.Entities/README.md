@@ -180,7 +180,7 @@ state and simulation, via `EntityManager` and these shared Core interfaces:
 
 | Interface | Entities-owned state |
 | --- | --- |
-| `IShardEntityManager` | Generic YAML entity instances, spawn, damage, teleport, death queue and shared entity IDs |
+| `IShardEntityManager` | Generic YAML entity instances, persistent spawn/health/teleport state, one-shot death queue and shared entity IDs |
 | `IShardLivingEntities` | Persisted native sheep health, wool color, sheared state and regrowth |
 | `IShardGroundItems` | Dropped item stacks, 20 Hz gravity, despawn, pickup and persistent ground-item storage |
 | `IShardExperienceOrbs` | Experience orbs, physical simulation and persistent XP storage |
@@ -195,10 +195,11 @@ through `IShardContext`. Items configures `dropItem` and other skills; Core
 dispatches the skill pipeline. On-shear wool is selected by color-aware
 Items YAML, using server-owned sheep metadata.
 
-`BindWorldEntities` reuses the existing Gameplay world/data-directory paths,
-so existing `AMLIVE01` sheep saves, ground-item saves and XP-orb saves can
-be read without resetting worlds. Entity IDs are reallocated for persisted
-entities at startup; UUIDs remain stable. Projectiles and fishing bobbers
+`BindWorldEntities` reuses the existing Gameplay world/data-directory paths.
+Legacy `AMLIVE01` sheep, ground-item and XP saves remain readable; new
+`AMGEN001` generic-instance saves use a distinct sibling file. Mutations
+are atomically persisted, and the Entities Shard flushes all durable stores
+on disable. Entity IDs are reallocated at startup; UUIDs remain stable. Projectiles and fishing bobbers
 are intentionally not saved between restarts.
 
 ## Current limits
@@ -208,8 +209,10 @@ pathfinding, gravity, collision, attacks, breeding, item drops, or automated
 healing. Configured Health and Invulnerable currently affect manager
 operations, not client-visible damage animations or a vanilla combat
 system. Configured Display is not yet sent as custom-name entity metadata.
-Generic YAML-spawned instances are **transient** (except sheep) and
-do not yet implement natural AI or universal persistence. Sheep retain
+Generic YAML-spawned instances now use a separate atomic, world-scoped
+`AMGEN001` save file with stable UUIDs, authoritative health and positions,
+and fresh network IDs allocated at load. This does **not** implement natural
+spawning or AI. Sheep retain
 their color/sheared state and health through restart, and physical item
 entities and XP orbs are persisted. Fishing bobbers and launched projectiles
 remain transient. Player authentication, inventory, movement and networking

@@ -154,9 +154,15 @@ try
         new[] { redSheep.EntityId, dropped.EntityId, orb.EntityId,
             hook.EntityId, arrow.EntityId }.Distinct().Count() == 5,
         "Entity ID allocation is unique across livestock, items, XP, hooks and projectiles");
-    native.Save();
-    itemEntities.Save();
-    xpEntities.Save();
+    // Generic mobs now use their own AMGEN001 world-scoped store, separate
+    // from the legacy sheep, dropped item and XP persistence formats.
+    if (!authoritative.TrySpawn("cow", 7, 80, 7, out var managedCow))
+        throw new Exception("Could not spawn persistent generic cow.");
+    Check(authoritative.TryDamage(managedCow.EntityId, 6,
+        out var woundedCow) && woundedCow.Health == 34 &&
+        authoritative.TryTeleport(managedCow.EntityId, 8, 81, 8, 35, 0),
+        "Generic mob health and teleport are writable persistent state");
+    authoritative.SaveWorldEntities();
     var restartedWorld = new EntityManager(catalog);
     restartedWorld.BindWorldEntities(temp, ownedWorld, items);
     Check(((IShardLivingEntities)restartedWorld).Snapshot()
@@ -168,6 +174,25 @@ try
         ((IShardFishingWorld)restartedWorld).Snapshot().Length == 0 &&
         ((IShardProjectileWorld)restartedWorld).Snapshot().Length == 0,
         "Entities restores durable living/item/XP state without resurrecting transient projectiles");
+
+    ShardEntityInstance loadedCow = restartedWorld.Snapshot().Single(
+        x => x.Uuid == managedCow.Uuid);
+    Check(loadedCow.EntityId != managedCow.EntityId &&
+        loadedCow.DefinitionId == managedCow.DefinitionId &&
+        loadedCow.Health == 34 && loadedCow.X == 8 && loadedCow.Y == 81 &&
+        loadedCow.Z == 8 && loadedCow.Yaw == 35 &&
+        restartedWorld.Snapshot().Select(x => x.EntityId)
+            .Distinct().Count() == restartedWorld.Snapshot().Length,
+        "Generic mobs restore identity, health and position with fresh unique network IDs");
+    Check(restartedWorld.TryDamageAndTakeDeath(loadedCow.EntityId, 100,
+        out var deadCow, out bool killedPersisted) &&
+        killedPersisted && deadCow.Uuid == managedCow.Uuid &&
+        restartedWorld.DrainDeaths().Length == 0,
+        "Lethal generic damage persists removal and consumes the one-shot death");
+    var afterKill = new EntityManager(catalog);
+    afterKill.BindWorldEntities(temp, ownedWorld, items);
+    Check(!afterKill.Snapshot().Any(x => x.Uuid == managedCow.Uuid),
+        "Killed generic mobs do not resurrect after restart");
 
     // The dead entity disappears before Gameplay can process the one-shot
     // onDeath event; its last color/sheared metadata must remain on the queued

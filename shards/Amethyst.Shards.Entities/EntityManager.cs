@@ -14,6 +14,7 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
     private readonly Dictionary<int, ShardEntityInstance> _instances = new();
     private readonly Queue<ShardEntityInstance> _deaths = new();
     private readonly HashSet<int> _sheared = [];
+    private GenericEntityStore? _genericStore;
     private readonly object _gate = new();
     private int _nextEntityId;
     private LivingEntityStore _livestock;
@@ -45,6 +46,14 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
             _livestock = new LivingEntityStore(directory, worldPath, AllocateEntityId);
             _experienceOrbs = new ExperienceOrbStore(directory, worldPath, AllocateEntityId);
             _groundItems = new GroundItemStore(directory, worldPath, AllocateEntityId, items);
+            _genericStore = new GenericEntityStore(directory, worldPath, _definitions);
+            foreach (ShardEntityInstance persisted in _genericStore.Load(AllocateEntityId))
+            {
+                if (_instances.Count + _livestock.Snapshot().Length >= MaximumEntities)
+                    throw new InvalidDataException("Entity capacity exceeded by world save.");
+                if (!_instances.Values.Any(e => e.Uuid == persisted.Uuid))
+                    _instances.Add(persisted.EntityId, persisted);
+            }
             _worldBound = true;
         }
     }
@@ -65,6 +74,22 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
     public LivingEntity[] Regrow(long nowMs, int requiredMs = 180_000) =>
         _livestock.Regrow(nowMs, requiredMs);
     public void Save() => _livestock.Save();
+
+    /// <summary>Flush every durable store when the Shard is disabled or
+    /// the world is saved. Generic instances also persist after mutations.</summary>
+    public void SaveWorldEntities()
+    {
+        lock (_gate)
+        {
+            _genericStore?.Save(_instances.Values.ToArray());
+            _livestock.Save();
+            _groundItems.Save();
+            _experienceOrbs.Save();
+        }
+    }
+
+    private void SaveGeneric() =>
+        _genericStore?.Save(_instances.Values.ToArray());
 
     ExperienceOrb[] IShardExperienceOrbs.Snapshot() =>
         _experienceOrbs.Snapshot();
@@ -172,6 +197,8 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
                 definition.Identifier, definition.ProtocolId, x, y, z, 0, 0,
                 definition.MaxHealth);
             _instances.Add(entity.EntityId, entity);
+            try { SaveGeneric(); }
+            catch { _instances.Remove(entity.EntityId); throw; }
             return true;
         }
     }
@@ -180,8 +207,15 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
     {
         lock (_gate)
         {
+            if (_instances.Remove(entityId, out ShardEntityInstance removed))
+            {
+                try { SaveGeneric(); }
+                catch { _instances.Add(entityId, removed); throw; }
+                _sheared.Remove(entityId);
+                return true;
+            }
             _sheared.Remove(entityId);
-            return _instances.Remove(entityId) || _livestock.TryRemove(entityId);
+            return _livestock.TryRemove(entityId);
         }
     }
 
@@ -196,6 +230,8 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
                 return _livestock.TryTeleport(entityId, x, y, z);
             if (!_instances.TryGetValue(entityId, out var entity)) return false;
             _instances[entityId] = entity with { X = x, Y = y, Z = z, Yaw = yaw, Pitch = pitch };
+            try { SaveGeneric(); }
+            catch { _instances[entityId] = entity; throw; }
             return true;
         }
     }
@@ -220,12 +256,16 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
                 return false;
             updated = entity with { Health = Math.Max(0, health - amount) };
             if (updated.Health <= 0)
-            {
                 _instances.Remove(entityId);
+            else
+                _instances[entityId] = updated;
+            try { SaveGeneric(); }
+            catch { _instances[entityId] = entity; throw; }
+            if (updated.Health <= 0)
+            {
                 _sheared.Remove(entityId);
                 EnqueueDeath(updated);
             }
-            else _instances[entityId] = updated;
             return true;
         }
     }
@@ -250,6 +290,8 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
                 return false;
             killed = entity with { Health = entity.Health.HasValue ? 0 : null };
             _instances.Remove(entityId);
+            try { SaveGeneric(); }
+            catch { _instances[entityId] = entity; throw; }
             _sheared.Remove(entityId);
             EnqueueDeath(killed);
             return true;
