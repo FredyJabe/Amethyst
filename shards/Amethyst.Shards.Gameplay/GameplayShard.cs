@@ -25,13 +25,13 @@ public sealed class GameplayShard : IShard, IShardGameplay
         var game = new MinecraftServer(context.Options, world,
             context.GetRequiredService<IShardPacketBus>(), context.GetService<IShardBlockWorld>(),
             context.DataDirectory, items, recipes,
+            entities, entityTypes, interactions,
             context.GetService<IShardEnchantmentRegistry>(),
             context.GetService<IShardSkillEngine>(),
             context.GetService<IShardLootRegistry>(),
             context.GetService<IShardVanillaLootTables>(),
             context.GetService<IShardVanillaBlockStates>(),
-            context.GetService<IShardConsumableRegistry>(),
-            entities, entityTypes, interactions);
+            context.GetService<IShardConsumableRegistry>());
         game.Start();
         _gameplay = game;
         context.RegisterService<IShardGameplay>(this);
