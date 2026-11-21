@@ -436,10 +436,17 @@ try
         wooden_axe:
           Stats:
             - damage 50
+            - damage +10
+            - damage -5
+            - damage *1.5
             - attack_speed 2
         wooden_shovel:
           Stats:
             damage: 12
+        wooden_pickaxe:
+          Stats:
+            - damage =-5
+            - mining_speed *1.5
         """);
     var statItems = new ItemCatalog(Path.Combine(path, "items-26.3.yml"), itemOverrides);
     Check(statItems.TryGetByIdentifier("diamond_sword", out var boosted) &&
@@ -458,17 +465,19 @@ try
 
     if (!statItems.TryGetByIdentifier("wooden_axe", out var axe))
         throw new Exception("Missing wooden axe definition.");
-    Check(axe.Stats?.Count == 2 && axe.Stats.All(x => x.Operation == "set"),
-        "Stats sequence entries are parsed as absolute assignments");
+    Check(axe.Stats?.Count == 5 &&
+        axe.Stats.Select(x => x.Operation).SequenceEqual(
+            new[] { "set", "add", "add", "multiply", "set" }),
+        "Stats sequence parses set, add, subtract and multiply in order");
     var axeRuntime = new ShardSkillRuntime();
     axeRuntime.SetNumber("damage", 7);
     axeRuntime.SetNumber("attack_speed", 4);
     var axeEvent = new ShardSkillEvent(axe.Identifier, "onAttack",
         EnchantmentLevel: 1) { Runtime = axeRuntime };
     foreach (var stat in axe.Stats ?? []) stat.Apply(axeEvent, engine);
-    Check(axeRuntime.Number("damage") == 50 &&
+    Check(Math.Abs(axeRuntime.Number("damage") - 82.5) < 0.001 &&
         axeRuntime.Number("attack_speed") == 2,
-        "Item Stats scalar list replaces existing values instead of adding");
+        "Ordered Stats operations compose: ((50 + 10 - 5) * 1.5) = 82.5");
 
     if (!statItems.TryGetByIdentifier("wooden_shovel", out var shovel))
         throw new Exception("Missing wooden shovel definition.");
@@ -480,24 +489,35 @@ try
     Check(shovelRuntime.Number("damage") == 12,
         "Legacy mapping scalar values also use absolute assignment");
 
+    if (!statItems.TryGetByIdentifier("wooden_pickaxe", out var pickaxe))
+        throw new Exception("Missing wooden pickaxe definition.");
+    var pickaxeRuntime = new ShardSkillRuntime();
+    pickaxeRuntime.SetNumber("damage", 8);
+    pickaxeRuntime.SetNumber("mining_speed", 2);
+    var pickaxeEvent = new ShardSkillEvent(pickaxe.Identifier, "onAttack")
+        { Runtime = pickaxeRuntime };
+    foreach (var stat in pickaxe.Stats ?? []) stat.Apply(pickaxeEvent, engine);
+    Check(pickaxeRuntime.Number("damage") == -5 &&
+        pickaxeRuntime.Number("mining_speed") == 3,
+        "Explicit equals sets negative values and signed factors multiply");
+
     var invalidStats = Path.Combine(temporary, "invalid-stats");
     Directory.CreateDirectory(invalidStats);
-    File.WriteAllText(Path.Combine(invalidStats, "duplicates.yml"), """
+    File.WriteAllText(Path.Combine(invalidStats, "malformed.yml"), """
         wooden_axe:
           Stats:
-            - damage 50
-            - damage 100
+            - damage **2
         """);
-    bool duplicateStatRejected = false;
+    bool malformedStatRejected = false;
     try
     {
         _ = new ItemCatalog(Path.Combine(path, "items-26.3.yml"), invalidStats);
     }
     catch (InvalidDataException)
     {
-        duplicateStatRejected = true;
+        malformedStatRejected = true;
     }
-    Check(duplicateStatRejected, "Duplicate scalar Stats assignments are rejected");
+    Check(malformedStatRejected, "Malformed operator Stats assignments are rejected");
     var smite = catalog.All.Single(x => x.Identifier == "minecraft:smite").Stats[0];
     engine.ValidateConditions(smite.Conditions);
     var undead = new ShardSkillRuntime();
