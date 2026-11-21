@@ -260,7 +260,7 @@ internal static class ConsumableFeatureTests
         public bool LavaGround { get; set; }
         public ushort GetBlockState(int x, int y, int z) =>
             y == 79 ? (ushort)(LavaGround ? 2 : 1) :
-            BlockHead && y == 81 ? (ushort)1 : (ushort)0;
+            BlockHead && y == 81 ? (ushort)2 : (ushort)0;
         public bool TrySetBlockState(int x, int y, int z,
             ushort state, out ushort previousState)
         {
