@@ -78,6 +78,10 @@ public sealed record ShardSkillEvent(
     /// after all mechanics finish. Legacy entity events use the fallback
     /// drop sink instead, so their loot is never spawned twice.</summary>
     public bool PublisherCommitsDrops { get; init; }
+    /// <summary>Restrict execution to a validated Items loot override pack.
+    /// Explicit empty override lists suppress every default owner skill,
+    /// whereas null retains the ordinary multi-Shard dispatch semantics.</summary>
+    public IReadOnlyList<ShardSkillInstruction>? AllowedSkills { get; init; }
 }
 
 public delegate void ShardSkillValidator(ShardSkillInstruction skill);

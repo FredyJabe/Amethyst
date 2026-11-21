@@ -269,7 +269,9 @@ public sealed class SkillEngine : IShardSkillEngine
         foreach (var skill in skills)
         {
             ct.ThrowIfCancellationRequested();
-            if (!string.Equals(skill.Trigger, context.Trigger, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(skill.Trigger, context.Trigger, StringComparison.OrdinalIgnoreCase) ||
+                context.AllowedSkills is { } allowed &&
+                    !allowed.Contains(skill))
                 continue;
             ShardSkillExecutor executor;
             ShardSkillConditionEvaluator[] checks;

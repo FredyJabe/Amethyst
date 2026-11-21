@@ -22,6 +22,17 @@ public sealed class LootCatalog : IShardLootRegistry
     private readonly HashSet<string> _overridden =
         new(StringComparer.OrdinalIgnoreCase);
     public bool HasOverride(string ownerId) => _overridden.Contains(ownerId);
+    public bool TryGetSkills(string ownerId,
+        out IReadOnlyList<ShardSkillInstruction> skills)
+    {
+        if (_entries.TryGetValue(ownerId, out var found))
+        {
+            skills = found;
+            return true;
+        }
+        skills = Array.Empty<ShardSkillInstruction>();
+        return false;
+    }
 
     public LootCatalog(string bundledFile, string? overridesDirectory = null)
     {

@@ -74,6 +74,19 @@ public sealed partial class MinecraftServer
             await EnchantmentEventAsync(weapon, "onEntityDrop", ct,
                 runtime, targetKind: EnchantmentMobCategory(kind),
                 actor: attacker.PlayerUuid);
+        // A user-supplied loot pack is the authoritative owner-level
+        // replacement, not additive with starter death skills from legacy
+        // YAML. Skills: [] is a legitimate way to disable drops entirely.
+        bool overridden = _loot?.HasOverride(dead.DefinitionId) == true ||
+            vanillaKind is not null && _loot?.HasOverride(vanillaKind) == true;
+        IReadOnlyList<ShardSkillInstruction>? selectedSkills = null;
+        if (overridden && _loot is not null)
+        {
+            string owner = _loot.HasOverride(dead.DefinitionId)
+                ? dead.DefinitionId : vanillaKind!;
+            if (_loot.TryGetSkills(owner, out var configured))
+                selectedSkills = configured;
+        }
         if (_skills is not null)
             await _skills.DispatchAsync(new ShardSkillEvent(
                 dead.DefinitionId, "onDeath", dead.X, dead.Y, dead.Z,
@@ -83,11 +96,9 @@ public sealed partial class MinecraftServer
                 TargetKind: EnchantmentMobCategory(kind))
             {
                 Runtime = runtime,
-                PublisherCommitsDrops = true
+                PublisherCommitsDrops = true,
+                AllowedSkills = selectedSkills
             }, ct);
-
-        bool overridden = _loot?.HasOverride(dead.DefinitionId) == true ||
-            vanillaKind is not null && _loot?.HasOverride(vanillaKind) == true;
         IReadOnlyList<ShardItemDrop>? vanilla = !overridden && table is not null
             ? TryVanillaLoot(table, new ShardVanillaLootContext
             {

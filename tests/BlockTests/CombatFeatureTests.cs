@@ -286,6 +286,60 @@ internal static class CombatFeatureTests
                 server.GroundItemsForTests.Length == beforeNative + 2,
                 "Console kills use native loot without player-only eligibility");
 
+            string lootOverrides = Path.Combine(root, "loot-overrides");
+            Directory.CreateDirectory(lootOverrides);
+            File.WriteAllText(Path.Combine(lootOverrides, "mobs.yml"), """
+                minecraft:cow:
+                  Skills:
+                    - "dropItem{item=minecraft:emerald;amount=1} @self ~onDeath"
+                minecraft:zombie:
+                  Skills: []
+                """);
+            var overrideLoot = new LootCatalog(Path.Combine(
+                solutionRoot.FullName, "shards", "Amethyst.Shards.Items",
+                "loot-26.3.yml"), lootOverrides);
+            skills.RegisterInstructions("override-tests", overrideLoot.Instructions);
+            Check(overrideLoot.HasOverride("minecraft:cow") &&
+                overrideLoot.HasOverride("minecraft:zombie") &&
+                overrideLoot.TryGetSkills("minecraft:zombie", out var emptyOverride) &&
+                emptyOverride.Count == 0,
+                "Administrator loot override preserves explicit empty Skills lists");
+            var overriddenMobs = new EntityManager(mobTypes);
+            var overrideServer = TestServerFactory.Create(settings, world,
+                null!, world, items: items, recipes: recipes,
+                entities: overriddenMobs, entityTypes: mobTypes,
+                enchantments: enchantments, skills: skills, loot: overrideLoot,
+                vanillaLoot: nativeMobLoot);
+            using var overrideStream = new MemoryStream();
+            using var overrideChannel = new PacketChannel(overrideStream);
+            Guid overrideId = Guid.NewGuid();
+            Check(overrideServer.TryAdmit(new VerifiedProfile(
+                    overrideId, "OverrideTester", []), overrideChannel, 0, out _),
+                "Admit a player for authoritative loot override integration");
+            ConnectedPlayer overridePlayer =
+                overrideServer.GetPlayerForTests(overrideId)!;
+            overridePlayer.MarkReady();
+            overridePlayer.SetGameMode(PlayerGameMode.Survival);
+            overridePlayer.SetPose(new PlayerPose(0, 80, 0, 0, 0, true));
+            Check(items.TryGetByIdentifier("minecraft:emerald", out var emerald) &&
+                overridePlayer.Inventory.TryCreativeSet(
+                    36, sword.ProtocolId, 1, true) &&
+                overriddenMobs.TrySpawn("cow", 1, 80, 0, out var overrideCow),
+                "Set up a custom emerald-only cow death skill");
+            await overrideServer.HandleAttackAsync(
+                overridePlayer, overrideCow.EntityId, CancellationToken.None);
+            Check(overrideServer.GroundItemsForTests.Length == 1 &&
+                overrideServer.GroundItemsForTests[0].ItemId == emerald.ProtocolId,
+                "Custom mob loot replaces legacy starter drops, without stacking them");
+            Check(overriddenMobs.TrySpawn("zombie", 1, 80, 0,
+                out var silentZombie), "Set up a mob with Skills: []");
+            await Task.Delay(140);
+            await overrideServer.HandleAttackAsync(
+                overridePlayer, silentZombie.EntityId, CancellationToken.None);
+            Check(overrideServer.GroundItemsForTests.Length == 1 &&
+                !overriddenMobs.Snapshot().Any(e => e.EntityId == silentZombie.EntityId),
+                "Explicit empty loot override suppresses both native and legacy drops");
+
             Check(items.TryGetByIdentifier("minecraft:diamond", out var rewardDiamond) &&
                 world.TrySetBlockState(0, 81, 1, 10, out _),
                 "Prepare a Survival dirt block for onBlockDrop custom skills");
