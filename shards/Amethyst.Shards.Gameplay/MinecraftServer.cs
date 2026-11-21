@@ -1309,38 +1309,11 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     internal async Task TickEntitiesAsync(CancellationToken ct)
     {
         if (_entities is null) return;
-        // The Entities Shard reports death exactly once; Core dispatches
-        // the trigger to registered mechanics without understanding item IDs.
-        // The Items Shard owns dropItem and calls Gameplay's world-item sink.
-        if (_skills is not null)
-        {
-            foreach (ShardEntityInstance dead in _entities.DrainDeaths())
-            {
-                string? fallback = _entityTypes is not null &&
-                    _entityTypes.TryGetById(dead.ProtocolId, out var vanilla)
-                        ? vanilla.Identifier : null;
-                // Keep native sheep color/sheared state on its one-shot
-                // death event, even though the authoritative entity has
-                // already been removed. Phase 4 loot skills need these flags.
-                bool nativeSheep = dead.DefinitionId == "minecraft:sheep";
-                var effects = new ShardSkillRuntime();
-                if (nativeSheep)
-                {
-                    effects.SetFlag("color_" + WoolColors[
-                        Math.Clamp(dead.Color, 0, WoolColors.Length - 1)]);
-                    if (!dead.Sheared) effects.SetFlag("not_sheared");
-                }
-                await _skills.DispatchAsync(new ShardSkillEvent(
-                    dead.DefinitionId, "onDeath", dead.X, dead.Y, dead.Z,
-                    dead.EntityId, fallback)
-                {
-                    Runtime = effects,
-                    PublisherCommitsDrops = nativeSheep
-                }, ct);
-                if (nativeSheep)
-                    SpawnLoot(effects.Drops, dead.X, dead.Y + 0.25, dead.Z);
-            }
-        }
+        // Plugin/console deaths and natural kills use the same native
+        // loot/skill pipeline as player kills. An attributed melee death is
+        // removed atomically by TryDamageAndTakeDeath and cannot reappear.
+        foreach (ShardEntityInstance dead in _entities.DrainDeaths())
+            await ProcessEntityDeathAsync(dead, null, ItemStack.Empty, ct);
         ShardEntityInstance[] instances = _entities.Snapshot();
         ConnectedPlayer[] viewers = _players.Snapshot().Where(p => p.Ready).ToArray();
         var online = viewers.Select(p => p.ConnectionId).ToHashSet();

@@ -298,6 +298,46 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
                 _livestock.TryGet(entityId, out LivingEntity sheep) && sheep.Sheared;
     }
 
+    public bool TryDamageAndTakeDeath(int entityId, double amount,
+        out ShardEntityInstance updated, out bool killed)
+    {
+        lock (_gate)
+        {
+            // _gate is a re-entrant Monitor, so this transaction cannot
+            // interleave with a tick draining death events.
+            if (!TryDamage(entityId, amount, out updated))
+            {
+                killed = false;
+                return false;
+            }
+            killed = updated.Health is <= 0 && TryTakeDeath(entityId, out _);
+            return true;
+        }
+    }
+
+    public bool TryTakeDeath(int entityId, out ShardEntityInstance killed)
+    {
+        killed = default;
+        if (entityId <= 0) return false;
+        lock (_gate)
+        {
+            if (!_deaths.Any(death => death.EntityId == entityId))
+                return false;
+            int count = _deaths.Count;
+            for (int i = 0; i < count; i++)
+            {
+                ShardEntityInstance death = _deaths.Dequeue();
+                if (death.EntityId == entityId)
+                {
+                    killed = death;
+                    continue;
+                }
+                _deaths.Enqueue(death);
+            }
+            return true;
+        }
+    }
+
     public ShardEntityInstance[] DrainDeaths()
     {
         lock (_gate)

@@ -48,6 +48,74 @@ public sealed partial class MinecraftServer
         return success;
     }
 
+    /// <summary>Single source of truth for all Entities-Shard deaths.
+    /// A pinned Mojang loot table takes precedence unless Items has an
+    /// explicit YAML override. Skills always execute, but their drop intents
+    /// are committed only for a fallback/override so no two drop providers
+    /// can award the same kill.</summary>
+    private async Task ProcessEntityDeathAsync(ShardEntityInstance dead,
+        ConnectedPlayer? attacker, ItemStack weapon, CancellationToken ct)
+    {
+        string? vanillaKind = _entityTypes is not null &&
+            _entityTypes.TryGetById(dead.ProtocolId, out var definition)
+                ? definition.Identifier : null;
+        string kind = vanillaKind ?? dead.DefinitionId;
+        string? table = kind.StartsWith("minecraft:", StringComparison.Ordinal)
+            ? "minecraft:entities/" + kind["minecraft:".Length..] : null;
+
+        var runtime = new ShardSkillRuntime();
+        if (kind == "minecraft:sheep")
+        {
+            runtime.SetFlag("color_" + WoolColors[
+                Math.Clamp(dead.Color, 0, WoolColors.Length - 1)]);
+            if (!dead.Sheared) runtime.SetFlag("not_sheared");
+        }
+        if (attacker is not null)
+            await EnchantmentEventAsync(weapon, "onEntityDrop", ct,
+                runtime, targetKind: EnchantmentMobCategory(kind),
+                actor: attacker.PlayerUuid);
+        if (_skills is not null)
+            await _skills.DispatchAsync(new ShardSkillEvent(
+                dead.DefinitionId, "onDeath", dead.X, dead.Y, dead.Z,
+                dead.EntityId, vanillaKind,
+                ActorUuid: attacker?.PlayerUuid,
+                ItemId: weapon.ItemId, Count: weapon.Count,
+                TargetKind: EnchantmentMobCategory(kind))
+            {
+                Runtime = runtime,
+                PublisherCommitsDrops = true
+            }, ct);
+
+        bool overridden = _loot?.HasOverride(dead.DefinitionId) == true ||
+            vanillaKind is not null && _loot?.HasOverride(vanillaKind) == true;
+        IReadOnlyList<ShardItemDrop>? vanilla = !overridden && table is not null
+            ? TryVanillaLoot(table, new ShardVanillaLootContext
+            {
+                KilledByPlayer = attacker is not null,
+                AttackerKind = attacker is null ? null : "minecraft:player",
+                DirectDamagerKind = attacker is null ? null : "minecraft:player",
+                DamageTypeIdentifier = attacker is null ? null :
+                    "minecraft:player_attack",
+                ToolIdentifier = attacker is not null && _items is not null &&
+                    _items.TryGetById(weapon.ItemId, out var tool)
+                        ? tool.Identifier : null,
+                Looting = (int)Math.Clamp(
+                    runtime.Number("looting_level"), 0, 255),
+                FireAspect = attacker is not null &&
+                    weapon.EnchantmentLevel("fire_aspect") > 0,
+                EntityColor = kind == "minecraft:sheep"
+                    ? WoolColors[Math.Clamp(dead.Color, 0, WoolColors.Length - 1)]
+                    : null,
+                EntitySheared = dead.Sheared
+            })
+            : null;
+
+        if (vanilla is not null)
+            SpawnLoot(vanilla, dead.X, dead.Y + 0.25, dead.Z);
+        else
+            SpawnLoot(runtime.Drops, dead.X, dead.Y + 0.25, dead.Z);
+    }
+
     private IReadOnlyList<ShardItemDrop>? TryVanillaLoot(
         string tableId, ShardVanillaLootContext context)
     {

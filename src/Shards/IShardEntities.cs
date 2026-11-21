@@ -68,10 +68,17 @@ public interface IShardEntityManager
     bool TryTeleport(int entityId, double x, double y, double z,
         float yaw, float pitch);
     bool TryDamage(int entityId, double amount, out ShardEntityInstance updated);
+    /// <summary>Atomic player-attack damage and one-shot death collection.
+    /// Killed entities are removed from the general death queue before other
+    /// tick consumers can process them without attacker attribution.</summary>
+    bool TryDamageAndTakeDeath(int entityId, double amount,
+        out ShardEntityInstance updated, out bool killed);
     /// <summary>Kill one managed entity, honoring its invulnerability flag.
     /// Unlike TryRemove, a kill creates a death event for loot processing.</summary>
     bool TryKill(int entityId, out ShardEntityInstance killed);
     /// <summary>Consume deaths once; Gameplay owns the drop generation.
     /// Despawns (TryRemove) are never counted as deaths.</summary>
+    /// <summary>Consume a queued death from a specific instance.</summary>
+    bool TryTakeDeath(int entityId, out ShardEntityInstance killed);
     ShardEntityInstance[] DrainDeaths();
 }

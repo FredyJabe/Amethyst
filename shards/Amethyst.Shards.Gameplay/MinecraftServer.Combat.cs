@@ -29,10 +29,24 @@ public sealed partial class MinecraftServer
         LivingEntity mob = default;
         bool sheep = victim is null &&
             _livingEntities?.TryGet(targetEntityId, out mob) == true;
-        if (victim is null && !sheep) return;
+        ShardEntityInstance managedTarget = default;
+        bool managed = false;
+        if (victim is null && !sheep && _entities is not null)
+            foreach (ShardEntityInstance candidate in _entities.Snapshot())
+                if (candidate.EntityId == targetEntityId && candidate.Health is > 0)
+                {
+                    managedTarget = candidate;
+                    managed = true;
+                    break;
+                }
+        if (victim is null && !sheep && !managed) return;
         PlayerPose source = attacker.Pose;
         PlayerPose destination = victim?.Pose ??
-            new PlayerPose(mob.X, mob.Y, mob.Z, 0, 0, true);
+            (sheep ? new PlayerPose(mob.X, mob.Y, mob.Z, 0, 0, true) :
+                new PlayerPose(managedTarget.X, managedTarget.Y,
+                    managedTarget.Z, 0, 0, true));
+        string targetKind = victim is not null ? "player" :
+            EnchantmentMobCategory(sheep ? mob.Kind : managedTarget.DefinitionId);
         if (!CombatRules.InReach(source, destination)) return;
         ItemStack weapon = attacker.Inventory.Held();
         string identifier = _items is not null &&
@@ -44,11 +58,9 @@ public sealed partial class MinecraftServer
         attackEffects.SetNumber("damage", raw);
         attackEffects.SetNumber("knockback", 0.4);
         await EnchantmentEventAsync(weapon, "onLeftClick", ct, attackEffects,
-            targetKind: victim is null ? EnchantmentMobCategory(mob.Kind) : "player",
-            actor: attacker.PlayerUuid);
+            targetKind: targetKind, actor: attacker.PlayerUuid);
         await EnchantmentEventAsync(weapon, "onAttack", ct, attackEffects,
-            targetKind: victim is null ? EnchantmentMobCategory(mob.Kind) : "player",
-            actor: attacker.PlayerUuid);
+            targetKind: targetKind, actor: attacker.PlayerUuid);
         // Every skill has executed. Only the underlying server-side attack
         // (damage, knockback and weapon wear) is now cancelled.
         attacker.RecordAttackSwingCancellation(attackEffects.IsCancelled);
@@ -137,6 +149,28 @@ public sealed partial class MinecraftServer
                             updated.EntityId, ct);
                     }
                 }
+            }
+        }
+        else if (managed && _entities is not null &&
+            _entities.TryDamageAndTakeDeath(targetEntityId, raw,
+                out ShardEntityInstance damaged, out bool killed))
+        {
+            hit = true;
+            if (killed)
+                await ProcessEntityDeathAsync(damaged, attacker, weapon, ct);
+            foreach (ConnectedPlayer viewer in _players.Snapshot()
+                .Where(x => x.Ready && _entityViews.TryGetValue(
+                    x.ConnectionId, out var seen) &&
+                    seen.ContainsKey(targetEntityId)))
+            {
+                if (killed)
+                {
+                    await EntityProtocol.SendRemoveAsync(
+                        viewer.Connection, targetEntityId, ct);
+                    _entityViews[viewer.ConnectionId].Remove(targetEntityId);
+                }
+                else await CombatProtocol.SendHurtAsync(
+                    viewer.Connection, targetEntityId, ct);
             }
         }
         if (!hit) return;
