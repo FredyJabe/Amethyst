@@ -153,17 +153,17 @@ public sealed partial class MinecraftServer
         }
         else if (managed && _entities is not null &&
             _entities.TryDamageAndTakeDeath(targetEntityId, raw,
-                out ShardEntityInstance damaged, out bool killed))
+                out ShardEntityInstance damaged, out bool genericKilled))
         {
             hit = true;
-            if (killed)
+            if (genericKilled)
                 await ProcessEntityDeathAsync(damaged, attacker, weapon, ct);
             foreach (ConnectedPlayer viewer in _players.Snapshot()
                 .Where(x => x.Ready && _entityViews.TryGetValue(
                     x.ConnectionId, out var seen) &&
                     seen.ContainsKey(targetEntityId)))
             {
-                if (killed)
+                if (genericKilled)
                 {
                     await EntityProtocol.SendRemoveAsync(
                         viewer.Connection, targetEntityId, ct);

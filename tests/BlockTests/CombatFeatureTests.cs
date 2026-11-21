@@ -104,7 +104,7 @@ internal static class CombatFeatureTests
             string healthDir = Path.Combine(root, "entity-definitions");
             Directory.CreateDirectory(healthDir);
             File.WriteAllText(Path.Combine(healthDir, "health.yml"),
-                "cow:\n  Health: 4\n");
+                "cow:\n  Health: 4\nzombie:\n  Health: 4\n");
             var mobTypes = new EntityCatalog(Path.Combine(
                 solutionRoot.FullName, "shards", "Amethyst.Shards.Entities",
                 "entities-26.3.yml"), healthDir);
@@ -126,12 +126,18 @@ internal static class CombatFeatureTests
                 SkillEngine.Parse("minecraft:diamond_sword",
                     "dropItem{item=minecraft:diamond;amount=2} @self ~onBlockDrop"),
                 SkillEngine.Parse("minecraft:cow",
-                    "dropItem{item=minecraft:beef;amount=1} @self ~onDeath")
+                    "dropItem{item=minecraft:beef;amount=1} @self ~onDeath"),
+                SkillEngine.Parse("minecraft:zombie",
+                    "dropItem{item=minecraft:rotten_flesh;amount=1} @self ~onDeath")
             ]));
+            if (!items.TryGetByIdentifier("minecraft:diamond", out var nativeReward))
+                throw new InvalidDataException("Expected vanilla diamond reward.");
+            var nativeMobLoot = new RecordedVanillaMobLoot(nativeReward.ProtocolId);
             var server = TestServerFactory.Create(settings, world,
                 null!, world, items: items, recipes: recipes,
                 entities: managedMobs, entityTypes: mobTypes,
-                enchantments: enchantments, skills: skills, loot: loot);
+                enchantments: enchantments, skills: skills, loot: loot,
+                vanillaLoot: nativeMobLoot);
             Guid id1 = Guid.NewGuid(), id2 = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(id1, "FighterOne", []),
                 connection1, 0, out _) &&
@@ -251,6 +257,34 @@ internal static class CombatFeatureTests
             Check(server.GroundItemsForTests.Length == beforeGeneric + 1,
                 "Generic melee kill cannot award the same death loot twice");
 
+            Check(managedMobs.TrySpawn("zombie", 1, 80, 0,
+                    out ShardEntityInstance zombie) && zombie.Health == 4,
+                "Spawn a health-bearing zombie for authoritative native loot");
+            int beforeNative = server.GroundItemsForTests.Length;
+            await Task.Delay(140);
+            await server.HandleAttackAsync(player1, zombie.EntityId,
+                CancellationToken.None);
+            Check(!managedMobs.Snapshot().Any(e => e.EntityId == zombie.EntityId) &&
+                server.GroundItemsForTests.Length == beforeNative + 1 &&
+                server.GroundItemsForTests.Count(d =>
+                    d.ItemId == nativeReward.ProtocolId) == 1 &&
+                nativeMobLoot.Contexts.Count == 1 &&
+                nativeMobLoot.Contexts[0].KilledByPlayer &&
+                nativeMobLoot.Contexts[0].AttackerKind == "minecraft:player" &&
+                nativeMobLoot.Contexts[0].DamageTypeIdentifier ==
+                    "minecraft:player_attack",
+                "Melee death prefers native loot with player attribution over YAML fallback");
+            Check(managedMobs.TrySpawn("zombie", 1, 80, 0,
+                    out var consoleZombie) &&
+                managedMobs.TryKill(consoleZombie.EntityId, out _),
+                "Prepare a non-player entity death");
+            await server.TickEntitiesAsync(CancellationToken.None);
+            Check(nativeMobLoot.Contexts.Count == 2 &&
+                !nativeMobLoot.Contexts[1].KilledByPlayer &&
+                nativeMobLoot.Contexts[1].AttackerKind is null &&
+                server.GroundItemsForTests.Length == beforeNative + 2,
+                "Console kills use native loot without player-only eligibility");
+
             Check(items.TryGetByIdentifier("minecraft:diamond", out var rewardDiamond) &&
                 world.TrySetBlockState(0, 81, 1, 10, out _),
                 "Prepare a Survival dirt block for onBlockDrop custom skills");
@@ -271,6 +305,22 @@ internal static class CombatFeatureTests
         {
             try { Directory.Delete(root, true); }
             catch (IOException) { }
+        }
+    }
+
+    private sealed class RecordedVanillaMobLoot(int rewardId) :
+        IShardVanillaLootTables
+    {
+        public int Count => 1;
+        public List<ShardVanillaLootContext> Contexts { get; } = [];
+        public bool HasTable(string id) => id == "minecraft:entities/zombie";
+        public IReadOnlyList<ShardItemDrop> Roll(string id,
+            ShardVanillaLootContext context)
+        {
+            if (!HasTable(id))
+                throw new InvalidDataException("Unexpected native loot table.");
+            Contexts.Add(context);
+            return [new ShardItemDrop(rewardId, 1)];
         }
     }
 
