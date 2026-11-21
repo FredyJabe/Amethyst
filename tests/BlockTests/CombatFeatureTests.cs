@@ -298,6 +298,31 @@ internal static class CombatFeatureTests
             Check(server.ExperienceOrbsForTests.Length == 3,
                 "Console kills cannot mint player-only experience rewards");
 
+            // Cancel the default death publication without interrupting the
+            // rest of the skill list or reversing the Entities-owned death.
+            skills.RegisterInstructions("death-cancel-tests", [
+                SkillEngine.Parse("minecraft:zombie",
+                    "cancelEvent @self ~onDeath"),
+                SkillEngine.Parse("minecraft:zombie",
+                    "dropItem{item=minecraft:emerald;amount=1} @self ~onDeath")
+            ]);
+            Check(items.TryGetByIdentifier("minecraft:emerald",
+                    out var emeraldCancel) &&
+                managedMobs.TrySpawn("zombie", 1, 80, 0, out var cancelledZombie),
+                "Prepare cancellable vanilla zombie death with later custom reward");
+            int xpBeforeCancelled = server.ExperienceOrbsForTests.Length;
+            int nativeBeforeCancelled = nativeMobLoot.Contexts.Count;
+            await Task.Delay(140);
+            await server.HandleAttackAsync(player1, cancelledZombie.EntityId,
+                CancellationToken.None);
+            Check(!managedMobs.Snapshot().Any(e =>
+                    e.EntityId == cancelledZombie.EntityId) &&
+                nativeMobLoot.Contexts.Count == nativeBeforeCancelled &&
+                server.ExperienceOrbsForTests.Length == xpBeforeCancelled &&
+                server.GroundItemsForTests.Any(x =>
+                    x.ItemId == emeraldCancel.ProtocolId && x.Count == 1),
+                "onDeath cancelEvent suppresses default loot and XP while later skills still drop items");
+
             string lootOverrides = Path.Combine(root, "loot-overrides");
             Directory.CreateDirectory(lootOverrides);
             File.WriteAllText(Path.Combine(lootOverrides, "mobs.yml"), """

@@ -118,7 +118,11 @@ public sealed partial class MinecraftServer
                 PublisherCommitsDrops = true,
                 AllowedSkills = selectedSkills
             }, ct);
-        IReadOnlyList<ShardItemDrop>? vanilla = !overridden && table is not null
+        // An onDeath cancelEvent can suppress the default native loot
+        // publication without stopping later configured dropItem mechanics.
+        // The physical death has already been committed by Entities.
+        IReadOnlyList<ShardItemDrop>? vanilla =
+            !runtime.IsCancelled && !overridden && table is not null
             ? TryVanillaLoot(table, new ShardVanillaLootContext
             {
                 KilledByPlayer = attacker is not null,
@@ -144,8 +148,9 @@ public sealed partial class MinecraftServer
             SpawnLoot(vanilla, dead.X, dead.Y + 0.25, dead.Z);
         else
             SpawnLoot(runtime.Drops, dead.X, dead.Y + 0.25, dead.Z);
-        SpawnEntityExperience(dead.DefinitionId, attacker,
-            dead.X, dead.Y, dead.Z);
+        if (!runtime.IsCancelled)
+            SpawnEntityExperience(dead.DefinitionId, attacker,
+                dead.X, dead.Y, dead.Z);
     }
 
     private IReadOnlyList<ShardItemDrop>? TryVanillaLoot(

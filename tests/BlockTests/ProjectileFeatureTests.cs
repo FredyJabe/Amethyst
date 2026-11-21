@@ -1,5 +1,6 @@
 using Amethyst;
 using Amethyst.BuiltinShards;
+using Amethyst.Shards;
 
 internal static class ProjectileFeatureTests
 {
