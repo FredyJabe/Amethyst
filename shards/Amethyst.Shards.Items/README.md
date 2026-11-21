@@ -969,60 +969,61 @@ duplicate overrides, invalid max levels, unknown conditions and mechanics.
 
 ### Stats (items and enchantments)
 
-Use top-level `Stats` to declare **numeric modifications**; `modify`
-is no longer a skill mechanic. This format is identical in
-`shards/data/items/definitions/*.yml` and
-`shards/data/items/enchantments/*.yml`:
+Use a top-level `Stats` list to assign **absolute numeric values**.
+The preferred syntax works in both item definitions
+(`shards/data/items/definitions/*.yml`) and enchantment overrides
+(`shards/data/items/enchantments/*.yml`):
 
 ```yaml
-# In an item definition
-diamond_sword:
+wooden_axe:
+  Id: minecraft:wooden_axe
   Stats:
-    damage:
-      Trigger: onAttack
-      Base: 3
-      Operation: add
-    knockback: 0.25 # Shorthand: constant additive bonus on all relevant events
+    - damage 50
+    - attack_speed 2
+```
 
-# In an enchantment override (independent of the item)
+Each entry is `- stat_name number`. It uses **set**, not add:
+`damage 50` replaces the event-local damage value with exactly 50,
+regardless of its previous value. Decimal and negative numbers are
+supported. Names are case-insensitive, normalized to lowercase, and
+must match `[a-z][a-z0-9_]*` (up to 64 characters). A list can have
+at most 64 entries, and duplicate stat names are rejected.
+`Stats: []` removes previously configured stats for an override.
+
+For enchantment formulas or explicitly conditional behavior, the
+existing advanced **mapping** syntax remains supported:
+
+```yaml
 smite:
   Stats:
     damage:
       Trigger: onAttack
       PerLevel: 2.5
+      Operation: add
       Conditions:
         - "target{type=undead}"
-
-# Enchantments can keep Skills for actions, not numeric modifiers
-fire_aspect:
-  Skills:
-    - "effect{id=fire;duration=4;perLevel=4} @target ~onAttack"
 ```
 
-Each Stats key is a server-side numeric name (e.g. `damage`,
-`mining_speed`, `knockback`, `projectile_damage`).
-The value is a number, a mapping with `Base`, `PerLevel`,
-`Operation` (`add`, `multiply`, `set`), `Trigger`, and
-`Conditions`, or a list of such modifier mappings. `PerLevel`
-scales with the active enchantment level; item modifiers use level 1.
-Unspecified `Operation` defaults to `add`; an absent `Trigger`
-applies on any event. `Conditions` accepts the same named
-`?conditions` as Skills (with or without a leading `?`) and
-requires all listed conditions to pass. Stats modifiers are evaluated
-in YAML order, before enchantment modifiers; Skills can set flags
-before the enchantment's Stats are evaluated.
+The advanced syntax accepts `Base`, `PerLevel`, `Operation`
+(`add`, `multiply`, `set`), `Trigger`, and `Conditions`.
+When advanced `Operation` is omitted it still defaults to `add`,
+preserving existing vanilla enchantment formulas; a plain scalar
+mapping (`damage: 50`) sets an absolute value, like the list syntax.
+`PerLevel` scales with the enchantment level; item modifiers use
+level 1. Without `Trigger`, a modifier applies whenever its item or
+enchantment is evaluated by a published event. Conditions are shared
+with the Core skill engine and must all pass. Item modifiers run before
+enchantment modifiers, and the `Skills` list is independent.
 
-Core owns the skill parser, registration, `~triggers` and `?conditions`.
-Core provides `cancelEvent`; Items provides `setFlag` and `effect`
-mechanics and the `level`, `target`, `damageType`, `flag`, and `chance`
-conditions. Gameplay Shards must publish events and consume the resulting
-numeric values and effect intents; **declaring a stat does not automatically
-implement an unsupported gameplay event**.
+Only stats used by an authoritative Gameplay event actually change
+gameplay. For example, `damage` is read by the melee attack pipeline,
+while **`attack_speed` is accepted and stored as an event-local number
+but does not yet change cooldowns or client attributes**.
 
-Stats are server-side behavior, **not Minecraft item components**, and
-do not change Java protocol component node assignments. As with
-other item aliases, custom alias Stats currently have no separate
-stack identity, so Gameplay applies physical vanilla-item Stats.
+Stats are server-side values, **not Minecraft item components**, and
+do not change Java protocol component node assignments. Custom item
+aliases without a distinct stack identity still resolve to the
+physical vanilla item definition in Gameplay.
 
 ### Mending driven by Skills and Stats
 
