@@ -14,6 +14,7 @@ public sealed class StationMenu
     public StationPos Position { get; }
     public int Revision { get; internal set; }
     internal ItemStack[] CraftingGrid { get; } = new ItemStack[9];
+    internal ItemStack[] RepairGrid { get; } = new ItemStack[2];
 
     internal StationMenu(Guid playerId, int windowId, StationKind kind, StationPos position)
     {
@@ -46,7 +47,9 @@ public sealed class StationState
 /// client state IDs and never trust client-supplied item contents.</summary>
 public sealed class WorkstationManager
 {
-    private static readonly byte[] Magic = "AMSTAT01"u8.ToArray();
+    private static readonly byte[] Magic = "AMSTAT03"u8.ToArray();
+    private static readonly byte[] DamageMagic = "AMSTAT02"u8.ToArray();
+    private static readonly byte[] LegacyMagic = "AMSTAT01"u8.ToArray();
     private readonly object _gate = new();
     private readonly Dictionary<StationPos, StationState> _stations = [];
     private readonly Dictionary<Guid, StationMenu> _menus = [];
@@ -72,8 +75,35 @@ public sealed class WorkstationManager
         Load();
     }
 
+    private static bool IsRepair(StationKind kind) =>
+        kind is StationKind.Anvil or StationKind.Grindstone;
+
+    private readonly record struct RepairPreview(ItemStack Result,
+        int MaterialConsumed, int LevelCost);
+
+    private RepairPreview? MatchRepair(StationKind kind, ItemStack[] grid)
+    {
+        if (!IsRepair(kind) || grid.Length != 2) return null;
+        if (kind == StationKind.Anvil)
+        {
+            if (!DurabilityRules.TryAnvil(grid[0], grid[1], _items,
+                out ItemStack result, out int consumed, out int levelCost) ||
+                levelCost > 39) return null;
+            return new RepairPreview(result, consumed, levelCost);
+        }
+        if (!DurabilityRules.TryGrindstone(grid[0], grid[1], _items,
+            out ItemStack output)) return null;
+        return new RepairPreview(output, grid[1].Count > 0 ? 1 : 0, 0);
+    }
+
     private CraftingMatch? MatchCrafting(ItemStack[] grid)
     {
+        int[] occupied = Enumerable.Range(0, grid.Length)
+            .Where(i => grid[i].Count > 0).ToArray();
+        if (occupied.Length == 2 &&
+            DurabilityRules.TryCombine(grid[occupied[0]], grid[occupied[1]],
+                _items, out ItemStack repaired))
+            return new CraftingMatch(repaired, occupied);
         ShardRecipeStack[] inputs = grid.Select(s =>
             new ShardRecipeStack(s.ItemId, s.Count)).ToArray();
         if (!_recipes.TryMatchCrafting(inputs, out var match)) return null;
@@ -109,10 +139,27 @@ public sealed class WorkstationManager
         return id <= 1657 ? 64 : 0; // direct legacy unit tests without ShardHost
     }
 
-    private bool ValidStack(ItemStack stack) =>
-        _items?.IsValidStack(stack.ItemId, stack.Count) ??
-        (stack.ItemId is >= 0 and <= 1657 && stack.Count is >= 0 and <= 64 &&
-         (stack.ItemId == 0) == (stack.Count == 0));
+    private bool ValidStack(ItemStack stack)
+    {
+        if (stack.Damage < 0 || stack.Unbreaking is < 0 or > 3 ||
+            stack.RepairCost is < 0 or > 1_000_000) return false;
+        bool patched = stack.Damage > 0 || stack.Unbreaking > 0 ||
+            stack.Mending || stack.Unbreakable || stack.RepairCost > 0;
+        if (_items is null)
+            return !patched && stack.ItemId is >= 0 and <= 1657 &&
+                stack.Count is >= 0 and <= 64 &&
+                (stack.ItemId == 0) == (stack.Count == 0);
+        if (!_items.IsValidStack(stack.ItemId, stack.Count)) return false;
+        if (stack.Count == 0) return !patched;
+        if (!_items.TryGetById(stack.ItemId, out var item)) return false;
+        return !patched || stack.Count == 1 &&
+            item.MaxDurability > stack.Damage && item.MaxDurability > 0;
+    }
+
+    private static bool SameItemData(ItemStack a, ItemStack b) =>
+        a.ItemId == b.ItemId && a.Damage == b.Damage &&
+        a.Unbreaking == b.Unbreaking && a.Mending == b.Mending &&
+        a.Unbreakable == b.Unbreakable && a.RepairCost == b.RepairCost;
 
     public static StationKind? FromBlockState(ushort state) =>
         state switch
@@ -121,6 +168,8 @@ public sealed class WorkstationManager
             >= 6883 and <= 6890 => StationKind.Furnace,
             >= 24111 and <= 24118 => StationKind.Smoker,
             >= 24119 and <= 24126 => StationKind.BlastFurnace,
+            >= 12962 and <= 12973 => StationKind.Anvil,
+            >= 24129 and <= 24140 => StationKind.Grindstone,
             _ => null
         };
 
@@ -134,7 +183,7 @@ public sealed class WorkstationManager
             int id = ++_nextWindowId;
             if (_nextWindowId >= 100) _nextWindowId = 1;
             var menu = new StationMenu(playerId, id, kind, pos);
-            if (kind != StationKind.Crafting)
+            if (kind != StationKind.Crafting && !IsRepair(kind))
             {
                 if (_stations.TryGetValue(pos, out StationState? previous) && previous.Kind != kind)
                     throw new InvalidOperationException("Station kind changed without removal.");
@@ -192,6 +241,13 @@ public sealed class WorkstationManager
                     ?? ItemStack.Empty;
                 Array.Copy(menu.CraftingGrid, 0, slots, 1, 9);
             }
+            else if (IsRepair(menu.Kind))
+            {
+                slots[0] = menu.RepairGrid[0];
+                slots[1] = menu.RepairGrid[1];
+                slots[2] = MatchRepair(menu.Kind, menu.RepairGrid)?.Result
+                    ?? ItemStack.Empty;
+            }
             else
             {
                 if (!_stations.TryGetValue(menu.Position, out StationState? state)) return null;
@@ -207,10 +263,15 @@ public sealed class WorkstationManager
     {
         lock (_gate)
         {
-            if (_menus.TryGetValue(playerId, out var menu) &&
-                _stations.TryGetValue(menu.Position, out var state))
-                return (state.BurnRemaining, state.BurnTotal,
-                    state.CookProgress, state.CookTotal);
+            if (_menus.TryGetValue(playerId, out var menu))
+            {
+                if (menu.Kind == StationKind.Anvil)
+                    return (MatchRepair(menu.Kind, menu.RepairGrid)?.LevelCost ?? 0,
+                        0, 0, 0);
+                if (_stations.TryGetValue(menu.Position, out var state))
+                    return (state.BurnRemaining, state.BurnTotal,
+                        state.CookProgress, state.CookTotal);
+            }
             return (0, 0, 0, 200);
         }
     }
@@ -223,7 +284,9 @@ public sealed class WorkstationManager
             // Crafting inputs belong to this menu, not the crafting table block.
             // Return the inputs on close. Furnace slots remain in the block.
             return menu.Kind == StationKind.Crafting
-                ? menu.CraftingGrid.Where(s => s.Count > 0).ToArray() : [];
+                ? menu.CraftingGrid.Where(s => s.Count > 0).ToArray() :
+                IsRepair(menu.Kind)
+                    ? menu.RepairGrid.Where(s => s.Count > 0).ToArray() : [];
         }
     }
 
@@ -247,21 +310,25 @@ public sealed class WorkstationManager
     /// <summary>Process a single standard container input, atomically against
     /// an inventory snapshot. Returns false for invalid/stale actions, so
     /// the caller sends the authoritative window contents to reconcile.</summary>
-    public bool Click(Guid playerId, PlayerInventory inventory, InventoryClick click)
+    public bool Click(Guid playerId, PlayerInventory inventory, InventoryClick click,
+        PlayerExperience? experience = null, bool creative = false)
     {
         lock (_gate)
         {
             if (!_menus.TryGetValue(playerId, out var menu) ||
                 click.Window != menu.WindowId || click.Revision != menu.Revision)
                 return false;
+            bool repair = IsRepair(menu.Kind);
             int count = menu.Kind == StationKind.Crafting ? 10 : 3;
             int total = count + 36;
             if (click.Slot < 0 || click.Slot >= total) return false;
-            StationState? block = menu.Kind == StationKind.Crafting ? null
-                : _stations.GetValueOrDefault(menu.Position);
-            if (menu.Kind != StationKind.Crafting && block is null) return false;
+            StationState? block = menu.Kind == StationKind.Crafting || repair
+                ? null : _stations.GetValueOrDefault(menu.Position);
+            if (menu.Kind != StationKind.Crafting && !repair && block is null)
+                return false;
             ItemStack[] local = menu.Kind == StationKind.Crafting
                 ? (ItemStack[])menu.CraftingGrid.Clone()
+                : repair ? (ItemStack[])menu.RepairGrid.Clone()
                 : (ItemStack[])block!.Slots.Clone();
             var (playerSlots, originalCursor, invRevision) = inventory.Snapshot();
             ItemStack cursor = originalCursor;
@@ -273,11 +340,14 @@ public sealed class WorkstationManager
                     ? index == 0
                         ? MatchCrafting(local)?.Output ?? ItemStack.Empty
                         : local[index - 1]
-                    : local[index])
+                    : repair && index == 2
+                        ? MatchRepair(menu.Kind, local)?.Result ?? ItemStack.Empty
+                        : local[index])
                 : playerSlots[pslot(index)];
             bool CanInsert(int index, ItemStack stack) =>
                 ValidStack(stack) &&
                 (index >= count || menu.Kind == StationKind.Crafting
+                || (repair && index < 2)
                 || (index != 2 && (stack.Count == 0 ||
                 (index == 0 && TryCook(menu.Kind, stack.ItemId,
                     out _, out _)) ||
@@ -294,6 +364,7 @@ public sealed class WorkstationManager
                 return false;
             bool output = menu.Kind == StationKind.Crafting
                 ? click.Slot == 0 : click.Slot == 2;
+            int xpCost = 0;
             if (output)
             {
                 ItemStack available = Get(click.Slot);
@@ -308,9 +379,9 @@ public sealed class WorkstationManager
                 else
                 {
                     if (cursor.Count != 0 &&
-                        (cursor.ItemId != available.ItemId ||
+                        (!SameItemData(cursor, available) ||
                          cursor.Count + available.Count > MaxStack(available.ItemId))) return false;
-                    cursor = new ItemStack(available.ItemId, cursor.Count + available.Count);
+                    cursor = available with { Count = cursor.Count + available.Count };
                 }
                 if (menu.Kind == StationKind.Crafting)
                 {
@@ -318,6 +389,16 @@ public sealed class WorkstationManager
                     if (matched is null || matched.Value.Output != available) return false;
                     foreach (int index in matched.Value.ConsumedSlots)
                         local[index] = Decrement(local[index], 1);
+                }
+                else if (repair)
+                {
+                    RepairPreview? match = MatchRepair(menu.Kind, local);
+                    if (match is not { } preview ||
+                        preview.Result != available) return false;
+                    local[0] = Decrement(local[0], 1);
+                    local[1] = Decrement(local[1], preview.MaterialConsumed);
+                    xpCost = menu.Kind == StationKind.Anvil && !creative
+                        ? preview.LevelCost : 0;
                 }
                 else local[2] = Decrement(local[2], available.Count);
                 changed = true;
@@ -339,7 +420,7 @@ public sealed class WorkstationManager
                         Put(click.Slot, cursor);
                         cursor = ItemStack.Empty;
                     }
-                    else if (here.ItemId == cursor.ItemId &&
+                    else if (SameItemData(here, cursor) &&
                         here.Count < MaxStack(cursor.ItemId))
                     {
                         if (!CanInsert(click.Slot, cursor)) return false;
@@ -360,14 +441,15 @@ public sealed class WorkstationManager
                     {
                         if (here.Count == 0) return false;
                         int take = (here.Count + 1) / 2;
-                        cursor = new ItemStack(here.ItemId, take);
+                        cursor = here with { Count = take };
                         Put(click.Slot, Decrement(here, take));
                     }
-                    else if (here.Count == 0 || here.ItemId == cursor.ItemId &&
+                    else if (here.Count == 0 ||
+                        SameItemData(here, cursor) &&
                         here.Count < MaxStack(cursor.ItemId))
                     {
                         if (!CanInsert(click.Slot, cursor)) return false;
-                        Put(click.Slot, new ItemStack(cursor.ItemId, here.Count + 1));
+                        Put(click.Slot, cursor with { Count = here.Count + 1 });
                         cursor = Decrement(cursor, 1);
                     }
                     else
@@ -391,15 +473,18 @@ public sealed class WorkstationManager
                 else
                 {
                     if (menu.Kind == StationKind.Crafting) return false;
-                    int target = TryCook(menu.Kind, here.ItemId,
+                    int target = repair ?
+                        local[0].Count == 0 ? 0 : local[1].Count == 0 ? 1 : -1 :
+                        TryCook(menu.Kind, here.ItemId,
                         out _, out _) ? 0 : StationRecipes.FuelTicks(here.ItemId) > 0 ? 1 : -1;
                     if (target < 0) return false;
                     ItemStack stationStack = local[target];
-                    if (stationStack.Count != 0 && stationStack.ItemId != here.ItemId)
+                    if (stationStack.Count != 0 &&
+                        (!SameItemData(stationStack, here)))
                         return false;
                     int moved = Math.Min(MaxStack(here.ItemId) - stationStack.Count, here.Count);
                     if (moved <= 0) return false;
-                    local[target] = new ItemStack(here.ItemId, stationStack.Count + moved);
+                    local[target] = here with { Count = stationStack.Count + moved };
                     Put(click.Slot, Decrement(here, moved));
                 }
                 changed = true;
@@ -414,10 +499,15 @@ public sealed class WorkstationManager
                 changed = true;
             }
             if (!changed) return false;
-            if (!inventory.TryCommitWindow(invRevision, playerSlots, cursor))
-                return false; // pickup or another event modified inventory meanwhile
+            bool committed = xpCost == 0 || creative
+                ? inventory.TryCommitWindow(invRevision, playerSlots, cursor)
+                : experience is not null && experience.TryPayLevels(xpCost,
+                    () => inventory.TryCommitWindow(invRevision, playerSlots, cursor));
+            if (!committed) return false;
             if (menu.Kind == StationKind.Crafting)
                 Array.Copy(local, menu.CraftingGrid, 9);
+            else if (repair)
+                Array.Copy(local, menu.RepairGrid, 2);
             else
             {
                 // Recipe duration/output may differ between configured inputs.
@@ -448,7 +538,8 @@ public sealed class WorkstationManager
     {
         int remaining = incoming.Count;
         for (int i = 9; i <= 44 && remaining > 0; i++)
-            if (slots[i].ItemId == incoming.ItemId && slots[i].Count > 0 && slots[i].Count < MaxStack(incoming.ItemId))
+            if (SameItemData(slots[i], incoming) &&
+                slots[i].Count > 0 && slots[i].Count < MaxStack(incoming.ItemId))
             {
                 int added = Math.Min(remaining, MaxStack(incoming.ItemId) - slots[i].Count);
                 slots[i] = slots[i] with { Count = slots[i].Count + added };
@@ -458,7 +549,7 @@ public sealed class WorkstationManager
             if (slots[i].Count == 0)
             {
                 int added = Math.Min(MaxStack(incoming.ItemId), remaining);
-                slots[i] = new ItemStack(incoming.ItemId, added);
+                slots[i] = incoming with { Count = added };
                 remaining -= added;
             }
         return remaining;
@@ -508,8 +599,8 @@ public sealed class WorkstationManager
                         {
                             state.CookProgress = 0;
                             state.Slots[0] = Decrement(state.Slots[0], 1);
-                            state.Slots[2] = new ItemStack(result.ItemId,
-                                state.Slots[2].Count + result.Count);
+                            state.Slots[2] = result with
+                            { Count = state.Slots[2].Count + result.Count };
                             persist = true;
                         }
                     }
@@ -537,7 +628,10 @@ public sealed class WorkstationManager
         if (_path is null || !File.Exists(_path)) return;
         using var stream = File.OpenRead(_path);
         using var reader = new BinaryReader(stream, Encoding.UTF8);
-        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic) ||
+        byte[] magic = reader.ReadBytes(Magic.Length);
+        bool legacy = magic.SequenceEqual(LegacyMagic);
+        bool damageOnly = magic.SequenceEqual(DamageMagic);
+        if (!legacy && !damageOnly && !magic.SequenceEqual(Magic) ||
             reader.ReadInt64() != _world.Seed || reader.ReadString() != _world.DimensionId)
             throw new InvalidDataException("Invalid station store header/world identity.");
         int count = reader.ReadInt32();
@@ -558,9 +652,19 @@ public sealed class WorkstationManager
             for (int slot = 0; slot < 3; slot++)
             {
                 int itemId = reader.ReadInt32(), amount = reader.ReadInt32();
-                if (!ValidStack(new ItemStack(itemId, amount)))
+                int damage = legacy ? 0 : reader.ReadInt32();
+                int unbreaking = legacy || damageOnly ? 0 : reader.ReadByte();
+                bool mending = !legacy && !damageOnly && reader.ReadBoolean();
+                bool unbreakable = !legacy && !damageOnly && reader.ReadBoolean();
+                int repairCost = legacy || damageOnly ? 0 : reader.ReadInt32();
+                var item = new ItemStack(itemId, amount)
+                {
+                    Damage = damage, Unbreaking = unbreaking, Mending = mending,
+                    Unbreakable = unbreakable, RepairCost = repairCost
+                };
+                if (!ValidStack(item))
                     throw new InvalidDataException("Invalid persisted station inventory.");
-                state.Slots[slot] = new ItemStack(itemId, amount);
+                state.Slots[slot] = item;
             }
             if (state.BurnRemaining is < 0 or > 100000 || state.BurnTotal is < 0 or > 100000 ||
                 state.CookProgress is < 0 or > 10000 || state.CookTotal is < 0 or > 10000)
@@ -604,6 +708,11 @@ public sealed class WorkstationManager
                     {
                         writer.Write(stack.ItemId);
                         writer.Write(stack.Count);
+                        writer.Write(stack.Damage);
+                        writer.Write((byte)stack.Unbreaking);
+                        writer.Write(stack.Mending);
+                        writer.Write(stack.Unbreakable);
+                        writer.Write(stack.RepairCost);
                     }
                 }
                 writer.Flush();

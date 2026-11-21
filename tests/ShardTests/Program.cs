@@ -33,8 +33,23 @@ try
     File.WriteAllText(Path.Combine(yamlDir, "custom.yml"), """
         crafting_table:
           Display: "Workshop Table"
+          ItemModel: amethyst:workshop_table
           Lore:
             - "Configured before the Shard loads"
+          Components:
+            minecraft:rarity: rare
+            minecraft:enchantment_glint_override: true
+            minecraft:custom_model_data:
+              floats: [2.5]
+              flags: [true]
+              strings: [amethyst:workshop]
+              colors: [16711935]
+            minecraft:tooltip_display:
+              hide_tooltip: false
+              hidden_components: [minecraft:enchantments]
+        diamond_pickaxe:
+          Unbreakable: true
+          ItemModel: amethyst:eternal_pickaxe
         """);
     string recipeDir = Path.Combine(temp, "shards", "items", "recipes");
     Directory.CreateDirectory(recipeDir);
@@ -303,6 +318,75 @@ try
         table.Lore is { Count: 1 } &&
         items.TryGetByIdentifier("crafting_table", out var byName) && byName == table,
         "Items can be resolved by protocol ID and canonical/short identifier");
+    Check(table.ItemModel == "amethyst:workshop_table" &&
+        table.Components is { Count: 7 } &&
+        table.Components.ContainsKey("minecraft:custom_name") &&
+        table.Components.ContainsKey("minecraft:custom_model_data") &&
+        ShardItemComponentIds.TryGetId("minecraft:item_model", out int modelComponent) &&
+        modelComponent == 10 &&
+        ShardItemComponentIds.TryGetId("minecraft:tooltip_display", out int tooltipComponent) &&
+        tooltipComponent == 18,
+        "YAML shorthands and Components expose version-pinned item patches");
+
+    // Test actual protocol-777 slot bytes: definitions are not merely stored
+    // as metadata; they must be sent to Java clients with correct field types.
+    var slotWriter = new PacketWriter();
+    InventoryProtocol.WriteStack(slotWriter, new ItemStack(table.ProtocolId, 1), items);
+    var slot = new PacketReader(slotWriter.ToArray());
+    Check(slot.ReadVarInt() == 1 && slot.ReadVarInt() == table.ProtocolId &&
+        slot.ReadVarInt() == 7 && slot.ReadVarInt() == 0,
+        "Configured item emits seven added components and zero removed");
+    Check(slot.ReadVarInt() == 6 && slot.ReadByte() == 8 &&
+        System.Text.Encoding.UTF8.GetString(slot.ReadFixedBytes(slot.ReadInt16())) ==
+        "Workshop Table", "Display writes a real NBT custom_name component");
+    Check(slot.ReadVarInt() == 10 &&
+        slot.ReadString(256) == "amethyst:workshop_table",
+        "item_model uses protocol-777 component ID and identifier codec");
+    Check(slot.ReadVarInt() == 11 && slot.ReadVarInt() == 1 &&
+        slot.ReadByte() == 8 &&
+        System.Text.Encoding.UTF8.GetString(slot.ReadFixedBytes(slot.ReadInt16())) ==
+        "Configured before the Shard loads",
+        "Lore encodes as an array of NBT text components");
+    Check(slot.ReadVarInt() == 12 && slot.ReadVarInt() == 2,
+        "Rarity encodes as the correct protocol enum");
+    Check(slot.ReadVarInt() == 17 && slot.ReadVarInt() == 1 &&
+        Math.Abs(slot.ReadFloat() - 2.5f) < 0.001 &&
+        slot.ReadVarInt() == 1 && slot.ReadByte() == 1 &&
+        slot.ReadVarInt() == 1 && slot.ReadString(256) == "amethyst:workshop" &&
+        slot.ReadVarInt() == 1 && slot.ReadInt32() == 16711935,
+        "Custom model data uses the modern floats/flags/strings/colors payload");
+    Check(slot.ReadVarInt() == 18 && slot.ReadByte() == 0 &&
+        slot.ReadVarInt() == 1 && slot.ReadVarInt() == 13,
+        "Tooltip display uses validated component registry references");
+    Check(slot.ReadVarInt() == 21 && slot.ReadByte() == 1 &&
+        slot.Remaining == 0, "Glint override encodes as a boolean component");
+
+    Check(items.TryGetByIdentifier("diamond_pickaxe", out var configuredPickaxe) &&
+        configuredPickaxe.ItemModel == "amethyst:eternal_pickaxe",
+        "Configuration applies to vanilla damageable item definitions");
+    var durableWriter = new PacketWriter();
+    InventoryProtocol.WriteStack(durableWriter,
+        new ItemStack(configuredPickaxe.ProtocolId, 1)
+        { Damage = 11, Unbreaking = 3, Mending = true, RepairCost = 4 }, items);
+    var durable = new PacketReader(durableWriter.ToArray());
+    Check(durable.ReadVarInt() == 1 &&
+        durable.ReadVarInt() == configuredPickaxe.ProtocolId &&
+        durable.ReadVarInt() == 5 && durable.ReadVarInt() == 0 &&
+        durable.ReadVarInt() == 3 && durable.ReadVarInt() == 11 &&
+        durable.ReadVarInt() == 4 &&
+        durable.ReadVarInt() == 10 &&
+        durable.ReadString(256) == "amethyst:eternal_pickaxe" &&
+        durable.ReadVarInt() == 13 && durable.ReadVarInt() == 2 &&
+        durable.ReadVarInt() == VanillaRegistries.IndexOf(
+            "minecraft:enchantment", "minecraft:unbreaking") &&
+        durable.ReadVarInt() == 3 &&
+        durable.ReadVarInt() == VanillaRegistries.IndexOf(
+            "minecraft:enchantment", "minecraft:mending") &&
+        durable.ReadVarInt() == 1 &&
+        durable.ReadVarInt() == 19 && durable.ReadVarInt() == 4 &&
+        durable.Remaining == 0,
+        "Definition patches coexist with authoritative durability/enchantment components");
+
     Check(items.TryGetByIdentifier("netherite_pickaxe", out var pickaxe) &&
         pickaxe.MaxStackSize == 1 &&
         items.TryGetByIdentifier("minecraft:ender_pearl", out var pearl) &&

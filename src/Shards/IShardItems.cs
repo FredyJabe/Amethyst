@@ -7,14 +7,25 @@ namespace Amethyst.Shards;
 public readonly record struct ShardItemDefinition(
     int ProtocolId, string Identifier, int MaxStackSize, bool IsBlockItem)
 {
-    /// <summary>Optional YAML-authored item metadata. Display, ItemName,
-    /// Lore and CustomModelData are definitions only until Gameplay supports
-    /// sending corresponding per-stack data components to Java clients.</summary>
+    /// <summary>Compatibility accessors for Mythic-style YAML shorthands.
+    /// For client-visible Java 26.3 components use Components below.</summary>
     public string? Display { get; init; }
     public string? ItemName { get; init; }
     public IReadOnlyList<string>? Lore { get; init; }
     public int? CustomModelData { get; init; }
     public bool Hidden { get; init; }
+    /// <summary>Optional definition-level component patch in 26.3 registry
+    /// names. Keys are canonical minecraft: identifiers; values are validated
+    /// JSON encoded by the Items Shard. Empty means vanilla defaults. Gameplay
+    /// applies this patch to all stacks of this vanilla item ID, then overlays
+    /// individual stack durability/enchantments. Alias definitions can expose
+    /// separate patches, but they do not have a distinct stack identity.</summary>
+    public IReadOnlyDictionary<string, string>? Components { get; init; }
+    /// <summary>Convenience accessor for the minecraft:item_model component.</summary>
+    public string? ItemModel { get; init; }
+    /// <summary>Java 26.3 default max damage; zero means non-damageable.
+    /// Physical durability is pinned to the vanilla item identity.</summary>
+    public int MaxDurability { get; init; }
 }
 
 /// <summary>Read-only item registry supplied by exactly one enabled Items

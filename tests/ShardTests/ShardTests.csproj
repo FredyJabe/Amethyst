@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Amethyst.csproj" />
+    <ProjectReference Include="../../shards/Amethyst.Shards.Gameplay/Amethyst.Shards.Gameplay.csproj" />
   </ItemGroup>
 </Project>

@@ -50,6 +50,114 @@ Check(!itemsCatalog.IsValidStack(99999, 1) &&
     itemsCatalog.IsValidStack(0, 0),
     "Unknown IDs and non-empty air stacks are never valid");
 
+// Java 26.3 durability comes from the Items Shard's pinned definitions.
+ShardItemDefinition shearsTool = default;
+Check(itemsCatalog.TryGetByIdentifier("wooden_pickaxe", out var woodenTool) &&
+    woodenTool.MaxDurability == 59 &&
+    diamondPickaxe.MaxDurability == 1561 &&
+    itemsCatalog.TryGetByIdentifier("shears", out shearsTool) &&
+    shearsTool.MaxDurability == 238 &&
+    itemsCatalog.TryGetByIdentifier("stone", out var notTool) &&
+    notTool.MaxDurability == 0,
+    "Items Shard exposes vanilla 26.3 durability, including copper tools and shears");
+Check(MiningRules.DurabilityCostForBlock(1, diamondPickaxe.ProtocolId, itemsCatalog) == 1 &&
+    itemsCatalog.TryGetByIdentifier("iron_sword", out var ironSword) &&
+    MiningRules.DurabilityCostForBlock(1, ironSword.ProtocolId, itemsCatalog) == 2 &&
+    MiningRules.DurabilityCostForBlock(30, diamondPickaxe.ProtocolId, itemsCatalog) == 0 &&
+    MiningRules.DurabilityCostForBlock(30, shearsTool.ProtocolId, itemsCatalog) == 1 &&
+    MiningRules.DurabilityCostForBlock(4931, shearsTool.ProtocolId, itemsCatalog) == 0 &&
+    MiningRules.DurabilityCostForBlock(1, 1, itemsCatalog) == 0,
+    "Mining wear follows tool and sword rules, with shears and instant-block exceptions");
+string wearRoot = Path.Combine(Path.GetTempPath(),
+    "amethyst-wear-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(wearRoot);
+try
+{
+    Guid wearId = Guid.NewGuid();
+    var wornInventory = new PlayerInventory(wearRoot, wearId, itemsCatalog);
+    Check(wornInventory.TryCreativeSet(36, woodenTool.ProtocolId, 1, true) &&
+        wornInventory.DamageHeld(woodenTool.ProtocolId, 7) &&
+        wornInventory.Held() == new ItemStack(woodenTool.ProtocolId, 1) { Damage = 7 },
+        "Survival wear is accumulated per tool stack");
+    int revision = wornInventory.Snapshot().Revision;
+    Check(wornInventory.ApplyClick(new InventoryClick(0, revision, 36, 0, 0)) &&
+        wornInventory.ApplyClick(new InventoryClick(0, revision + 1, 10, 0, 0)) &&
+        wornInventory.Snapshot().Slots[10].Damage == 7 &&
+        wornInventory.Snapshot().Cursor == ItemStack.Empty,
+        "Inventory clicks preserve tool damage when moving to main inventory");
+    Check(new PlayerInventory(wearRoot, wearId, itemsCatalog)
+        .Snapshot().Slots[10].Damage == 7,
+        "Worn tool damage survives reconnect and new-format save");
+    int moveRevision = wornInventory.Snapshot().Revision;
+    Check(wornInventory.ApplyClick(new InventoryClick(0, moveRevision, 10, 0, 0)) &&
+        wornInventory.ApplyClick(new InventoryClick(0, moveRevision + 1, 36, 0, 0)) &&
+        wornInventory.Held().Damage == 7,
+        "Moving a worn tool back to the hotbar keeps its durability");
+    Check(!wornInventory.DamageHeld(1, 1) &&
+        wornInventory.Held().Damage == 7,
+        "Wear cannot be applied to a different item ID");
+    Check(wornInventory.DamageHeld(woodenTool.ProtocolId, 51) &&
+        wornInventory.Held().Damage == 58 &&
+        wornInventory.DamageHeld(woodenTool.ProtocolId, 1) &&
+        wornInventory.Held() == ItemStack.Empty &&
+        !wornInventory.DamageHeld(woodenTool.ProtocolId, 1),
+        "Tool breaks and disappears precisely when maximum durability is reached");
+
+    // Legacy AMINV002 stored only (item ID, amount); those saves migrate
+    // without making old-world inventories invalid or giving tools damage.
+    Guid legacyId = Guid.NewGuid();
+    string legacyPath = Path.Combine(wearRoot, "inventories",
+        legacyId.ToString("N") + ".bin");
+    using (var stream = File.Create(legacyPath))
+    using (var legacyWriter = new BinaryWriter(stream))
+    {
+        legacyWriter.Write("AMINV002"u8.ToArray());
+        legacyWriter.Write(46);
+        for (int legacySlot = 0; legacySlot < 46; legacySlot++)
+        {
+            legacyWriter.Write(legacySlot == 36 ? woodenTool.ProtocolId : 0);
+            legacyWriter.Write(legacySlot == 36 ? 1 : 0);
+        }
+        legacyWriter.Write(0);
+        legacyWriter.Write(0);
+    }
+    var migrated = new PlayerInventory(wearRoot, legacyId, itemsCatalog);
+    Check(migrated.Held() == new ItemStack(woodenTool.ProtocolId, 1) &&
+        migrated.DamageHeld(woodenTool.ProtocolId, 1) &&
+        new PlayerInventory(wearRoot, legacyId, itemsCatalog).Held().Damage == 1,
+        "Legacy player inventories load undamaged and migrate on next save");
+    var (slots, cursor, validRevision) = migrated.Snapshot();
+    slots[9] = new ItemStack(1, 1) { Damage = 1 };
+    Check(!migrated.TryCommitWindow(validRevision, slots, cursor),
+        "Non-damageable items cannot carry forged damage");
+    slots[9] = new ItemStack(woodenTool.ProtocolId, 1) { Damage = 59 };
+    Check(!migrated.TryCommitWindow(validRevision, slots, cursor),
+        "Over-damaged or broken stacks cannot be committed into inventory");
+    var componentWriter = new PacketWriter();
+    InventoryProtocol.WriteStack(componentWriter,
+        new ItemStack(woodenTool.ProtocolId, 1) { Damage = 7 });
+    var encoded = new PacketReader(componentWriter.ToArray());
+    Check(encoded.ReadVarInt() == 1 &&
+        encoded.ReadVarInt() == woodenTool.ProtocolId &&
+        encoded.ReadVarInt() == 1 && encoded.ReadVarInt() == 0 &&
+        encoded.ReadVarInt() == 3 && encoded.ReadVarInt() == 7 &&
+        encoded.Remaining == 0,
+        "Protocol 777 sends accumulated wear as minecraft:damage component ID 3");
+}
+finally
+{
+    try { Directory.Delete(wearRoot, recursive: true); }
+    catch (IOException) { }
+}
+
+await DurabilityFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await CombatFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await ShieldFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await ProjectileFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await EntityInteractionFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await FishingFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await ElytraFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+
 // Mythic-style YAML: each root ID overrides one vanilla item or names a
 // custom alias backed by a vanilla protocol item. Never mint new IDs.
 string yamlTestRoot = Path.Combine(Path.GetTempPath(),
@@ -798,7 +906,39 @@ try
             Check(ack is { Id: BlockInteractionProtocol.ClientboundChangedAck } &&
                 ack.Value.Reader().ReadVarInt() == 7,
                 "One-tick START sequence is acknowledged after authoritative air");
+            Packet? wornSlot = await Protocol.ReadPacketAsync(instantStream, CancellationToken.None);
+            Check(wornSlot is { Id: InventoryProtocol.ClientboundSetSlot },
+                "Successful Survival mining sends a held-item durability update");
+            if (wornSlot is { } slotPacket)
+            {
+                PacketReader wear = slotPacket.Reader();
+                Check(wear.ReadVarInt() == 0 && wear.ReadVarInt() > 0 &&
+                    wear.ReadInt16() == 36 && wear.ReadVarInt() == 1 &&
+                    wear.ReadVarInt() == 1054 && wear.ReadVarInt() == 1 &&
+                    wear.ReadVarInt() == 0 && wear.ReadVarInt() == 3 &&
+                    wear.ReadVarInt() == 1 && wear.Remaining == 0 &&
+                    player.Inventory.Held().Damage == 1,
+                    "Client receives exact durability component for the mined block");
+            }
         }
+        player.SetGameMode(PlayerGameMode.Creative);
+        Check(world.TrySetBlockState(4, blockY, blockZ, 10, out _),
+            "Prepare Creative mining durability regression");
+        await game.HandleBlockActionAsync(player,
+            new PlayerBlockAction(BlockInteractionProtocol.StartDestroyBlock,
+                4, blockY, blockZ, 1, 14), CancellationToken.None);
+        Check(world.GetBlockState(4, blockY, blockZ) == 0 &&
+            player.Inventory.Held().Damage == 1,
+            "Creative breaks blocks without consuming any tool durability");
+        player.SetGameMode(PlayerGameMode.Survival);
+        Check(world.TrySetBlockState(4, blockY, blockZ, 30, out _),
+            "Prepare an instant-hand block");
+        await game.HandleBlockActionAsync(player,
+            new PlayerBlockAction(BlockInteractionProtocol.StartDestroyBlock,
+                4, blockY, blockZ, 1, 15), CancellationToken.None);
+        Check(world.GetBlockState(4, blockY, blockZ) == 0 &&
+            player.Inventory.Held().Damage == 1,
+            "Breaking a zero-hardness block does not damage a tool");
 
         // Exercise the same block-use handler used by connected players.
         // Both blocks must work in both game modes, and Survival must

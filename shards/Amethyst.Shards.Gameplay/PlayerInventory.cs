@@ -6,13 +6,16 @@ namespace Amethyst;
 /// <summary>Simple server-authoritative player inventory. Supports main slots
 /// 9..35 and hotbar 36..44; armor/crafting/offhand are reserved for later.
 /// All edits are persisted atomically under Gameplay's Shard data directory.</summary>
-public sealed class PlayerInventory
+public sealed partial class PlayerInventory
 {
-    private static readonly byte[] Magic = "AMINV002"u8.ToArray();
+    private static readonly byte[] Magic = "AMINV004"u8.ToArray();
+    private static readonly byte[] DamageMagic = "AMINV003"u8.ToArray();
+    private static readonly byte[] LegacyMagic = "AMINV002"u8.ToArray();
     private readonly object _sync = new();
     private readonly ItemStack[] _slots = new ItemStack[46];
     private readonly string? _path;
     private readonly IShardItemRegistry? _items;
+    internal IShardItemRegistry? ItemRegistry => _items;
     private ItemStack _cursor;
     private int _selected;
     private int _revision;
@@ -48,8 +51,8 @@ public sealed class PlayerInventory
 
     public bool TryCreativeSet(int slot, int itemId, int count, bool plain)
     {
-        if (slot is < 9 or > 44 || !plain ||
-            !ValidStack(new ItemStack(itemId, count))) return false;
+        if (!ValidSlot(slot) || !plain ||
+            !ValidSlotStack(slot, new ItemStack(itemId, count))) return false;
         lock (_sync)
         {
             var original = _slots[slot];
@@ -59,6 +62,11 @@ public sealed class PlayerInventory
             return true;
         }
     }
+
+    /// <summary>Wear on the selected tool, honoring Unbreaking
+    /// and Unbreakable through the shared durability engine.</summary>
+    public bool DamageHeld(int expectedItemId, int damage) =>
+        DamageSlot(SelectedSlot, expectedItemId, damage);
 
     /// <summary>Remove one placed item, if held. Creative mode never consumes.</summary>
     public bool ConsumeHeld(bool creative, int expectedItem)
@@ -109,7 +117,8 @@ public sealed class PlayerInventory
             foreach (int index in Enumerable.Range(36, 9).Concat(Enumerable.Range(9, 27)))
             {
                 ItemStack stack = _slots[index];
-                if (stack.ItemId != itemId || stack.Count == 0 || stack.Count >= maximum) continue;
+                if (stack.ItemId != itemId || stack.Damage != 0 ||
+                    stack.Count == 0 || stack.Count >= maximum) continue;
                 int delta = Math.Min(maximum - stack.Count, remaining);
                 _slots[index] = stack with { Count = stack.Count + delta };
                 remaining -= delta;
@@ -180,7 +189,8 @@ public sealed class PlayerInventory
     public bool TryCommitWindow(int expectedRevision, ItemStack[] slots, ItemStack cursor)
     {
         if (slots.Length != _slots.Length || !ValidStack(cursor) ||
-            slots.Any(s => !ValidStack(s))) return false;
+            slots.Where((stack, index) => !ValidSlotStack(index, stack)).Any())
+            return false;
         lock (_sync)
         {
             if (expectedRevision != _revision) return false;
@@ -209,12 +219,49 @@ public sealed class PlayerInventory
         return itemId <= 1657 ? 64 : 0;
     }
 
-    private bool ValidStack(ItemStack s) =>
-        _items?.IsValidStack(s.ItemId, s.Count) ??
-        (s.Count is >= 0 and <= 64 && s.ItemId is >= 0 and <= 1657 &&
-         (s.Count == 0) == (s.ItemId == 0));
+    private bool ValidStack(ItemStack s)
+    {
+        if (s.Damage < 0 || s.Unbreaking is < 0 or > 3 ||
+            s.RepairCost is < 0 or > 1_000_000) return false;
+        bool extra = s.Damage > 0 || s.Unbreaking > 0 || s.Mending ||
+            s.Unbreakable || s.RepairCost > 0;
+        if (_items is null)
+            return !extra && s.Count is >= 0 and <= 64 &&
+                s.ItemId is >= 0 and <= 1657 &&
+                (s.Count == 0) == (s.ItemId == 0);
+        if (!_items.IsValidStack(s.ItemId, s.Count)) return false;
+        if (s.Count == 0) return !extra;
+        if (!_items.TryGetById(s.ItemId, out var item)) return false;
+        return !extra || (item.MaxDurability > 0 && s.Count == 1 &&
+            s.Damage < item.MaxDurability);
+    }
 
-    private static bool ValidSlot(int slot) => slot is >= 9 and <= 44;
+    private bool ValidSlotStack(int slot, ItemStack item)
+    {
+        if (!ValidStack(item)) return false;
+        if (item.Count == 0) return true;
+        if (slot is < 5 or > 45) return false;
+        if (slot is >= 9 and <= 45) return true;
+        if (_items is null || !_items.TryGetById(item.ItemId, out var definition))
+            return false;
+        string name = definition.Identifier;
+        return slot switch
+        {
+            5 => name.EndsWith("_helmet", StringComparison.Ordinal),
+            6 => name.EndsWith("_chestplate", StringComparison.Ordinal) ||
+                 name == "minecraft:elytra",
+            7 => name.EndsWith("_leggings", StringComparison.Ordinal),
+            8 => name.EndsWith("_boots", StringComparison.Ordinal),
+            _ => false
+        };
+    }
+
+    private static bool ValidSlot(int slot) => slot is >= 5 and <= 45;
+
+    private static bool SameItemData(ItemStack a, ItemStack b) =>
+        a.ItemId == b.ItemId && a.Damage == b.Damage &&
+        a.Unbreaking == b.Unbreaking && a.Mending == b.Mending &&
+        a.Unbreakable == b.Unbreakable && a.RepairCost == b.RepairCost;
 
     /// <summary>Execute server-side mouse clicks, hotbar swaps and shift-clicks.
     /// Client-provided item hashes are never trusted to mint items.</summary>
@@ -233,8 +280,10 @@ public sealed class PlayerInventory
             {
                 if (click.Button == 0)
                 {
-                    if (_cursor.Count == 0 || here.Count == 0 || _cursor.ItemId != here.ItemId)
+                    if (_cursor.Count == 0 || here.Count == 0 ||
+                        !SameItemData(_cursor, here))
                     {
+                        if (!ValidSlotStack(slot, _cursor)) return false;
                         (_slots[slot], _cursor) = (_cursor, here);
                         changed = true;
                     }
@@ -258,16 +307,19 @@ public sealed class PlayerInventory
                         changed = true;
                     }
                     else if (_cursor.Count > 0 &&
-                        (here.Count == 0 || (here.ItemId == _cursor.ItemId &&
+                        (here.Count == 0 || (SameItemData(here, _cursor) &&
                             here.Count < MaxStack(_cursor.ItemId))))
                     {
-                        _slots[slot] = new ItemStack(_cursor.ItemId, here.Count + 1);
+                        if (!ValidSlotStack(slot, _cursor with { Count = here.Count + 1 }))
+                            return false;
+                        _slots[slot] = _cursor with { Count = here.Count + 1 };
                         _cursor = _cursor.Count == 1 ? ItemStack.Empty :
                             _cursor with { Count = _cursor.Count - 1 };
                         changed = true;
                     }
                     else if (_cursor.Count > 0 && here.Count > 0)
                     {
+                        if (!ValidSlotStack(slot, _cursor)) return false;
                         (_slots[slot], _cursor) = (_cursor, here);
                         changed = true;
                     }
@@ -281,8 +333,8 @@ public sealed class PlayerInventory
                 for (int i = low; i <= high && remaining > 0; i++)
                 {
                     ItemStack other = _slots[i];
-                    if (other.ItemId != here.ItemId || other.Count == 0 ||
-                        other.Count >= MaxStack(here.ItemId)) continue;
+                    if (!SameItemData(other, here) ||
+                        other.Count == 0 || other.Count >= MaxStack(here.ItemId)) continue;
                     int moved = Math.Min(remaining, MaxStack(here.ItemId) - other.Count);
                     _slots[i] = other with { Count = other.Count + moved };
                     remaining -= moved;
@@ -291,7 +343,7 @@ public sealed class PlayerInventory
                 {
                     if (_slots[i].Count != 0) continue;
                     int moved = Math.Min(MaxStack(here.ItemId), remaining);
-                    _slots[i] = new ItemStack(here.ItemId, moved);
+                    _slots[i] = here with { Count = moved };
                     remaining -= moved;
                 }
                 if (remaining != here.Count)
@@ -304,10 +356,17 @@ public sealed class PlayerInventory
             else if (click.Mode == 2 && click.Button is >= 0 and <= 8)
             {
                 int hotbar = 36 + click.Button;
+                if (!ValidSlotStack(slot, _slots[hotbar])) return false;
                 (_slots[slot], _slots[hotbar]) = (_slots[hotbar], _slots[slot]);
                 changed = slot != hotbar;
             }
             if (!changed) return false;
+            if (!ValidSlotStack(slot, _slots[slot]) || !ValidStack(_cursor))
+            {
+                Array.Copy(backup, _slots, _slots.Length);
+                _cursor = cursor;
+                return false;
+            }
             try { Persist(); _revision++; }
             catch
             {
@@ -324,20 +383,37 @@ public sealed class PlayerInventory
         if (_path is null || !File.Exists(_path)) return;
         using var stream = File.OpenRead(_path);
         using var reader = new BinaryReader(stream, Encoding.UTF8);
-        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic) ||
+        byte[] magic = reader.ReadBytes(Magic.Length);
+        bool oldPlain = magic.SequenceEqual(LegacyMagic);
+        bool oldDamage = magic.SequenceEqual(DamageMagic);
+        if (!oldPlain && !oldDamage && !magic.SequenceEqual(Magic) ||
             reader.ReadInt32() != _slots.Length)
             throw new InvalidDataException($"Bad player inventory header in {_path}");
-        for (int i = 0; i < _slots.Length; i++)
+        ItemStack ReadStack()
         {
             int item = reader.ReadInt32(), count = reader.ReadInt32();
-            if (!ValidStack(new ItemStack(item, count)))
-                throw new InvalidDataException($"Corrupted inventory slot {i} in {_path}");
-            _slots[i] = new ItemStack(item, count);
+            int damage = oldPlain ? 0 : reader.ReadInt32();
+            int unbreaking = oldPlain || oldDamage ? 0 : reader.ReadByte();
+            bool mending = !oldPlain && !oldDamage && reader.ReadBoolean();
+            bool unbreakable = !oldPlain && !oldDamage && reader.ReadBoolean();
+            int cost = oldPlain || oldDamage ? 0 : reader.ReadInt32();
+            return new ItemStack(item, count)
+            {
+                Damage = damage, Unbreaking = unbreaking, Mending = mending,
+                Unbreakable = unbreakable, RepairCost = cost
+            };
         }
-        int cursorItem = reader.ReadInt32(), cursorCount = reader.ReadInt32();
-        if (!ValidStack(new ItemStack(cursorItem, cursorCount)))
+        for (int i = 0; i < _slots.Length; i++)
+        {
+            ItemStack item = ReadStack();
+            if (!ValidSlotStack(i, item))
+                throw new InvalidDataException($"Corrupted inventory slot {i} in {_path}");
+            _slots[i] = item;
+        }
+        ItemStack cursor = ReadStack();
+        if (!ValidStack(cursor))
             throw new InvalidDataException($"Corrupted carried item in {_path}");
-        _cursor = new ItemStack(cursorItem, cursorCount);
+        _cursor = cursor;
         if (stream.Position != stream.Length)
             throw new InvalidDataException($"Unexpected inventory data in {_path}");
     }
@@ -356,13 +432,18 @@ public sealed class PlayerInventory
             {
                 writer.Write(Magic);
                 writer.Write(_slots.Length);
-                foreach (ItemStack slot in _slots)
+                static void WriteStack(BinaryWriter output, ItemStack slot)
                 {
-                    writer.Write(slot.ItemId);
-                    writer.Write(slot.Count);
+                    output.Write(slot.ItemId);
+                    output.Write(slot.Count);
+                    output.Write(slot.Damage);
+                    output.Write((byte)slot.Unbreaking);
+                    output.Write(slot.Mending);
+                    output.Write(slot.Unbreakable);
+                    output.Write(slot.RepairCost);
                 }
-                writer.Write(_cursor.ItemId);
-                writer.Write(_cursor.Count);
+                foreach (ItemStack slot in _slots) WriteStack(writer, slot);
+                WriteStack(writer, _cursor);
                 writer.Flush();
                 stream.Flush(flushToDisk: true);
             }

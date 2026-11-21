@@ -5,7 +5,9 @@ public enum StationKind : byte
     Crafting = 0,
     Furnace = 1,
     Smoker = 2,
-    BlastFurnace = 3
+    BlastFurnace = 3,
+    Anvil = 4,
+    Grindstone = 5
 }
 
 public readonly record struct CraftingMatch(ItemStack Output, int[] ConsumedSlots);

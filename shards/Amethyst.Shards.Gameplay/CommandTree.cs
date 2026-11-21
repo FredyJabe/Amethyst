@@ -13,6 +13,7 @@ public static class CommandTree
         ("msg", 0, true), ("tell", 0, true), ("w", 0, true), ("me", 0, true),
         ("gamemode", 1, true),
         ("say", 2, true), ("kick", 2, true), ("oplist", 2, false),
+        ("enchant", 2, true), ("summon", 2, true),
         ("op", 4, true), ("deop", 4, true)
     };
 

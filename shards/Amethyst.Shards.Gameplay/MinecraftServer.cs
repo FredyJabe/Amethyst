@@ -5,7 +5,7 @@ namespace Amethyst;
 
 /// <summary>Gameplay runtime supplied by the gameplay Shard. Network listener,
 /// login authentication and configuration are handled by AmethystNetworkServer.</summary>
-public sealed class MinecraftServer : IShardItemDropSink
+public sealed partial class MinecraftServer : IShardItemDropSink
 {
     private static readonly bool TraceMining =
         Environment.GetEnvironmentVariable("AMETHYST_TRACE_MINING") == "1";
@@ -18,6 +18,8 @@ public sealed class MinecraftServer : IShardItemDropSink
     private readonly PlayerRegistry _players;
     private readonly OperatorStore _operators;
     private readonly GroundItemStore? _groundItems;
+    private readonly ExperienceOrbStore? _experienceOrbs;
+    private readonly LivingEntityStore? _livingEntities;
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
@@ -27,6 +29,7 @@ public sealed class MinecraftServer : IShardItemDropSink
     private readonly IShardEntityInteractions? _interactions;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
+    private readonly Dictionary<Guid, Dictionary<int, ExperienceOrb>> _experienceViews = new();
     private readonly Dictionary<Guid, Dictionary<int, ShardEntityInstance>> _entityViews = new();
     private CancellationTokenSource? _clockLifetime;
     private Task? _clockSync;
@@ -59,14 +62,24 @@ public sealed class MinecraftServer : IShardItemDropSink
         _stations = new WorkstationManager(inventoryDirectory, options.WorldPath, world,
             items, recipes ?? throw new ArgumentNullException(nameof(recipes)));
         if (_blocks is not null)
+        {
             _groundItems = new GroundItemStore(inventoryDirectory,
                 options.WorldPath, _players.AllocateEntityId, items);
+            _experienceOrbs = new ExperienceOrbStore(inventoryDirectory,
+                options.WorldPath, _players.AllocateEntityId);
+            _livingEntities = new LivingEntityStore(inventoryDirectory,
+                options.WorldPath, _players.AllocateEntityId);
+            _projectiles = new ProjectileWorld(_players.AllocateEntityId);
+            _fishing = new FishingWorld(_players.AllocateEntityId);
+        }
     }
 
     public ShardPlayerSummary[] OnlinePlayers => _players.Snapshot()
         .Select(p => new ShardPlayerSummary(p.Username, p.PlayerUuid)).ToArray();
 
     internal GroundItem[] GroundItemsForTests => _groundItems?.Snapshot() ?? [];
+    internal ExperienceOrb[] ExperienceOrbsForTests =>
+        _experienceOrbs?.Snapshot() ?? [];
     internal WorkstationManager StationsForTests => _stations;
     internal ConnectedPlayer? GetPlayerForTests(Guid id) =>
         _players.Snapshot().FirstOrDefault(p => p.PlayerUuid == id);
@@ -107,7 +120,13 @@ public sealed class MinecraftServer : IShardItemDropSink
                 try { await _stationSync; } catch (OperationCanceledException) { }
             _stations.Save();
             _groundItems?.Save();
+            _experienceOrbs?.Save();
+            _livingEntities?.Save();
+            _livingViews.Clear();
+            _projectileViews.Clear();
+            _fishingViews.Clear();
             _itemViews.Clear();
+            _experienceViews.Clear();
             _entityViews.Clear();
             _itemsSync = null;
             _entitiesSync = null;
@@ -154,6 +173,9 @@ public sealed class MinecraftServer : IShardItemDropSink
             ?? throw new InvalidOperationException("Player admission was not completed.");
         await SpawnPackets.SendAsync(player, _world, _options, _clock, ct);
         await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+        await ExperienceProtocol.SendExperienceAsync(player.Connection,
+            player.Experience, ct);
+        await CombatProtocol.SendHealthAsync(player, ct);
         int actualOpLevel = _options.OnlineMode ? _operators.Level(player.PlayerUuid) : 0;
         await GameModeProtocol.SendClientPermissionsAsync(player.Connection, player.EntityId, actualOpLevel, ct);
         await CommandTree.SendAsync(player.Connection, actualOpLevel, ct);
@@ -169,6 +191,7 @@ public sealed class MinecraftServer : IShardItemDropSink
         // who completed login; rejected/half-loaded sessions must not overwrite
         // a valid previous save with the initial spawn placeholder.
         CloseStation(player);
+        _fishing?.Cancel(player.PlayerUuid);
         TrySavePosition(player);
         _players.Remove(player.ConnectionId);
         await NotifyDepartureAsync(player);
@@ -225,6 +248,14 @@ public sealed class MinecraftServer : IShardItemDropSink
                             teleportConfirmed = true;
                         break;
                     }
+                    case FlightProtocol.ServerboundPlayerCommand:
+                    {
+                        PlayerCommandAction command =
+                            FlightProtocol.ReadPlayerCommand(packet.Value);
+                        await HandleFlightCommandAsync(player, command,
+                            lifetime.Token);
+                        break;
+                    }
                     case 0x2C: // Player Loaded
                         reader.RequireEnd();
                         playerLoaded = true;
@@ -235,6 +266,33 @@ public sealed class MinecraftServer : IShardItemDropSink
                         reader.RequireEnd();
                         player.AdvanceClientTick();
                         break;
+                    case 0x0C: // Respawn request (Java 26.3)
+                    {
+                        int command = reader.ReadVarInt();
+                        reader.RequireEnd();
+                        if (command == 0 && player.Vitals.Snapshot().Health <= 0)
+                        {
+                            expectedTeleportId++;
+                            teleportConfirmed = false;
+                            await RespawnPlayerAsync(player, expectedTeleportId,
+                                lifetime.Token);
+                        }
+                        break;
+                    }
+                    case CombatProtocol.ServerboundAttack:
+                    {
+                        int entityId = CombatProtocol.ReadAttack(packet.Value);
+                        await HandleAttackAsync(player, entityId, lifetime.Token);
+                        break;
+                    }
+                    case EntityInteractionProtocol.ServerboundInteract:
+                    {
+                        EntityInteraction interaction =
+                            EntityInteractionProtocol.Read(packet.Value);
+                        await HandleEntityInteractAsync(player, interaction,
+                            lifetime.Token);
+                        break;
+                    }
                     case 0x1C: // KeepAlive reply
                         _ = reader.ReadInt64(); reader.RequireEnd();
                         break;
@@ -281,8 +339,22 @@ public sealed class MinecraftServer : IShardItemDropSink
                                 _world.SpawnZPosition, lifetime.Token);
                             break;
                         }
-                        var current = new PlayerPose(x, y, z, yaw, pitch, (flags & 1) != 0);
+                        var current = new PlayerPose(x, y, z, yaw, pitch,
+                            (flags & 1) != 0);
+                        if (player.Flight.IsGliding &&
+                            !FlightRules.PlausibleMovement(old, current,
+                                player.Flight.IsBoosted(Environment.TickCount64)))
+                        {
+                            expectedTeleportId++;
+                            teleportConfirmed = false;
+                            await SpawnPackets.SendPositionAsync(player.Connection,
+                                expectedTeleportId, old.X, old.Y, old.Z,
+                                old.Yaw, old.Pitch, lifetime.Token);
+                            break;
+                        }
                         player.SetPose(current);
+                        await UpdateGlideMovementAsync(player, old, current,
+                            flags, lifetime.Token);
                         if (_stations.GetMenu(player.PlayerUuid) is StationMenu active)
                         {
                             double sx = active.Position.X + 0.5 - current.X;
@@ -330,7 +402,9 @@ public sealed class MinecraftServer : IShardItemDropSink
                         ChatProtocol.ParseSessionUpdate(packet.Value);
                         break;
                     case BlockInteractionProtocol.ServerboundSetHeldItem:
+                        player.UseState.CancelCharge();
                         player.SelectHotbar(BlockInteractionProtocol.ReadHeldItem(packet.Value));
+                        await ReleaseUsingItemAsync(player, lifetime.Token);
                         break;
                     case BlockInteractionProtocol.ServerboundCreativeSlot:
                     {
@@ -386,6 +460,12 @@ public sealed class MinecraftServer : IShardItemDropSink
                     {
                         BlockUseOn hit = BlockInteractionProtocol.ReadUseOn(packet.Value);
                         await HandleBlockUseAsync(player, hit, lifetime.Token);
+                        break;
+                    }
+                    case UseItemProtocol.ServerboundUseItem:
+                    {
+                        UseItemAction use = UseItemProtocol.ReadUseItem(packet.Value);
+                        await HandleUseItemAsync(player, use, lifetime.Token);
                         break;
                     }
                     case 0x0E: // Client information (Play): chat visibility preference
@@ -478,6 +558,13 @@ public sealed class MinecraftServer : IShardItemDropSink
             Console.WriteLine($"[mining] recv {player.Username} mode={player.GameMode} " +
                 $"status={action.Status} pos={action.X},{action.Y},{action.Z} " +
                 $"face={action.Face} seq={action.Sequence} held={player.Inventory.Held().ItemId}");
+        if (action.Status == BlockInteractionProtocol.ReleaseUseItem)
+        {
+            await ReleaseUsingItemAsync(player, ct);
+            await BlockInteractionProtocol.SendAckAsync(
+                player.Connection, action.Sequence, ct);
+            return;
+        }
         if (action.Status is BlockInteractionProtocol.DropAllItems
             or BlockInteractionProtocol.DropItem)
         {
@@ -527,6 +614,7 @@ public sealed class MinecraftServer : IShardItemDropSink
             await DispatchItemSkillAsync(player, player.Inventory.Held().ItemId,
                 "onLeftClick", ct);
         bool changed = false;
+        bool toolWearChanged = false;
         bool survival = player.GameMode == PlayerGameMode.Survival;
         string outcome = valid ? "no change" : "invalid target / range / mode / not ready";
         switch (action.Status)
@@ -601,13 +689,16 @@ public sealed class MinecraftServer : IShardItemDropSink
 
         if (changed)
         {
+            // The last point of durability may break a tool, but this block
+            // must still yield drops based on the tool that mined it.
+            int miningTool = player.Inventory.Held().ItemId;
             if (WorkstationManager.FromBlockState(state) is not null)
                 await BreakStationAsync(action.X, action.Y, action.Z, ct);
             await BroadcastBlockChangeAsync(player, action.X, action.Y, action.Z, 0, ct);
             if (survival)
             {
                 MiningRules.BlockInfo info = MiningRules.ForState(state);
-                if (info.DropItem > 0 && MiningRules.IsHarvestable(info, player.Inventory.Held().ItemId))
+                if (info.DropItem > 0 && MiningRules.IsHarvestable(info, miningTool))
                 {
                     // A break produces a world item. The player receives it
                     // only after touching the item and after its pickup delay.
@@ -616,6 +707,20 @@ public sealed class MinecraftServer : IShardItemDropSink
                         action.X + 0.5, action.Y + 0.35, action.Z + 0.5, out _))
                         Console.WriteLine($"[items] No capacity to spawn drop {info.DropItem} " +
                             $"at {action.X},{action.Y},{action.Z}");
+                }
+                int wear = MiningRules.DurabilityCostForBlock(state, miningTool, _items);
+                toolWearChanged = wear > 0 &&
+                    player.Inventory.DamageHeld(miningTool, wear);
+                // XP is a physical orb, not an instant mining reward.
+                // Only correctly harvested ore can spawn experience.
+                if (MiningRules.IsHarvestable(info, miningTool) &&
+                    _experienceOrbs is not null)
+                {
+                    int xp = OreExperience.Roll(state);
+                    if (xp > 0)
+                        _experienceOrbs.TrySpawn(xp,
+                            action.X + 0.5, action.Y + 0.35,
+                            action.Z + 0.5, out _);
                 }
             }
         }
@@ -635,6 +740,9 @@ public sealed class MinecraftServer : IShardItemDropSink
                 $"changed={changed} {outcome}");
         }
         await BlockInteractionProtocol.SendAckAsync(player.Connection, action.Sequence, ct);
+        if (toolWearChanged)
+            await InventoryProtocol.SendSlotAsync(player.Connection,
+                player.Inventory, player.Inventory.SelectedSlot, ct);
     }
 
     private async Task OpenStationAsync(ConnectedPlayer player,
@@ -653,8 +761,16 @@ public sealed class MinecraftServer : IShardItemDropSink
         var content = _stations.Content(player.PlayerUuid, player.Inventory);
         if (content is not { } menu) return;
         await StationProtocol.SendContentAsync(player.Connection, menu.WindowId,
-            menu.Revision, menu.Slots, menu.Cursor, ct);
-        if (_stations.GetMenu(player.PlayerUuid)?.Kind != StationKind.Crafting)
+            menu.Revision, menu.Slots, menu.Cursor, ct, _items);
+        StationKind? kind = _stations.GetMenu(player.PlayerUuid)?.Kind;
+        if (kind == StationKind.Anvil)
+        {
+            var data = _stations.Data(player.PlayerUuid);
+            await StationProtocol.SendDataAsync(player.Connection,
+                menu.WindowId, 0, data.Burn, ct); // anvil level cost
+        }
+        else if (kind is StationKind.Furnace or StationKind.Smoker or
+            StationKind.BlastFurnace)
         {
             var data = _stations.Data(player.PlayerUuid);
             await StationProtocol.SendDataAsync(player.Connection, menu.WindowId, 0, data.Burn, ct);
@@ -677,10 +793,37 @@ public sealed class MinecraftServer : IShardItemDropSink
             await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
             return;
         }
-        bool changed = _stations.Click(player.PlayerUuid, player.Inventory, click);
+        bool changed = _stations.Click(player.PlayerUuid, player.Inventory,
+            click, player.Experience,
+            player.GameMode == PlayerGameMode.Creative);
         // Even rejected predictions need an authoritative menu resync.
         await SendStationContentAsync(player, ct);
-        if (!changed || active.Kind == StationKind.Crafting) return;
+        if (changed && active.Kind == StationKind.Anvil)
+        {
+            await ExperienceProtocol.SendExperienceAsync(player.Connection,
+                player.Experience, ct);
+            // The output must be committed (including XP payment) before
+            // the 12% anvil wear roll can change or destroy its block.
+            if (click.Slot == 2 && player.GameMode == PlayerGameMode.Survival &&
+                _blocks is not null)
+            {
+                StationPos position = active.Position;
+                ushort current = _blocks.GetBlockState(
+                    position.X, position.Y, position.Z);
+                if (DurabilityRules.TryWearAnvil(current, out ushort updated) &&
+                    _blocks.TrySetBlockState(position.X, position.Y,
+                        position.Z, updated, out _))
+                {
+                    await BroadcastBlockChangeAsync(player, position.X,
+                        position.Y, position.Z, updated, ct);
+                    if (updated == 0)
+                        await BreakStationAsync(position.X, position.Y,
+                            position.Z, ct);
+                }
+            }
+        }
+        if (!changed || active.Kind is StationKind.Crafting or
+            StationKind.Anvil or StationKind.Grindstone) return;
         foreach (ConnectedPlayer observer in _players.Snapshot().Where(p =>
             p.Ready && p.ConnectionId != player.ConnectionId &&
             _stations.GetMenu(p.PlayerUuid)?.Position == active.Position))
@@ -696,11 +839,11 @@ public sealed class MinecraftServer : IShardItemDropSink
         PlayerPose pose = player.Pose;
         foreach (ItemStack item in stacks)
         {
-            int inserted = player.Inventory.Give(item.ItemId, item.Count);
+            int inserted = player.Inventory.GiveStack(item);
             int left = item.Count - inserted;
             if (left > 0 && (_groundItems is null ||
-                !_groundItems.TrySpawn(item.ItemId, left, pose.X, pose.Y + 0.2,
-                    pose.Z, out _)))
+                !_groundItems.TrySpawn(item with { Count = left },
+                    pose.X, pose.Y + 0.2, pose.Z, out _)))
                 Console.WriteLine($"[station] Unable to return {left} of item {item.ItemId} " +
                     $"for {player.Username}");
         }
@@ -729,8 +872,8 @@ public sealed class MinecraftServer : IShardItemDropSink
         var (contents, viewers) = _stations.Break(pos);
         foreach (ItemStack item in contents)
         {
-            if (_groundItems is null || !_groundItems.TrySpawn(item.ItemId,
-                item.Count, x + 0.5, y + 0.4, z + 0.5, out _))
+            if (_groundItems is null || !_groundItems.TrySpawn(item,
+                x + 0.5, y + 0.4, z + 0.5, out _))
                 Console.WriteLine($"[station] Unable to drop station contents {item.ItemId}");
         }
         foreach (Guid id in viewers)
@@ -878,6 +1021,7 @@ public sealed class MinecraftServer : IShardItemDropSink
             await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
             return;
         }
+        if (await TryHandleToolUseAsync(player, hit, ct)) return;
         var (x, y, z) = BlockInteractionProtocol.Adjacent(hit.X, hit.Y, hit.Z, hit.Face);
         ushort selected = 0;
         bool allowed = hit.ValidHit && hit.Hand == 0 &&
@@ -919,6 +1063,63 @@ public sealed class MinecraftServer : IShardItemDropSink
                     x, y, z, _blocks!.GetBlockState(x, y, z), ct);
         }
         await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
+    }
+
+    /// <summary>Server-authoritative right-click tool use. Never spends
+    /// durability on invalid interactions or rejected block-state writes.</summary>
+    private async Task<bool> TryHandleToolUseAsync(ConnectedPlayer player,
+        BlockUseOn hit, CancellationToken ct)
+    {
+        if (!hit.ValidHit || hit.Hand != 0 || _blocks is null ||
+            _items is null || !CanEditAt(player, hit.X, hit.Y, hit.Z))
+            return false;
+        ItemStack held = player.Inventory.Held();
+        if (held.Count != 1 ||
+            !_items.TryGetById(held.ItemId, out var definition) ||
+            definition.MaxDurability <= 0) return false;
+        ushort block = _blocks.GetBlockState(hit.X, hit.Y, hit.Z);
+        if (block == 0) return false;
+        var (ax, ay, az) = BlockInteractionProtocol.Adjacent(
+            hit.X, hit.Y, hit.Z, hit.Face);
+        bool adjacentAir = CanEditAt(player, ax, ay, az) &&
+            _blocks.GetBlockState(ax, ay, az) == 0;
+        bool aboveAir = hit.Y < 319 &&
+            _blocks.GetBlockState(hit.X, hit.Y + 1, hit.Z) == 0;
+        if (!ToolUseRules.TryUse(definition.Identifier, block, hit.Face,
+            aboveAir, adjacentAir, out var action)) return false;
+
+        int bx = action.Adjacent ? ax : hit.X;
+        int by = action.Adjacent ? ay : hit.Y;
+        int bz = action.Adjacent ? az : hit.Z;
+        if (!CanEditAt(player, bx, by, bz) ||
+            !player.TryConsumeEditBudget())
+        {
+            await BlockInteractionProtocol.SendAckAsync(player.Connection,
+                hit.Sequence, ct);
+            return true;
+        }
+        bool changed = _blocks.TrySetBlockState(bx, by, bz,
+            action.NewState, out _);
+        if (changed)
+        {
+            await BroadcastBlockChangeAsync(player, bx, by, bz,
+                action.NewState, ct);
+            if (action.Seeds > 0 && _groundItems is not null &&
+                _items.TryGetByIdentifier("minecraft:pumpkin_seeds",
+                    out var seed))
+                _groundItems.TrySpawn(seed.ProtocolId, action.Seeds,
+                    hit.X + 0.5, hit.Y + 0.4, hit.Z + 0.5, out _);
+        }
+        else await BlockInteractionProtocol.SendBlockUpdateAsync(
+            player.Connection, bx, by, bz,
+            _blocks.GetBlockState(bx, by, bz), ct);
+        await BlockInteractionProtocol.SendAckAsync(player.Connection,
+            hit.Sequence, ct);
+        if (changed && player.GameMode == PlayerGameMode.Survival &&
+            player.Inventory.DamageHeld(held.ItemId, 1))
+            await InventoryProtocol.SendSlotAsync(player.Connection,
+                player.Inventory, player.Inventory.SelectedSlot, ct);
+        return true;
     }
 
     private async Task BroadcastBlockChangeAsync(ConnectedPlayer actor,
@@ -1026,6 +1227,12 @@ public sealed class MinecraftServer : IShardItemDropSink
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
         while (await ticker.WaitForNextTickAsync(ct))
             await TickGroundItemsAsync(ct);
+            await TickExperienceOrbsAsync(ct);
+            await TickLivingEntitiesAsync(ct);
+            await TickProjectilesAsync(ct);
+            await TickFishingAsync(ct);
+            await TickWoolRegrowthAsync(ct);
+            await TickElytraAsync(ct);
     }
 
     /// <summary>One authoritative 20Hz tick for loose items. Exposed internally
@@ -1064,11 +1271,11 @@ public sealed class MinecraftServer : IShardItemDropSink
                 try
                 {
                     if (!seen.TryGetValue(item.EntityId, out GroundItem last))
-                        await DroppedItemProtocol.SendSpawnAsync(viewer.Connection, item, ct);
+                        await DroppedItemProtocol.SendSpawnAsync(viewer.Connection, item, ct, _items);
                     else
                     {
                         if (last.Count != item.Count)
-                            await DroppedItemProtocol.SendStackAsync(viewer.Connection, item, ct);
+                            await DroppedItemProtocol.SendStackAsync(viewer.Connection, item, ct, _items);
                         if (last.X != item.X || last.Y != item.Y || last.Z != item.Z)
                             await DroppedItemProtocol.SendPositionAsync(viewer.Connection, item, ct);
                     }
@@ -1119,7 +1326,7 @@ public sealed class MinecraftServer : IShardItemDropSink
                         else
                         {
                             await DroppedItemProtocol.SendStackAsync(viewer.Connection,
-                                remaining, ct);
+                                remaining, ct, _items);
                             seen[item.EntityId] = remaining;
                         }
                     }
@@ -1136,6 +1343,114 @@ public sealed class MinecraftServer : IShardItemDropSink
                 await DispatchItemSkillAsync(collector, item.ItemId, "onPickup", ct,
                     count, item.X, item.Y, item.Z);
                 if (remaining.Count == 0) break;
+            }
+        }
+    }
+
+    /// <summary>One authoritative orb simulation and pickup pass. Orbs
+    /// become visible only in loaded chunks, and Mending is applied only
+    /// when the player actually collides with an orb.</summary>
+    internal async Task TickExperienceOrbsAsync(CancellationToken ct)
+    {
+        if (_experienceOrbs is null || _blocks is null) return;
+        _experienceOrbs.Simulate(_blocks);
+        ExperienceOrb[] orbs = _experienceOrbs.Snapshot();
+        ConnectedPlayer[] viewers = _players.Snapshot()
+            .Where(p => p.Ready).ToArray();
+        HashSet<Guid> online = viewers.Select(x => x.ConnectionId).ToHashSet();
+        foreach (Guid id in _experienceViews.Keys.ToArray())
+            if (!online.Contains(id)) _experienceViews.Remove(id);
+
+        foreach (ConnectedPlayer viewer in viewers)
+        {
+            if (!_experienceViews.TryGetValue(viewer.ConnectionId,
+                out Dictionary<int, ExperienceOrb>? seen))
+            {
+                seen = new Dictionary<int, ExperienceOrb>();
+                _experienceViews.Add(viewer.ConnectionId, seen);
+            }
+            var visible = new HashSet<int>();
+            foreach (ExperienceOrb orb in orbs)
+            {
+                PlayerPose pose = viewer.Pose;
+                double dx = orb.X - pose.X, dz = orb.Z - pose.Z;
+                if (dx * dx + dz * dz > 48 * 48 ||
+                    Math.Abs(orb.Y - pose.Y) > 48) continue;
+                int cx = (int)Math.Floor(orb.X / 16),
+                    cz = (int)Math.Floor(orb.Z / 16);
+                if (viewer.View is IShardChunkSubscriptions chunks &&
+                    !await chunks.HasLoadedChunkAsync(cx, cz, ct)) continue;
+                visible.Add(orb.EntityId);
+                try
+                {
+                    if (!seen.TryGetValue(orb.EntityId, out var previous))
+                        await ExperienceProtocol.SendOrbAsync(
+                            viewer.Connection, orb, ct);
+                    else if (previous.X != orb.X || previous.Y != orb.Y ||
+                             previous.Z != orb.Z)
+                        await ExperienceProtocol.SendPositionAsync(
+                            viewer.Connection, orb, ct);
+                    seen[orb.EntityId] = orb;
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+            }
+            foreach (int id in seen.Keys.ToArray())
+            {
+                if (visible.Contains(id)) continue;
+                try
+                {
+                    await DroppedItemProtocol.SendRemoveAsync(
+                        viewer.Connection, id, ct);
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+                seen.Remove(id);
+            }
+        }
+
+        foreach (ExperienceOrb orb in orbs)
+        {
+            foreach (ConnectedPlayer collector in viewers)
+            {
+                PlayerPose pose = collector.Pose;
+                double dx = orb.X - pose.X, dz = orb.Z - pose.Z;
+                if (dx * dx + dz * dz > 1.5 * 1.5 ||
+                    Math.Abs(orb.Y - (pose.Y + 0.35)) > 1.6) continue;
+                if (!_experienceViews.TryGetValue(collector.ConnectionId,
+                    out var visible) || !visible.ContainsKey(orb.EntityId))
+                    continue;
+                int xp = _experienceOrbs.TryCollect(orb.EntityId);
+                if (xp == 0) continue;
+                var (remaining, repairedSlot) =
+                    collector.Inventory.RepairFromExperience(xp);
+                if (remaining > 0) collector.Experience.Award(remaining);
+                foreach (ConnectedPlayer viewer in viewers)
+                {
+                    if (!_experienceViews.TryGetValue(viewer.ConnectionId,
+                        out var seen) || !seen.Remove(orb.EntityId)) continue;
+                    try
+                    {
+                        await ExperienceProtocol.SendPickupAsync(
+                            viewer.Connection, orb, collector, ct);
+                        await DroppedItemProtocol.SendRemoveAsync(
+                            viewer.Connection, orb.EntityId, ct);
+                    }
+                    catch (IOException) { }
+                    catch (ObjectDisposedException) { }
+                }
+                try
+                {
+                    if (repairedSlot >= 0)
+                        await InventoryProtocol.SendSlotAsync(
+                            collector.Connection, collector.Inventory,
+                            repairedSlot, ct);
+                    await ExperienceProtocol.SendExperienceAsync(
+                        collector.Connection, collector.Experience, ct);
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+                break;
             }
         }
     }
@@ -1212,7 +1527,7 @@ public sealed class MinecraftServer : IShardItemDropSink
         int minimum = verb switch
         {
             "gamemode" => GameModeProtocol.RequiredOpLevel,
-            "say" or "kick" or "oplist" => 2,
+            "say" or "kick" or "oplist" or "enchant" or "summon" => 2,
             "op" or "deop" => 4,
             _ => 0
         };
@@ -1226,7 +1541,7 @@ public sealed class MinecraftServer : IShardItemDropSink
             case "help":
                 await ReplyAsync(player, "Commands: /help /list /whoami /msg /me" +
                     (level >= 1 ? " /gamemode" : "") +
-                    (level >= 2 ? " /say /kick /oplist" : "") +
+                    (level >= 2 ? " /say /kick /oplist /enchant /summon" : "") +
                     (level >= 4 ? " /op /deop" : ""), ct);
                 break;
             case "list":
@@ -1264,6 +1579,15 @@ public sealed class MinecraftServer : IShardItemDropSink
                 await ChangeGameModeAsync(target, mode, player, ct);
                 break;
             }
+            case "enchant":
+                await ReplyAsync(player, await EnchantHeldAsync(argument, ct), ct);
+                break;
+            case "summon":
+                await ReplyAsync(player,
+                    argument == "sheep" && SummonSheepAt(player)
+                        ? "Summoned a persistent sheep near you."
+                        : "Usage: /summon sheep (maximum 512 per world).", ct);
+                break;
             case "msg":
             case "tell":
             case "w":
@@ -1325,6 +1649,38 @@ public sealed class MinecraftServer : IShardItemDropSink
                 await ReplyAsync(player, $"Unknown command: /{verb}", ct);
                 break;
         }
+    }
+
+    private async Task<string> EnchantHeldAsync(string argument, CancellationToken ct)
+    {
+        string[] words = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length is < 2 or > 3)
+            return "Usage: enchant <online-player> <unbreaking|mending> [level]";
+        ConnectedPlayer? target = FindOnline(words[0]);
+        if (target is null) return "Player not found or not fully connected.";
+        string enchantment = words[1].ToLowerInvariant();
+        if (enchantment.StartsWith("minecraft:", StringComparison.Ordinal))
+            enchantment = enchantment["minecraft:".Length..];
+        int level = 1;
+        if (words.Length == 3 && !int.TryParse(words[2], out level))
+            return "Invalid enchantment level.";
+        if ((enchantment == "mending" && level != 1) ||
+            (enchantment == "unbreaking" && level is < 1 or > 3) ||
+            enchantment is not ("mending" or "unbreaking"))
+            return "Supported enchantments: Mending I and Unbreaking I–III.";
+        ItemStack held = target.Inventory.Held();
+        bool applied = enchantment == "mending"
+            ? target.Inventory.ConfigureHeld(
+                held.Unbreaking, true, held.Unbreakable)
+            : target.Inventory.ConfigureHeld(
+                level, held.Mending, held.Unbreakable);
+        if (!applied)
+            return "Target must hold a damageable item; the requested enchantment may already be applied.";
+        await InventoryProtocol.SendSlotAsync(target.Connection,
+            target.Inventory, target.Inventory.SelectedSlot, ct);
+        await ReplyAsync(target,
+            $"Your held item received {enchantment} {level}.", ct);
+        return $"Applied {enchantment} {level} to {target.Username}'s held item.";
     }
 
     private async Task ChangeGameModeAsync(ConnectedPlayer target, PlayerGameMode mode,
@@ -1434,6 +1790,24 @@ public sealed class MinecraftServer : IShardItemDropSink
                     await RevokeOperatorAsync(argument, null, stop);
                 else Console.WriteLine("Usage: deop <name|uuid>");
                 break;
+            case "enchant":
+                Console.WriteLine("[enchant] " +
+                    await EnchantHeldAsync(argument, stop));
+                break;
+            case "summon":
+            {
+                string[] words = argument.Split(' ',
+                    StringSplitOptions.RemoveEmptyEntries);
+                ConnectedPlayer? target = words.Length == 2 ?
+                    FindOnline(words[1]) : _players.Snapshot()
+                    .FirstOrDefault(p => p.Ready);
+                Console.WriteLine(words.Length is >= 1 and <= 2 &&
+                    words[0] == "sheep" && target is not null &&
+                    SummonSheepAt(target)
+                        ? "[entities] Summoned a sheep near " + target.Username
+                        : "Usage: summon sheep [online player]");
+                break;
+            }
             case "say":
                 if (ChatProtocol.IsSafeMessage(argument, _options.ChatMaxLength))
                 {
