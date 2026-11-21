@@ -91,6 +91,10 @@ public static class LootSkills
                         NumberStyles.None, CultureInfo.InvariantCulture, out max))
                     throw new InvalidDataException($"Invalid dropItem amount '{range}'.");
             }
+            else if (!args.ContainsKey("min") && !args.ContainsKey("max"))
+            {
+                min = max = 1; // legacy dropItem{item=...} shorthand
+            }
             else
             {
                 if (!args.TryGetValue("min", out string? lo) ||
@@ -98,7 +102,7 @@ public static class LootSkills
                     !int.TryParse(lo, NumberStyles.None, CultureInfo.InvariantCulture,
                         out min) || !int.TryParse(hi, NumberStyles.None,
                         CultureInfo.InvariantCulture, out max))
-                    throw new InvalidDataException("dropItem requires amount or min/max.");
+                    throw new InvalidDataException("dropItem requires both min and max.");
             }
             if (min < 0 || max < min || max > 64 ||
                 (max + Math.Max(0, 255) + definition.MaxStackSize - 1) /
