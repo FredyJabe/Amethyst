@@ -38,7 +38,8 @@ public sealed partial class MinecraftServer
         string identifier = _items is not null &&
             _items.TryGetById(weapon.ItemId, out ShardItemDefinition definition)
             ? definition.Identifier : "";
-        float raw = CombatRules.MeleeDamage(identifier);
+        float raw = CombatRules.MeleeDamageWithEffects(
+            identifier, attacker.ActiveEffects.Snapshot());
         var attackEffects = new ShardSkillRuntime();
         attackEffects.SetNumber("damage", raw);
         attackEffects.SetNumber("knockback", 0.4);
