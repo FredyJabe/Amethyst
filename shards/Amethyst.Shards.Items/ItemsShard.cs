@@ -599,6 +599,26 @@ public sealed class ItemsShard : IShard
         var loot = new LootCatalog(Path.Combine(directory, "loot-26.3.yml"),
             lootDirectory);
         ctx.RegisterService<IShardLootRegistry>(loot);
+        // Full vanilla loot JSON and exact block-state IDs are pinned to
+        // Java 26.3 by the read-only submodule; missing assets do not cause
+        // a silently guessed replacement dataset.
+        string vanillaLootDir = Path.Combine(directory, "vanilla-loot");
+        string vanillaBlocks = Path.Combine(directory, "vanilla-blocks.json");
+        if (Directory.Exists(vanillaLootDir) && File.Exists(vanillaBlocks))
+        {
+            var vanilla = new VanillaLootTables(vanillaLootDir, catalog, recipes);
+            var states = new VanillaBlockStateLookup(vanillaBlocks);
+            if (vanilla.Count != 1447)
+                throw new InvalidDataException(
+                    $"Wrong 26.3 loot table count: expected 1447, got {vanilla.Count}.");
+            ctx.RegisterService<IShardVanillaLootTables>(vanilla);
+            ctx.RegisterService<IShardVanillaBlockStates>(states);
+            ctx.Log($"Loaded {vanilla.Count} pinned Java 26.3 loot tables and " +
+                $"{states.Count} block states.");
+        }
+        else
+            ctx.Log("WARNING: vanilla 26.3 loot assets unavailable; " +
+                "initial skill-based loot fallback remains active.");
         // Fail fast for unknown/invalid Stats conditions instead of throwing
         // only after a player triggers an affected event.
         var skillEngine = ctx.GetRequiredService<IShardSkillEngine>();

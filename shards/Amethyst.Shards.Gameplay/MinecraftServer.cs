@@ -26,6 +26,8 @@ public sealed partial class MinecraftServer
     private readonly IShardEnchantmentRegistry? _enchantments;
     private readonly IShardSkillEngine? _skills;
     private readonly IShardLootRegistry? _loot;
+    private readonly IShardVanillaLootTables? _vanillaLoot;
+    private readonly IShardVanillaBlockStates? _vanillaBlockStates;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private readonly Dictionary<Guid, Dictionary<int, ExperienceOrb>> _experienceViews = new();
@@ -39,7 +41,9 @@ public sealed partial class MinecraftServer
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
         IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
         IShardEnchantmentRegistry? enchantments = null, IShardSkillEngine? skills = null,
-        IShardLootRegistry? loot = null)
+        IShardLootRegistry? loot = null,
+        IShardVanillaLootTables? vanillaLoot = null,
+        IShardVanillaBlockStates? vanillaBlockStates = null)
     {
         _options = options;
         _world = world;
@@ -49,6 +53,8 @@ public sealed partial class MinecraftServer
         _enchantments = enchantments;
         _skills = skills;
         _loot = loot;
+        _vanillaLoot = vanillaLoot;
+        _vanillaBlockStates = vanillaBlockStates;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers);
         _operators = new OperatorStore(options.OperatorsFile);
@@ -690,47 +696,73 @@ public sealed partial class MinecraftServer
             if (survival)
             {
                 MiningRules.BlockInfo info = MiningRules.ForState(state);
-                if (info.DropItem > 0 && MiningRules.IsHarvestable(info, miningTool))
+                if (MiningRules.IsHarvestable(info, miningTool))
                 {
                     var drops = new ShardSkillRuntime();
                     drops.SetNumber("drop_count", 1);
-                    await EnchantmentEventAsync(player.Inventory.Held(),
-                        "onBlockDrop", ct, drops, actor: player.PlayerUuid);
-                    // Cancelled ~onBlockDrop means no vanilla item drop.
-                    // The mined block, XP and tool wear are independent events.
-                    int count = drops.IsCancelled ? 0 :
-                        (int)Math.Clamp(drops.Number("drop_count", 1), 0, 64);
-                    // Fortune changes resource drops, not dropped block items.
-                    if (!drops.IsCancelled && !drops.HasFlag("silk_touch") &&
-                        _items is not null &&
-                        _items.TryGetById(info.DropItem, out var dropped) &&
-                        dropped.Identifier is "minecraft:coal" or "minecraft:diamond" or
-                        "minecraft:emerald" or "minecraft:lapis_lazuli" or
-                        "minecraft:redstone" or "minecraft:raw_iron" or
-                        "minecraft:raw_gold" or "minecraft:raw_copper" or
-                        "minecraft:quartz")
+                    ItemStack tool = player.Inventory.Held();
+                    await EnchantmentEventAsync(tool, "onBlockDrop",
+                        ct, drops, actor: player.PlayerUuid);
+                    // A cancelled block-drop event suppresses only vanilla
+                    // results, not any explicit dropItem skill intents.
+                    bool usedNative = false;
+                    bool silk = drops.HasFlag("silk_touch") ||
+                        tool.EnchantmentLevel("silk_touch") > 0;
+                    if (!drops.IsCancelled && _vanillaBlockStates is not null &&
+                        _vanillaBlockStates.TryGet(state,
+                            out string blockId, out var properties))
                     {
-                        int fortune = (int)Math.Clamp(
-                            drops.Number("fortune_level"), 0, 255);
-                        if (fortune > 0)
-                            count = Math.Min(64, count +
-                                Random.Shared.Next(fortune + 2));
+                        string table = "minecraft:blocks/" +
+                            blockId["minecraft:".Length..];
+                        var native = TryVanillaLoot(table,
+                            new ShardVanillaLootContext
+                            {
+                                BlockId = blockId,
+                                BlockProperties = properties,
+                                Fortune = (int)Math.Clamp(drops.Number(
+                                    "fortune_level"), 0, 255),
+                                SilkTouch = silk,
+                                Shears = _items is not null &&
+                                    _items.TryGetById(tool.ItemId,
+                                        out var toolDefinition) &&
+                                    toolDefinition.Identifier == "minecraft:shears"
+                            });
+                        if (native is not null)
+                        {
+                            usedNative = true;
+                            SpawnLoot(native, action.X + 0.5,
+                                action.Y + 0.35, action.Z + 0.5);
+                        }
                     }
-                    // The shared 20Hz item ticker handles world drops and pickups.
-                    if (count > 0 && (_groundItems is null ||
-                        !_groundItems.TrySpawn(info.DropItem, count,
-                            action.X + 0.5, action.Y + 0.35, action.Z + 0.5, out _)))
-                        Console.WriteLine($"[items] No capacity to spawn drop {info.DropItem} " +
-                            $"at {action.X},{action.Y},{action.Z}");
-                    // Explicit dropItem skills are independent of the vanilla
-                    // block drop. cancelEvent suppresses only the default,
-                    // never the subsequent skills in the configured list.
-                    if (_groundItems is not null)
-                        foreach (ShardItemDrop drop in drops.Drops)
-                            if (!_groundItems.TrySpawn(drop.ItemId, drop.Count,
+                    if (!usedNative && !drops.IsCancelled && info.DropItem > 0)
+                    {
+                        // Compatibility fallback when the pinned data pack is
+                        // unavailable or its table needs an unsupported
+                        // vanilla function. The fallback is not full parity.
+                        int count = (int)Math.Clamp(
+                            drops.Number("drop_count", 1), 0, 64);
+                        if (!silk && _items is not null &&
+                            _items.TryGetById(info.DropItem, out var dropped) &&
+                            dropped.Identifier is "minecraft:coal" or
+                                "minecraft:diamond" or "minecraft:emerald" or
+                                "minecraft:lapis_lazuli" or "minecraft:redstone" or
+                                "minecraft:raw_iron" or "minecraft:raw_gold" or
+                                "minecraft:raw_copper" or "minecraft:quartz")
+                        {
+                            int fortune = (int)Math.Clamp(
+                                drops.Number("fortune_level"), 0, 255);
+                            if (fortune > 0)
+                                count = Math.Min(64, count +
+                                    Random.Shared.Next(fortune + 2));
+                        }
+                        if (count > 0 && (_groundItems is null ||
+                            !_groundItems.TrySpawn(info.DropItem, count,
                                 action.X + 0.5, action.Y + 0.35,
-                                action.Z + 0.5, out _))
-                                Console.WriteLine($"[items] No capacity for skill drop {drop.ItemId}.");
+                                action.Z + 0.5, out _)))
+                            Console.WriteLine($"[items] Cannot spawn fallback block drop {info.DropItem}.");
+                    }
+                    SpawnLoot(drops.Drops, action.X + 0.5,
+                        action.Y + 0.35, action.Z + 0.5);
                 }
                 int wear = MiningRules.DurabilityCostForBlock(state, miningTool, _items);
                 toolWearChanged = wear > 0 &&

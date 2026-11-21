@@ -697,6 +697,42 @@ activate them.
 Custom aliases have registered definitions, but physical stacks still
 need separate alias identity before their per-alias skills can fire.
 
+## Pinned official 26.3 loot-table inputs
+
+`vendor/minecraft-26.3-data` is a read-only Git submodule at
+`mj41/mc26-data` commit `d48a84ec43b97f41a01244bf0b6ab1d7a6b97bc6`,
+extracted from Mojang's Java **26.3 / protocol 777** server jar.
+The submodule carries **1,447** `data/minecraft/loot_table/**/*.json`
+files plus `blocks.json` mapping every numeric block state to its
+canonical block and properties. The Items Shard installs these assets
+and registers `IShardVanillaLootTables` and
+`IShardVanillaBlockStates`. A normal `./run.sh` checkout initializes
+the submodule once. For an alternate checkout, run
+`git submodule update --init --recursive` before building.
+The upstream dataset is credited under its accompanying MIT license.
+
+Live mob deaths prefer the original JSON loot table, including nested
+sheep-color lookups, count providers, Looting bonuses, smelting and
+explicit conditions. Live Survival block breaks prefer the actual
+`minecraft:blocks/<block>` JSON using the real block-state report,
+with Fortune, Silk Touch and shear-tool context. Explicit user YAML
+loot overrides **take precedence** over the vanilla mob tables.
+Item-defined `~onBlockDrop` skills still run and can replace vanilla
+drops with `cancelEvent` followed by `dropItem`.
+
+**Important correctness boundary:** merely loading all 1,447 files
+does not mean that every loot function and predicate is implemented.
+The current evaluator supports common item, alternatives, group,
+sequence, nested-table entries and common conditions, weighted pools,
+set-count, ore Fortune, Looting count increase, explosion decay, item
+damage, simple potion components and furnace smelting. Some 26.3
+specialized entry types, predicate trees and modifier types still
+raise a named `NotSupportedException`. Gameplay logs these and uses
+the existing explicitly approximate drop fallback. This behavior is
+not yet **complete vanilla parity**. The pinned dataset is the
+authoritative source for implementing and testing the remaining
+function families instead of guessing hard-coded results.
+
 ## YAML loot drops and `dropItem` (Phase 4)
 
 `shards/Amethyst.Shards.Items/loot-26.3.yml` bundles initial

@@ -19,6 +19,9 @@ public sealed class LootCatalog : IShardLootRegistry
     public int Count => _entries.Count;
     public IReadOnlyList<ShardSkillInstruction> Instructions { get; }
     public bool HasDefinition(string ownerId) => _entries.ContainsKey(ownerId);
+    private readonly HashSet<string> _overridden =
+        new(StringComparer.OrdinalIgnoreCase);
+    public bool HasOverride(string ownerId) => _overridden.Contains(ownerId);
 
     public LootCatalog(string bundledFile, string? overridesDirectory = null)
     {
@@ -44,6 +47,7 @@ public sealed class LootCatalog : IShardLootRegistry
                     throw new InvalidDataException(
                         $"Loot owner {owner} overridden more than once.");
                 entries[owner] = instructions;
+                _overridden.Add(owner);
             }
         }
         _entries = new ReadOnlyDictionary<string, IReadOnlyList<ShardSkillInstruction>>(entries);

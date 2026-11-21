@@ -56,7 +56,12 @@ public sealed class ShardSkillRuntime
 public sealed record ShardSkillEffect(string Type, string Id, int Duration = 0, int Amplifier = 0);
 /// <summary>Requested stack spawn, evaluated after all mechanics have run.
 /// The Gameplay Shard owns physical entity creation and persistence.</summary>
-public readonly record struct ShardItemDrop(int ItemId, int Count);
+public readonly record struct ShardItemDrop(int ItemId, int Count)
+{
+    /// <summary>Optional canonical component patch. Values are JSON-encoded
+    /// strings per component, consumed by Gameplay's stack codec.</summary>
+    public string? ComponentData { get; init; }
+}
 
 /// <summary>Event data supplied by a Shard when dispatching a trigger.
 /// OwnerId is the exact entity/item/other object definition key;

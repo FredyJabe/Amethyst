@@ -81,6 +81,51 @@ Check(items.TryGetByIdentifier("minecraft:diamond_sword", out var sword) &&
     !catalog.CanApply("aqua_affinity", sword),
     "Supported item category validation");
 
+// Version-pinned, full Mojang 26.3 loot-table input data is kept as a
+// git submodule (1,447 tables), not reconstructed from the old drop map.
+string vanillaRoot = Path.Combine(root.FullName, "vendor",
+    "minecraft-26.3-data");
+var nativeTables = new VanillaLootTables(Path.Combine(vanillaRoot,
+    "data", "minecraft", "loot_table"), items);
+var blockStates = new VanillaBlockStateLookup(Path.Combine(
+    vanillaRoot, "blocks.json"));
+Check(nativeTables.Count == 1447 && blockStates.Count > 20000 &&
+    blockStates.TryGet(1, out var stateName, out _) &&
+    stateName == "minecraft:stone",
+    "Pinned 26.3 Mojang loot and blockstate registries loaded");
+Check(items.TryGetByIdentifier("minecraft:cobblestone", out var cobble) &&
+    nativeTables.Roll("minecraft:blocks/stone",
+        new ShardVanillaLootContext())[0].ItemId == cobble.ProtocolId,
+    "Stone drops cobblestone without Silk Touch");
+Check(nativeTables.Roll("minecraft:blocks/stone",
+        new ShardVanillaLootContext { SilkTouch = true })[0].ItemId ==
+    items.All.Single(x => x.Identifier == "minecraft:stone").ProtocolId,
+    "Stone drops its own block with Silk Touch");
+Check(items.TryGetByIdentifier("minecraft:diamond_ore", out var ore) &&
+    nativeTables.Roll("minecraft:blocks/diamond_ore",
+        new ShardVanillaLootContext { SilkTouch = true })[0].ItemId ==
+    ore.ProtocolId,
+    "Silk Touch returns the original diamond ore, not a diamond");
+Check(items.TryGetByIdentifier("minecraft:diamond", out var diamondOreDrop) &&
+    nativeTables.Roll("minecraft:blocks/diamond_ore",
+        new ShardVanillaLootContext { Fortune = 3 })[0] is
+        { } diamondDrop && diamondDrop.ItemId == diamondOreDrop.ProtocolId &&
+        diamondDrop.Count is >= 1 and <= 4,
+    "Vanilla ore_drops formula uses Fortune multipliers");
+var nativeSheep = nativeTables.Roll("minecraft:entities/sheep",
+    new ShardVanillaLootContext { EntityColor = "blue" });
+Check(items.TryGetByIdentifier("minecraft:blue_wool", out var blueFromNative) &&
+    nativeSheep.Any(d => d.ItemId == blueFromNative.ProtocolId) &&
+    nativeSheep.Any(d => d.ItemId == mutton.ProtocolId),
+    "Vanilla nested sheep loot tables select a colored wool and mutton");
+var nativeSheared = nativeTables.Roll("minecraft:entities/sheep",
+    new ShardVanillaLootContext { EntityColor = "blue", EntitySheared = true });
+Check(nativeSheared.All(d => d.ItemId != blueFromNative.ProtocolId),
+    "Vanilla sheep predicate omits wool after shearing");
+Check(nativeTables.Roll("minecraft:gameplay/fishing/fish",
+    new ShardVanillaLootContext()).Count == 1,
+    "Vanilla fishing sub-table selects exactly one weighted fish");
+
 string temporary = Path.Combine(Path.GetTempPath(),
     "amethyst-enchant-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(temporary);
