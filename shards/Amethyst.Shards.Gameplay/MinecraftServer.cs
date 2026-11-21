@@ -1186,6 +1186,7 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
             return;
         }
+        if (await TryHandleBucketUseAsync(player, hit, ct)) return;
         if (await TryHandleToolUseAsync(player, hit, ct)) return;
         var (x, y, z) = BlockInteractionProtocol.Adjacent(hit.X, hit.Y, hit.Z, hit.Face);
         ushort selected = 0;
