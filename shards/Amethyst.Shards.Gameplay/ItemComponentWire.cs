@@ -77,6 +77,16 @@ internal static class ItemComponentWire
                     if (value.GetBoolean()) added[id] = static _ => { };
                     else removed.Add(id);
                     break;
+                case "minecraft:instrument":
+                {
+                    string instrument = value.GetString() ?? "";
+                    int registryId = VanillaRegistries.IndexOf(
+                        "minecraft:instrument", instrument);
+                    // Holder<Instrument> encodes a registered value as ID+1;
+                    // zero is reserved for a direct (inline) holder.
+                    added[id] = w => w.WriteVarInt(registryId + 1);
+                    break;
+                }
                 case "minecraft:item_model":
                 case "minecraft:tooltip_style":
                     string identifier = value.GetString()!;
