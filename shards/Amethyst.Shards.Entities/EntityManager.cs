@@ -47,6 +47,8 @@ public sealed class EntityManager : IShardEntityManager, IShardEntityInteraction
         _livestock.TryDamage(id, points, out updated, out killed);
     bool IShardLivingEntities.TryShear(int id, out LivingEntity changed) =>
         _livestock.TryShear(id, out changed);
+    bool IShardLivingEntities.TryTeleport(int id, double x, double y, double z) =>
+        _livestock.TryTeleport(id, x, y, z);
     public LivingEntity[] Regrow(long nowMs, int requiredMs = 180_000) =>
         _livestock.Regrow(nowMs, requiredMs);
     public void Save() => _livestock.Save();
