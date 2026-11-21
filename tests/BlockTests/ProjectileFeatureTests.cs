@@ -141,9 +141,10 @@ internal static class ProjectileFeatureTests
                 player.Inventory.Held().Damage == 1 &&
                 player.Inventory.Snapshot().Slots[37].Count == 2,
                 "Charged bow consumes an arrow and wears the bow exactly once");
+            ShardEntityInstance targetCow = default;
             Check(server.ProjectilesForTests[0].SourceWeapon.ItemId == bow.ProtocolId &&
                 managed.TrySpawn("cow", 0.5, 115.3, 3.5,
-                    out ShardEntityInstance targetCow),
+                    out targetCow),
                 "Ranged projectile retains authoritative firing weapon and has a mob target");
             for (int t = 0; t < 20 && impactSkillsRun == 0; t++)
                 await server.TickProjectilesAsync(CancellationToken.None);
