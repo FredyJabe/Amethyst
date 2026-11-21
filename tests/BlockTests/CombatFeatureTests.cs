@@ -118,7 +118,7 @@ internal static class CombatFeatureTests
                 SkillEngine.Parse("minecraft:diamond_sword",
                     "dropItem{item=minecraft:diamond;amount=2} @self ~onBlockDrop")
             ]));
-            var server = new MinecraftServer(settings, world,
+            var server = TestServerFactory.Create(settings, world,
                 null!, world, items: items, recipes: recipes,
                 enchantments: enchantments, skills: skills, loot: loot);
             Guid id1 = Guid.NewGuid(), id2 = Guid.NewGuid();

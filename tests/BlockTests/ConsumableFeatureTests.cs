@@ -147,7 +147,7 @@ internal static class ConsumableFeatureTests
             await using var world = new TerrainWorld(settings);
             using var outbound = new MemoryStream();
             using var channel = new PacketChannel(outbound);
-            var server = new MinecraftServer(settings, world, null!, world,
+            var server = TestServerFactory.Create(settings, world, null!, world,
                 items: items, recipes: recipes, consumables: consumables);
             Guid playerId = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(playerId, "FoodTester", []),

@@ -755,7 +755,7 @@ try
         player.MarkReady();
         player.SetGameMode(PlayerGameMode.Survival);
         // The handler does not use the packet bus when invoked directly.
-        var game = new MinecraftServer(settings, world, null!, world,
+        var game = TestServerFactory.Create(settings, world, null!, world,
             items: itemsCatalog, recipes: recipesCatalog);
 
         for (int x = 1; x <= 2; x++)
@@ -1167,7 +1167,7 @@ try
         using (var wire = new MemoryStream())
         using (var channel = new PacketChannel(wire))
         {
-            var game = new MinecraftServer(config, world, null!, world, dataRoot,
+            var game = TestServerFactory.Create(config, world, null!, world, dataRoot,
                 itemsCatalog, recipesCatalog);
             Check(game.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
@@ -1188,7 +1188,7 @@ try
 
             // Recreate Gameplay as if the process restarted: admission must
             // use the saved coordinates rather than a hard-coded spawn.
-            var restarted = new MinecraftServer(config, world, null!, world, dataRoot,
+            var restarted = TestServerFactory.Create(config, world, null!, world, dataRoot,
                 itemsCatalog, recipesCatalog);
             Check(restarted.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), channel, 0, out _),
@@ -1252,7 +1252,7 @@ try
 
         using var fallbackWire = new MemoryStream();
         using var fallbackChannel = new PacketChannel(fallbackWire);
-        var fallbackGame = new MinecraftServer(config, world, null!, world, dataRoot,
+        var fallbackGame = TestServerFactory.Create(config, world, null!, world, dataRoot,
                 itemsCatalog, recipesCatalog);
         Check(fallbackGame.TryAdmit(new VerifiedProfile(userId, "PositionTester",
                 Array.Empty<ProfileProperty>()), fallbackChannel, 0, out _),
@@ -1471,7 +1471,7 @@ try
             Array.Empty<ProfileProperty>(), 77, gameplayChannel,
             stationWorld, null, itemsCatalog);
         stationPlayer.MarkReady();
-        var gameplay = new MinecraftServer(settings, stationWorld, null!,
+        var gameplay = TestServerFactory.Create(settings, stationWorld, null!,
             stationWorld, Path.Combine(stationsRoot, "gameplay-integration"),
             itemsCatalog, recipesCatalog);
         int seq = 1;
@@ -1524,7 +1524,7 @@ try
         deathSkills.RegisterTrigger("items", trigger);
     deathSkills.RegisterDefinitions("items", Path.Combine(solutionRoot.FullName,
         "shards", "Amethyst.Shards.Items", "skills-26.3.yml"));
-    lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
+    lootGame = TestServerFactory.Create(settings, stationWorld, null!, stationWorld,
         Path.Combine(stationsRoot, "loot-gameplay"), itemsCatalog, recipesCatalog,
         lootWorld, lootTypes, lootWorld, skills: deathSkills);
     Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var testCow) &&

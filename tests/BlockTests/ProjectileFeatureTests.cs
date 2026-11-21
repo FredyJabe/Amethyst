@@ -47,7 +47,7 @@ internal static class ProjectileFeatureTests
             ProjectileImpact? impact = null;
             for (int i = 0; i < 20; i++)
             {
-                ProjectileFrame frame = physics.Tick(world, [target], []);
+                ProjectileFrame frame = physics.Tick(world, [new ProjectilePlayer(target.PlayerUuid, target.Pose)], []);
                 if (frame.Impacts.Length > 0)
                 {
                     impact = frame.Impacts[0];
@@ -73,7 +73,7 @@ internal static class ProjectileFeatureTests
 
             using var playStream = new MemoryStream();
             using var conn = new PacketChannel(playStream);
-            var server = new MinecraftServer(settings, world,
+            var server = TestServerFactory.Create(settings, world,
                 null!, world, items: items, recipes: recipes);
             Guid playerId = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(playerId,

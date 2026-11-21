@@ -60,7 +60,7 @@ internal static class EntityInteractionFeatureTests
             await using var world = new TerrainWorld(settings);
             using var stream = new MemoryStream();
             using var channel = new PacketChannel(stream);
-            var server = new MinecraftServer(settings, world,
+            var server = TestServerFactory.Create(settings, world,
                 null!, world, items: items, recipes: recipes);
             Guid id = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(id, "SheepTester", []),

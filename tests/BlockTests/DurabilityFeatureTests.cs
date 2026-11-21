@@ -400,7 +400,7 @@ internal static class DurabilityFeatureTests
             Check(actor.Inventory.TryCreativeSet(36, axe.ProtocolId, 1, true) &&
                 world.TrySetBlockState(1, 81, 1, 139, out _),
                 "Prepare world and axe for real tool-use packet path");
-            var game = new MinecraftServer(settings, world, null!, world,
+            var game = TestServerFactory.Create(settings, world, null!, world,
                 items: items, recipes: recipes);
             await game.HandleBlockUseAsync(actor,
                 new BlockUseOn(0, 1, 81, 1, 1, 101, true),

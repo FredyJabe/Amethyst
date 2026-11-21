@@ -96,7 +96,7 @@ internal static class FishingFeatureTests
 
             using var playStream = new MemoryStream();
             using var connection = new PacketChannel(playStream);
-            var server = new MinecraftServer(settings, world,
+            var server = TestServerFactory.Create(settings, world,
                 null!, world, items: items, recipes: recipes);
             Guid uuid = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(uuid, "Angler", []),
