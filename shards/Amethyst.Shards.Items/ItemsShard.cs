@@ -17,6 +17,9 @@ public sealed class ItemCatalog : IShardItemRegistry
         @"^([a-z0-9_.-]+:)?[a-z0-9_./-]+$", RegexOptions.Compiled |
         RegexOptions.CultureInvariant);
     private readonly ShardItemDefinition[] _byId;
+    private readonly ItemComponentNodeMap _componentNodes;
+
+    public IReadOnlyDictionary<string, string> ComponentNodes => _componentNodes.Nodes;
     private readonly IReadOnlyList<ShardItemDefinition> _all;
     private readonly Dictionary<string, ShardItemDefinition> _byName =
         new(StringComparer.OrdinalIgnoreCase);
@@ -25,11 +28,13 @@ public sealed class ItemCatalog : IShardItemRegistry
     public int Count => _byId.Length;
     public IReadOnlyList<ShardItemDefinition> All => _all;
 
-    public ItemCatalog(string vanillaYamlPath, string? overridesDirectory = null)
+    public ItemCatalog(string vanillaYamlPath, string? overridesDirectory = null,
+        ItemComponentNodeMap? componentNodes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(vanillaYamlPath);
+        _componentNodes = componentNodes ?? new ItemComponentNodeMap();
         var definitions = new List<ShardItemDefinition>();
-        foreach (var (root, options) in ReadEntries(vanillaYamlPath))
+        foreach (var (root, options) in ReadEntries(vanillaYamlPath, _componentNodes))
         {
             if (options.ProtocolId != definitions.Count ||
                 options.Id is null || options.MaxStackSize is null ||
@@ -72,7 +77,7 @@ public sealed class ItemCatalog : IShardItemRegistry
                 .Order(StringComparer.Ordinal).ToArray();
             var touched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string file in files)
-                foreach (var (root, options) in ReadEntries(file))
+                foreach (var (root, options) in ReadEntries(file, _componentNodes))
                     ApplyOverride(root, options, file, touched);
         }
         // Capture a read-only snapshot after YAML overrides have been applied.
@@ -213,10 +218,9 @@ public sealed class ItemCatalog : IShardItemRegistry
             Shorthand("minecraft:enchantment_glint_override", glint);
         if (fields.Unbreakable is bool unbreakable)
             Shorthand("minecraft:unbreakable", unbreakable);
-        if (fields.CustomModelData is int customModel)
+        if (fields.CustomModelData is int customModel &&
+            fields.Components?.ContainsKey("minecraft:custom_model_data") != true)
         {
-            if (fields.Components?.ContainsKey("minecraft:custom_model_data") == true)
-                throw new InvalidDataException("CustomModelData was specified twice.");
             patch["minecraft:custom_model_data"] =
                 ItemComponentConfig.Encode("minecraft:custom_model_data",
                     new YamlScalarNode(customModel.ToString(CultureInfo.InvariantCulture)),
@@ -285,7 +289,8 @@ public sealed class ItemCatalog : IShardItemRegistry
         public IReadOnlyDictionary<string, string>? Components;
     }
 
-    private static IEnumerable<(string Key, ItemFields Fields)> ReadEntries(string path)
+    private static IEnumerable<(string Key, ItemFields Fields)> ReadEntries(
+        string path, ItemComponentNodeMap componentNodes)
     {
         var yaml = new YamlStream();
         try
@@ -311,6 +316,22 @@ public sealed class ItemCatalog : IShardItemRegistry
                 throw new InvalidDataException($"Item '{key}' in {path} must have a mapping of properties.");
             var fields = new ItemFields();
             var properties = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void AddComponent(string yamlNode, YamlNode data)
+            {
+                if (!componentNodes.TryResolve(yamlNode, out string component))
+                    throw new InvalidDataException(
+                        $"Unknown item component '{yamlNode}' in '{key}' ({path}).");
+                var patch = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (fields.Components is not null)
+                    foreach (var (previous, value) in fields.Components)
+                        patch.Add(previous, value);
+                if (!patch.TryAdd(component,
+                    ItemComponentConfig.Encode(component, data, $"{key} ({path})")))
+                    throw new InvalidDataException(
+                        $"Duplicate component {component} in '{key}' ({path}).");
+                fields.Components = patch;
+            }
             foreach (var field in node.Children)
             {
                 string fieldName = Scalar(field.Key, path, key);
@@ -348,12 +369,30 @@ public sealed class ItemCatalog : IShardItemRegistry
                         fields.Unbreakable = Boolean(field.Value, path, key);
                         break;
                     case "components":
-                        fields.Components = ItemComponentConfig.Parse(field.Value, key);
+                        foreach (var (component, json) in
+                            ItemComponentConfig.Parse(field.Value, key, componentNodes))
+                        {
+                            var patch = new Dictionary<string, string>(StringComparer.Ordinal);
+                            if (fields.Components is not null)
+                                foreach (var (previous, value) in fields.Components)
+                                    patch.Add(previous, value);
+                            if (!patch.TryAdd(component, json))
+                                throw new InvalidDataException(
+                                    $"Duplicate component {component} in '{key}' ({path}).");
+                            fields.Components = patch;
+                        }
                         break;
                     case "custommodeldata":
-                        fields.CustomModelData = Integer(field.Value, path, key);
-                        if (fields.CustomModelData < 0)
-                            throw new InvalidDataException($"Negative CustomModelData in {key} ({path}).");
+                        // The approved fixed node supports both the legacy
+                        // integer shorthand and modern structured model data.
+                        if (field.Value is YamlScalarNode)
+                        {
+                            fields.CustomModelData = Integer(field.Value, path, key);
+                            if (fields.CustomModelData < 0)
+                                throw new InvalidDataException(
+                                    $"Negative CustomModelData in {key} ({path}).");
+                        }
+                        AddComponent(fieldName, field.Value);
                         break;
                     case "hidden": fields.Hidden = Boolean(field.Value, path, key); break;
                     case "lore":
@@ -387,14 +426,22 @@ public sealed class ItemCatalog : IShardItemRegistry
                                     fields.Hidden = Boolean(option.Value, path, key);
                                     break;
                                 default:
-                                    throw new InvalidDataException(
-                                        $"Unsupported Options.{optionName} in '{key}' ({path}).");
+                                    if (componentNodes.TryResolve(optionName, out _))
+                                        AddComponent(optionName, option.Value);
+                                    else
+                                        throw new InvalidDataException(
+                                            $"Unsupported Options.{optionName} in '{key}' ({path}).");
+                                    break;
                             }
                         }
                         break;
                     default:
-                        throw new InvalidDataException(
-                            $"Unsupported item property '{fieldName}' in '{key}' ({path}).");
+                        if (componentNodes.TryResolve(fieldName, out _))
+                            AddComponent(fieldName, field.Value);
+                        else
+                            throw new InvalidDataException(
+                                $"Unsupported item property '{fieldName}' in '{key}' ({path}).");
+                        break;
                 }
             }
             yield return (key, fields);
@@ -451,9 +498,9 @@ public sealed class ItemsShard : IShard
                 #   Display: "<aqua>Miner's Pickaxe</aqua>"
                 #   ItemModel: amethyst:miners_pickaxe
                 #   Components:
-                #     minecraft:rarity: rare
-                #     minecraft:enchantment_glint_override: true
-                #     minecraft:custom_model_data:
+                #     Rarity: rare
+                #     GlintOverride: true
+                #     CustomModelData:
                 #       floats: [3.0]
                 #       flags: []
                 #       strings: [amethyst:miners_pickaxe]
@@ -470,7 +517,11 @@ public sealed class ItemsShard : IShard
                 #   Lore:
                 #     - "An alias of the vanilla pickaxe; NOT a new protocol item."
                 """ + Environment.NewLine);
-        var catalog = new ItemCatalog(Path.Combine(directory, "items-26.3.yml"), definitions);
+        // Component YAML node assignments are fixed by Amethyst source code.
+        // No component-nodes.yml is generated, read or monitored.
+        var componentNodes = new ItemComponentNodeMap();
+        var catalog = new ItemCatalog(Path.Combine(directory, "items-26.3.yml"),
+            definitions, componentNodes);
         string recipeDirectory = Path.Combine(ctx.DataDirectory, "recipes");
         Directory.CreateDirectory(recipeDirectory);
         string exampleRecipe = Path.Combine(recipeDirectory, "example-recipes.yml");
@@ -566,6 +617,29 @@ public sealed class ItemsShard : IShard
                 return true;
             }
         });
+        ctx.RegisterConsoleCommand("componentnodes", (args, token) =>
+        {
+            string filter = args.Trim();
+            int count = 0;
+            for (int i = 0; i < ShardItemComponentIds.Count; i++)
+            {
+                string component = ShardItemComponentIds.All[i];
+                string? node = componentNodes.Nodes.TryGetValue(component, out string? assigned)
+                    ? assigned : null;
+                if (filter.Length > 0 &&
+                    !component.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
+                    !(node?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false) &&
+                    filter != i.ToString(CultureInfo.InvariantCulture))
+                    continue;
+                ctx.Log($"[{i,3}] {component} => {node ?? "(unassigned)"}");
+                count++;
+            }
+            ctx.Log($"Component YAML nodes: {count} matching of " +
+                $"{ShardItemComponentIds.Count} registered in Java {catalog.MinecraftVersion}; " +
+                $"{componentNodes.Nodes.Count} fixed assignments, " +
+                $"{componentNodes.PendingCount} pending (no user-configurable mapping file).");
+            return Task.CompletedTask;
+        });
         ctx.RegisterConsoleCommand("recipes", (args, token) =>
         {
             string filter = args.Trim();
@@ -594,7 +668,9 @@ public sealed class ItemsShard : IShard
         });
         ctx.Log($"Registered {catalog.Count} Java {catalog.MinecraftVersion} items, " +
             $"{recipes.RecipeCount} recipes, and Core has {skills.Definitions.Count} skills " +
-            $"for {skills.OwnerCount} entity types; Items skills YAML: {skillsDirectory}.");
+            $"for {skills.OwnerCount} entity types; Items skills YAML: {skillsDirectory}; " +
+            $"fixed component nodes: {componentNodes.Nodes.Count} assigned, " +
+            $"{componentNodes.PendingCount} pending.");
         return Task.CompletedTask;
     }
 

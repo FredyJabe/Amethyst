@@ -32,14 +32,19 @@ internal static class ItemComponentConfig
     }
 
     public static IReadOnlyDictionary<string, string> Parse(
-        YamlNode node, string context)
+        YamlNode node, string context, ItemComponentNodeMap? nodes = null)
     {
         if (node is not YamlMappingNode mapping)
             throw new InvalidDataException($"Components in {context} must be a mapping.");
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        nodes ??= new ItemComponentNodeMap();
         foreach (var pair in mapping.Children)
         {
-            string key = Key(Scalar(pair.Key, context));
+            string nodeName = Scalar(pair.Key, context);
+            if (!nodes.TryResolve(nodeName, out string key))
+                throw new InvalidDataException(
+                    $"Unknown or unassigned YAML component node '{nodeName}' in {context}. " +
+                    "Use one of Amethyst's fixed node names or an explicit minecraft: ID.");
             if (!result.TryAdd(key, Encode(key, pair.Value, context)))
                 throw new InvalidDataException($"Duplicate component {key} in {context}.");
         }
@@ -49,6 +54,36 @@ internal static class ItemComponentConfig
     public static string Encode(string key, YamlNode node, string context)
     {
         string at = $"{key} in {context}";
+        if (!ShardItemComponentIds.TryGetId(key, out _))
+            throw new InvalidDataException($"Unknown component '{key}' in {context}.");
+        // The registry contains 122 independently typed network codecs.
+        // Advanced raw bytes permit a correct vanilla-encoded payload for any
+        // type even before Amethyst has a first-class structured serializer.
+        // No unsafe auto-encoding of arbitrary YAML into the wrong wire type.
+        if (node is YamlMappingNode raw)
+        {
+            var entries = raw.Children.ToArray();
+            if (entries.Length == 1 &&
+                entries[0].Key is YamlScalarNode { Value: { } rawKey })
+            {
+                if (rawKey.Equals("WireHex", StringComparison.OrdinalIgnoreCase))
+                {
+                    string hex = Scalar(entries[0].Value, at).Trim();
+                    if (hex.Length > 131072 || (hex.Length % 2) != 0 ||
+                        hex.Any(ch => !Uri.IsHexDigit(ch)))
+                        throw new InvalidDataException(
+                            $"WireHex in {at} must contain at most 65536 bytes of hex.");
+                    return JsonSerializer.Serialize(new { WireHex = hex.ToUpperInvariant() });
+                }
+                if (rawKey.Equals("Remove", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!Boolean(entries[0].Value, at))
+                        throw new InvalidDataException(
+                            $"Remove must be true in {at}.");
+                    return JsonSerializer.Serialize(new { Remove = true });
+                }
+            }
+        }
         return key switch
         {
             "minecraft:item_model" or "minecraft:tooltip_style" =>
@@ -60,15 +95,23 @@ internal static class ItemComponentConfig
             "minecraft:rarity" => JsonSerializer.Serialize(Rarity(node, at)),
             "minecraft:enchantment_glint_override" or "minecraft:unbreakable" =>
                 JsonSerializer.Serialize(Boolean(node, at)),
-            "minecraft:repair_cost" => JsonSerializer.Serialize(
-                Integer(node, at, 0, 32767)),
+            "minecraft:repair_cost" or "minecraft:damage" or
+            "minecraft:max_damage" or "minecraft:enchantable" or
+            "minecraft:map_id" => JsonSerializer.Serialize(
+                Integer(node, at, 0, int.MaxValue)),
+            "minecraft:dyed_color" => JsonSerializer.Serialize(
+                Integer(node, at, 0, 0xFFFFFF)),
+            "minecraft:creative_slot_lock" or "minecraft:intangible_projectile" or
+            "minecraft:glider" or "minecraft:waxed" => JsonSerializer.Serialize(
+                Boolean(node, at)),
             "minecraft:max_stack_size" => JsonSerializer.Serialize(
                 Integer(node, at, 1, 64)),
             "minecraft:custom_model_data" => CustomModelData(node, at),
             "minecraft:tooltip_display" => TooltipDisplay(node, at),
             _ => throw new InvalidDataException(
-                $"Unsupported Java 26.3 component '{key}' in {context}; " +
-                "a wire codec is required before this property can be configured.")
+                $"Component '{key}' needs its Java 26.3 encoded payload in {at}. " +
+                "Use { WireHex: '...' } to supply bytes or { Remove: true } " +
+                "to remove the component from the vanilla item defaults.")
         };
     }
 

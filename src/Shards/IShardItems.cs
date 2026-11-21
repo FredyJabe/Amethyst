@@ -38,6 +38,10 @@ public interface IShardItemRegistry
     bool TryGetById(int protocolId, out ShardItemDefinition definition);
     bool TryGetByIdentifier(string identifier, out ShardItemDefinition definition);
     IReadOnlyList<ShardItemDefinition> All { get; }
+    /// <summary>Canonical component ID -> configured YAML node name.
+    /// This map covers every registered Java 26.3 component type, even
+    /// components that currently require a raw packet payload.</summary>
+    IReadOnlyDictionary<string, string> ComponentNodes { get; }
     /// <summary>Return true for the canonical empty (0,0) stack or a
     /// positive count within the item's actual maximum stack size.</summary>
     bool IsValidStack(int protocolId, int count);

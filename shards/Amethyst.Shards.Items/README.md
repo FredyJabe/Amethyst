@@ -180,8 +180,8 @@ resolve to the same vanilla item** when supplied. In the bundled
 `items-26.3.yml`, `ProtocolId` pins the actual wire ID. User YAML
 cannot reassign protocol IDs or invent new ones.
 
-`MaxStackSize` (or MythicMobs-compatible
-`Options.StackSize`) must be at least 1 and **cannot exceed the
+`MaxStackSize` (or the fixed `StackSize` component node,
+or MythicMobs-compatible `Options.StackSize`) must be at least 1 and **cannot exceed the
 vanilla base item's actual maximum** (1, 16 or 64). Specify at most
 one of them. Lowering it is enforced by the server in inventory,
 pickups and station transactions; vanilla clients may still predict
@@ -219,9 +219,60 @@ change the base material's physical capacity, durability, or block nature.
 
 ### Item components (Java 26.3 / protocol 777)
 
-For the **complete, numbered registry of all 122 components** (including
-unimplemented codecs), see [COMPONENTS.md](COMPONENTS.md).
+For the **complete, numbered registry of all 122 components** and its
+wire format coverage, see [COMPONENTS.md](COMPONENTS.md).
 
+### Fixed YAML nodes (45 approved, 77 pending)
+
+Amethyst's Java 26.3 registry recognizes **122 item components**.
+Exactly **45 component-to-YAML-node names are fixed in
+`ItemComponentNodeMap.cs`**, following the project's approved naming
+conventions. No `component-nodes.yml` is created or read. The other
+**77 types have no assigned YAML shorthand** until their names are
+decided. The unassigned components remain addressable in `Components:`
+by their full `minecraft:` registry IDs.
+
+The 45 approved names are documented alongside the complete component
+registry in [COMPONENTS.md](COMPONENTS.md), and exposed to other
+Shards as `IShardItemRegistry.ComponentNodes`. Run `componentnodes`
+to list all 122 identifiers with their assigned name or
+`(unassigned)`. `componentnodes food` filters the list.
+
+Use the fixed nodes inside `Options:`, `Components:`, or as top-level
+fields where they do not collide with existing item metadata:
+
+```yaml
+diamond_pickaxe:
+  Id: minecraft:diamond_pickaxe
+  CustomName: "<gold>Amethyst Pickaxe</gold>"
+  ItemModel: amethyst:custom_pickaxe
+  Components:
+    Rarity: epic
+    GlintOverride: true
+    CustomModelData:
+      floats: [42.0]
+      flags: []
+      strings: []
+      colors: []
+
+stone:
+  Options:
+    CustomData: { WireHex: "0A00" }
+    Glider: { Remove: true }
+```
+
+The `CustomData` value above is an illustrative raw value, not a
+general-purpose custom-data encoder. A complete typed codec remains
+necessary to express the more complex components in natural YAML.
+`WireHex` accepts a maximum of 65,536 bytes of pre-encoded Java 26.3
+**component value bytes**, not an entire Slot packet or component ID.
+Incorrect bytes can cause client disconnections.
+`{ Remove: true }` removes a component from the vanilla defaults.
+
+**Naming and implementation coverage are separate:** 45 fixed field
+names, 21 typed value codecs and all 122 registry IDs accessible by
+canonical ID. The remaining complex codecs and game-side mechanics
+such as consumption, combat and equipping still require implementation.
 
 **Mythic-style top-level fields** and the explicit `Components` map
 can be used in your item definition YAML:
@@ -229,20 +280,20 @@ can be used in your item definition YAML:
 ```yaml
 diamond_pickaxe:
   Id: minecraft:diamond_pickaxe
-  Display: "<aqua>Miner's Pickaxe</aqua>"
+  CustomName: "<aqua>Miner's Pickaxe</aqua>"
   ItemName: "Masterwork Pickaxe"
   ItemModel: amethyst:miners_pickaxe
   Lore:
     - "A tool forged in amethyst"
   Rarity: epic
-  Glint: true
+  GlintOverride: true
   Components:
-    minecraft:custom_model_data:
+    CustomModelData:
       floats: [42.0]
       flags: [true]
       strings: [miners_pickaxe]
       colors: [16711935]
-    minecraft:tooltip_display:
+    TooltipDisplay:
       hide_tooltip: false
       hidden_components: [minecraft:enchantments]
 ```
@@ -279,11 +330,11 @@ Top-level shorthands also include `TooltipStyle`, `Rarity`,
 `Unbreakable`, and `Glint`. Do not define the same component in a
 shorthand and the `Components` map; duplicates are rejected.
 
-Complex components (attributes, equippable, food, custom effects,
-enchantment lists, etc.) require individual codec and gameplay support
-before they can be configured; unsupported types fail at startup. The
-public `ShardItemComponentIds` resolves all 122 protocol-777 component
-IDs, but that does not imply wire serialization for all of them.
+Additional simple typed codecs handle max damage, damage, enchantability,
+map IDs, dyed colors, and no-payload flag components. Other complex
+components accept `WireHex` or `Remove` under an approved node
+or their full canonical `minecraft:` ID; they still need typed codecs
+and gameplay integration for safe data-driven behavior.
 
 Simple `<aqua>Text</aqua>` or `<gold>Text</gold>` names are translated
 into Minecraft text components. Full MiniMessage (nested tags,
@@ -297,14 +348,14 @@ editing YAML.
 | Root item ID | string or numeric ID | Vanilla item to override, or a custom alias |
 | `Id` | vanilla name / protocol ID | Base item; required for aliases |
 | `ProtocolId` | integer | Version-specific vanilla wire ID; cannot be reassigned |
-| `MaxStackSize` | integer | Server-side max stack, 1 through vanilla max |
+| `MaxStackSize` / `StackSize` | integer | Server-side max stack, 1 through vanilla max |
 | `MaxDurability` | integer | Pinned vanilla maximum damage; user overrides may repeat, but cannot change the original value |
-| `Display` | string | Client-visible custom name |
+| `Display` / `CustomName` | string | Client-visible custom name; `CustomName` is the approved component node |
 | `ItemName` | string | Client-visible item name |
 | `Lore` | string list | Client-visible lore text |
 | `CustomModelData` | nonnegative integer | Modern custom-model-data float shorthand |
 | `Hidden` | boolean | Definition metadata, not `tooltip_display` |
-| `ItemModel` / `item_model` | resource location | Client-visible model selector |
+| `ItemModel` | resource location | Fixed node for client-visible model selector (legacy `item_model` top-level also accepted) |
 | `Rarity`, `Glint`, `Unbreakable`, `TooltipStyle` | mixed | Component shorthands |
 | `Components` | mapping | Validated client-visible data-component patch |
 | `Options.StackSize` | integer | MythicMobs-style synonym for `MaxStackSize` |
