@@ -1526,7 +1526,7 @@ try
         "shards", "Amethyst.Shards.Items", "skills-26.3.yml"));
     lootGame = new MinecraftServer(settings, stationWorld, null!, stationWorld,
         Path.Combine(stationsRoot, "loot-gameplay"), itemsCatalog, recipesCatalog,
-        lootWorld, deathSkills, lootTypes, lootWorld);
+        lootWorld, lootTypes, lootWorld, skills: deathSkills);
     Check(lootWorld.TrySpawn("cow", 11, 80, 12, out var testCow) &&
         lootWorld.TryKill(testCow.EntityId, out _),
         "Prepare an entity death for the Gameplay loot pipeline");
