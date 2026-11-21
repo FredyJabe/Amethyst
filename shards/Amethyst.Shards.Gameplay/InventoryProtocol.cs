@@ -7,6 +7,14 @@ public readonly record struct ItemStack(int ItemId, int Count)
     /// <summary>Accumulated item damage. Zero is undamaged; valid nonzero
     /// damage must be strictly below the item definition's MaxDurability.</summary>
     public int Damage { get; init; }
+    /// <summary>Vanilla Unbreaking I–III and Mending I.
+    /// These are authoritative item enchantments, not client input.</summary>
+    public int Unbreaking { get; init; }
+    public bool Mending { get; init; }
+    /// <summary>Vanilla unbreakable component (prevents all item wear).</summary>
+    public bool Unbreakable { get; init; }
+    /// <summary>Anvil prior-work penalty; retained through item moves.</summary>
+    public int RepairCost { get; init; }
 }
 
 public readonly record struct InventoryClick(int Window, int Revision, int Slot,
@@ -21,21 +29,58 @@ public static class InventoryProtocol
     public const int ClientboundSetContent = 0x12;
     public const int ClientboundSetSlot = 0x14;
 
-    public static void WriteStack(PacketWriter writer, ItemStack stack)
+    public static void WriteStack(PacketWriter writer, ItemStack stack,
+        Amethyst.Shards.IShardItemRegistry? items = null)
     {
         writer.WriteVarInt(stack.Count);
         if (stack.Count == 0) return;
         writer.WriteVarInt(stack.ItemId);
-        // Java 26.3 minecraft:data_component_type registry: damage = 3.
-        // The client's default item components supply max_damage. Only the
-        // damage override is needed to display the durability bar.
-        writer.WriteVarInt(stack.Damage > 0 ? 1 : 0);
-        writer.WriteVarInt(0); // removed data components
+
+        var added = new SortedDictionary<int, Action<PacketWriter>>();
+        var removed = new SortedSet<int>();
+        if (items is not null && items.TryGetById(stack.ItemId, out var definition))
+            ItemComponentWire.AddDefinition(added, removed, definition);
+
+        // Authoritative instance components override a definition's defaults.
         if (stack.Damage > 0)
+            added[3] = w => w.WriteVarInt(stack.Damage);
+        if (stack.Unbreakable)
         {
-            writer.WriteVarInt(3); // minecraft:damage
-            writer.WriteVarInt(stack.Damage);
+            added[4] = static _ => { }; // 26.3 unit component
+            removed.Remove(4);
         }
+        if (stack.Unbreaking > 0 || stack.Mending)
+        {
+            added[13] = w =>
+            {
+                w.WriteVarInt((stack.Unbreaking > 0 ? 1 : 0) +
+                    (stack.Mending ? 1 : 0));
+                if (stack.Unbreaking > 0)
+                {
+                    w.WriteVarInt(VanillaRegistries.IndexOf(
+                        "minecraft:enchantment", "minecraft:unbreaking"));
+                    w.WriteVarInt(stack.Unbreaking);
+                }
+                if (stack.Mending)
+                {
+                    w.WriteVarInt(VanillaRegistries.IndexOf(
+                        "minecraft:enchantment", "minecraft:mending"));
+                    w.WriteVarInt(1);
+                }
+            };
+        }
+        if (stack.RepairCost > 0)
+            added[19] = w => w.WriteVarInt(stack.RepairCost);
+
+        foreach (int type in added.Keys) removed.Remove(type);
+        writer.WriteVarInt(added.Count);
+        writer.WriteVarInt(removed.Count);
+        foreach (var (type, write) in added)
+        {
+            writer.WriteVarInt(type);
+            write(writer);
+        }
+        foreach (int type in removed) writer.WriteVarInt(type);
     }
 
     public static Task SendContentAsync(PacketChannel channel, PlayerInventory inventory, CancellationToken ct)
@@ -46,8 +91,8 @@ public static class InventoryProtocol
             writer.WriteVarInt(0); // player's own inventory menu
             writer.WriteVarInt(revision);
             writer.WriteVarInt(slots.Length);
-            foreach (ItemStack stack in slots) WriteStack(writer, stack);
-            WriteStack(writer, cursor);
+            foreach (ItemStack stack in slots) WriteStack(writer, stack, inventory.ItemRegistry);
+            WriteStack(writer, cursor, inventory.ItemRegistry);
         }, ct);
     }
 
@@ -60,7 +105,7 @@ public static class InventoryProtocol
             writer.WriteVarInt(0);
             writer.WriteVarInt(revision);
             writer.WriteInt16((short)slot);
-            WriteStack(writer, slots[slot]);
+            WriteStack(writer, slots[slot], inventory.ItemRegistry);
         }, ct);
     }
 

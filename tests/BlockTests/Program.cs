@@ -150,6 +150,14 @@ finally
     catch (IOException) { }
 }
 
+await DurabilityFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await CombatFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await ShieldFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await ProjectileFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await EntityInteractionFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await FishingFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+await ElytraFeatureTests.RunAsync(itemsCatalog, recipesCatalog);
+
 // Mythic-style YAML: each root ID overrides one vanilla item or names a
 // custom alias backed by a vanilla protocol item. Never mint new IDs.
 string yamlTestRoot = Path.Combine(Path.GetTempPath(),

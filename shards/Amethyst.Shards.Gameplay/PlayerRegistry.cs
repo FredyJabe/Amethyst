@@ -21,8 +21,15 @@ public sealed class ConnectedPlayer : IShardPlayer
             throw new ArgumentOutOfRangeException(nameof(mode));
         Volatile.Write(ref _gameMode, (int)mode);
         CancelMining();
+        UseState.StopShield();
+        UseState.CancelCharge();
+        Flight.End();
     }
     public PlayerInventory Inventory { get; }
+    public PlayerVitals Vitals { get; }
+    public PlayerUseState UseState { get; } = new();
+    public PlayerFlightState Flight { get; } = new();
+    public PlayerExperience Experience { get; }
     private long _editWindowStarted;
     private int _editCount;
 
@@ -142,6 +149,8 @@ public sealed class ConnectedPlayer : IShardPlayer
         PlayerUuid = id; Username = name; Properties = properties;
         EntityId = entityId; Connection = connection; View = world.CreateView();
         Inventory = new PlayerInventory(inventoryDirectory, id, items);
+        Vitals = new PlayerVitals(inventoryDirectory, id);
+        Experience = new PlayerExperience(inventoryDirectory, id);
     }
 }
 
