@@ -231,6 +231,42 @@ string temporary = Path.Combine(Path.GetTempPath(),
 Directory.CreateDirectory(temporary);
 try
 {
+    string generatedLoot = Path.Combine(temporary, "generated-loot");
+    Directory.CreateDirectory(generatedLoot);
+    File.WriteAllText(Path.Combine(generatedLoot, "test.json"), """
+        {
+          "type":"minecraft:chest",
+          "pools":[
+            {
+              "rolls":1,
+              "entries":[{"type":"minecraft:item", "name":"minecraft:book",
+                "modifier":{"type":"minecraft:enchant_randomly",
+                            "options":["minecraft:sharpness"]}}]
+            },
+            {
+              "rolls":1,
+              "entries":[{"type":"minecraft:item", "name":"minecraft:book",
+                "modifier":{"type":"minecraft:set_enchantments",
+                            "enchantments":{"minecraft:unbreaking":3}}}]
+            }
+          ]
+        }
+        """);
+    var generatedEnchanted = new VanillaLootTables(generatedLoot, items,
+        enchantments: catalog);
+    var enchantedLoot = generatedEnchanted.Roll("minecraft:test",
+        new ShardVanillaLootContext { Random = new ConstantRandom(0.0) });
+    if (!items.TryGetByIdentifier("minecraft:enchanted_book", out var book))
+        throw new InvalidDataException("Enchanted book registry entry missing.");
+    Check(enchantedLoot.Count == 2 &&
+        enchantedLoot.All(d => d.ItemId == book.ProtocolId &&
+            ItemStackComponents.IsValid(d.ComponentData)) &&
+        enchantedLoot[0].ComponentData!.Contains("minecraft:sharpness",
+            StringComparison.Ordinal) &&
+        enchantedLoot[1].ComponentData!.Contains("minecraft:unbreaking",
+            StringComparison.Ordinal),
+        "Vanilla enchant_randomly and set_enchantments preserve stored enchantment patches");
+
     File.WriteAllText(Path.Combine(temporary, "override.yml"), """
         sharpness:
           MaxLevel: 6

@@ -278,8 +278,8 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
                 if (c.ToolIdentifier is null)
                     throw new NotSupportedException(
                         "Tool-match predicate needs the actual mining tool.");
-                JsonElement predicate = cond.GetProperty("predicate");
-                if (!predicate.TryGetProperty("items", out var items))
+                JsonElement toolPredicate = cond.GetProperty("predicate");
+                if (!toolPredicate.TryGetProperty("items", out var items))
                     throw new NotSupportedException(
                         "Tool-match predicate has unsupported requirements.");
                 string name = items.GetString() ?? "";
@@ -431,6 +431,52 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
         throw new NotSupportedException(
             $"No pinned Java 26.3 tag dataset available for {registry}/{name}.");
 
+    private void AddOption(string name, HashSet<string> options)
+    {
+        if (name.StartsWith("#", StringComparison.Ordinal))
+            foreach (string found in ReadTag("enchantment", name))
+                options.Add(found);
+        else if (name.StartsWith("minecraft:", StringComparison.Ordinal))
+            options.Add(name);
+        else throw new NotSupportedException(
+            $"Unsupported enchantment loot selector {name}.");
+    }
+
+    /// <summary>Builds the correct enchanted_book/stored_enchantments or
+    /// equipment/enchantments component for selected loot.</summary>
+    private void ApplyEnchantments(Drop drop,
+        IReadOnlyDictionary<string, int> configured)
+    {
+        if (!_items.TryGetById(drop.ItemId, out var definition)) return;
+        bool book = definition.Identifier is "minecraft:book" or
+            "minecraft:enchanted_book";
+        string component = book ? "minecraft:stored_enchantments" :
+            "minecraft:enchantments";
+        if (definition.Identifier == "minecraft:book")
+        {
+            if (!_items.TryGetByIdentifier("minecraft:enchanted_book",
+                out var converted))
+                throw new InvalidDataException("Missing vanilla enchanted_book.");
+            drop.ItemId = converted.ProtocolId;
+        }
+        var updated = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        if (drop.Components.TryGetValue(component, out var current))
+        {
+            using var json = JsonDocument.Parse(current);
+            foreach (JsonProperty pair in json.RootElement.EnumerateObject())
+                updated[pair.Name] = pair.Value.GetInt32();
+        }
+        foreach (var (enchantment, level) in configured)
+        {
+            _ = VanillaRegistries.IndexOf("minecraft:enchantment", enchantment);
+            if (level is < 0 or > 255)
+                throw new InvalidDataException("Invalid enchantment loot level.");
+            if (level == 0) updated.Remove(enchantment);
+            else updated[enchantment] = level;
+        }
+        drop.Components[component] = JsonSerializer.Serialize(updated);
+    }
+
     private void ApplyModifiers(JsonElement parent,
         ShardVanillaLootContext c, List<Drop> drops)
     {
@@ -496,6 +542,46 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
                 }
                 break;
             }
+            case "minecraft:enchant_randomly":
+            {
+                if (_enchantments is null)
+                    throw new NotSupportedException(
+                        "Enchantment registry is not available for random loot enchantments.");
+                var options = new HashSet<string>(StringComparer.Ordinal);
+                if (modifier.TryGetProperty("options", out var available))
+                {
+                    if (available.ValueKind == JsonValueKind.String)
+                        AddOption(available.GetString()!, options);
+                    else if (available.ValueKind == JsonValueKind.Array)
+                        foreach (var option in available.EnumerateArray())
+                            AddOption(option.GetString()!, options);
+                    else throw new NotSupportedException(
+                        "Unknown 26.3 enchant_randomly option selector.");
+                }
+                else foreach (var definition in _enchantments.All)
+                    options.Add(definition.Identifier);
+
+                foreach (var drop in drops)
+                {
+                    if (!_items.TryGetById(drop.ItemId, out var material))
+                        continue;
+                    bool book = material.Identifier is "minecraft:book" or
+                        "minecraft:enchanted_book";
+                    var candidates = options
+                        .Where(name => _enchantments.TryGet(name, out var enchantment) &&
+                            (book || _enchantments.CanApply(name, material)))
+                        .Order(StringComparer.Ordinal).ToArray();
+                    if (candidates.Length == 0) continue;
+                    string picked = candidates[c.Random.Next(candidates.Length)];
+                    if (!_enchantments.TryGet(picked, out var selected))
+                        throw new InvalidDataException(
+                            $"Enchantment {picked} missing from current registry.");
+                    int level = c.Random.Next(1, selected.MaxLevel + 1);
+                    ApplyEnchantments(drop,
+                        new Dictionary<string, int> { [selected.Identifier] = level });
+                }
+                break;
+            }
             case "minecraft:copy_components":
             {
                 string origin = modifier.GetProperty("source").GetString() ?? "";
@@ -524,45 +610,12 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
             }
             case "minecraft:set_enchantments":
             {
-                JsonElement configured = modifier.GetProperty("enchantments");
-                foreach (var drop in drops)
-                {
-                    if (!_items.TryGetById(drop.ItemId, out var definition))
-                        continue;
-                    bool book = definition.Identifier == "minecraft:book";
-                    string component = book
-                        ? "minecraft:stored_enchantments"
-                        : "minecraft:enchantments";
-                    if (book)
-                    {
-                        if (!_items.TryGetByIdentifier(
-                            "minecraft:enchanted_book", out var converted))
-                            throw new InvalidDataException(
-                                "Missing vanilla enchanted_book registry item.");
-                        drop.ItemId = converted.ProtocolId;
-                    }
-                    var enchantments = new SortedDictionary<string, int>(
+                var configured = modifier.GetProperty("enchantments")
+                    .EnumerateObject().ToDictionary(
+                        entry => entry.Name, entry => entry.Value.GetInt32(),
                         StringComparer.Ordinal);
-                    if (drop.Components.TryGetValue(component, out var current))
-                    {
-                        using var json = JsonDocument.Parse(current);
-                        foreach (JsonProperty old in json.RootElement.EnumerateObject())
-                            enchantments[old.Name] = old.Value.GetInt32();
-                    }
-                    foreach (JsonProperty enchantment in configured.EnumerateObject())
-                    {
-                        _ = VanillaRegistries.IndexOf(
-                            "minecraft:enchantment", enchantment.Name);
-                        int level = enchantment.Value.GetInt32();
-                        if (level is < 0 or > 255)
-                            throw new InvalidDataException(
-                                "Invalid set_enchantments level.");
-                        if (level == 0) enchantments.Remove(enchantment.Name);
-                        else enchantments[enchantment.Name] = level;
-                    }
-                    drop.Components[component] =
-                        JsonSerializer.Serialize(enchantments);
-                }
+                foreach (var drop in drops)
+                    ApplyEnchantments(drop, configured);
                 break;
             }
             case "minecraft:set_components":
