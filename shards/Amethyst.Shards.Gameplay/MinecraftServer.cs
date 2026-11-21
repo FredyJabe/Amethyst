@@ -726,6 +726,10 @@ public sealed partial class MinecraftServer
                                 Fortune = (int)Math.Clamp(drops.Number(
                                     "fortune_level"), 0, 255),
                                 SilkTouch = silk,
+                                ToolIdentifier = _items is not null &&
+                                    _items.TryGetById(tool.ItemId,
+                                        out var definition) ?
+                                    definition.Identifier : null,
                                 Shears = _items is not null &&
                                     _items.TryGetById(tool.ItemId,
                                         out var toolDefinition) &&

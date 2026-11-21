@@ -17,6 +17,13 @@ public sealed record ShardVanillaLootContext
     public string? Biome { get; init; }
     public string? BlockId { get; init; }
     public IReadOnlyDictionary<string, string>? BlockProperties { get; init; }
+    /// <summary>Actual tool and attacker entity identity from the server;
+    /// required for data-pack match_tool and certain entity predicates.</summary>
+    public string? ToolIdentifier { get; init; }
+    public string? AttackerKind { get; init; }
+    /// <summary>JSON-encoded component values read from an authoritative
+    /// block entity, not untrusted item data.</summary>
+    public IReadOnlyDictionary<string, string>? BlockEntityComponents { get; init; }
     public string? EntityColor { get; init; }
     public bool EntitySheared { get; init; }
     public double? ExplosionRadius { get; init; }

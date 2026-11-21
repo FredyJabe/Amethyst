@@ -174,6 +174,58 @@ Check(nativeClosed.Count == 1 &&
     nativeClosed[0].ItemId != nameTag.ProtocolId,
     "Vanilla fishing treasure is blocked by non-open-water predicate");
 
+var vanillaTags = new VanillaLootTags(Path.Combine(vanillaRoot,
+    "data", "minecraft", "tags"));
+Check(vanillaTags.Resolve("item", "#minecraft:cluster_max_harvestables")
+    .Contains("minecraft:diamond_pickaxe"),
+    "Version-pinned item tags include amethyst harvestable pickaxes");
+if (!items.TryGetByIdentifier("minecraft:amethyst_shard", out var shard) ||
+    !items.TryGetByIdentifier("minecraft:barrel", out var barrel) ||
+    !items.TryGetByIdentifier("minecraft:music_disc_13", out var disc))
+    throw new InvalidDataException("Missing vanilla tag/loot test items.");
+var clusterDrops = nativeTables.Roll("minecraft:blocks/amethyst_cluster",
+    new ShardVanillaLootContext
+    {
+        BlockId = "minecraft:amethyst_cluster",
+        ToolIdentifier = "minecraft:diamond_pickaxe"
+    });
+Check(clusterDrops.Count == 1 &&
+    clusterDrops[0].ItemId == shard.ProtocolId && clusterDrops[0].Count == 4,
+    "minecraft:match_tool uses the real vanilla item tag");
+var noHarvest = nativeTables.Roll("minecraft:blocks/amethyst_cluster",
+    new ShardVanillaLootContext
+    {
+        BlockId = "minecraft:amethyst_cluster",
+        ToolIdentifier = "minecraft:wooden_shovel"
+    });
+Check(noHarvest.Count == 1 &&
+    noHarvest[0].ItemId == shard.ProtocolId && noHarvest[0].Count == 2,
+    "Incorrect tools receive the vanilla reduced shard count");
+var nativeBarrel = nativeTables.Roll("minecraft:blocks/barrel",
+    new ShardVanillaLootContext
+    {
+        BlockId = "minecraft:barrel",
+        BlockEntityComponents = new Dictionary<string, string>
+        {
+            ["minecraft:custom_name"] =
+                System.Text.Json.JsonSerializer.Serialize("Named Barrel")
+        }
+    });
+Check(nativeBarrel.Count == 1 && nativeBarrel[0].ItemId == barrel.ProtocolId &&
+    nativeBarrel[0].ComponentData?.Contains("Named Barrel",
+        StringComparison.Ordinal) == true,
+    "Vanilla copy_components transfers authoritative block-entity names");
+var discDrops = nativeTables.Roll("minecraft:entities/creeper",
+    new ShardVanillaLootContext
+    {
+        AttackerKind = "minecraft:skeleton",
+        KilledByPlayer = false
+    });
+Check(discDrops.Any(d => d.ItemId == disc.ProtocolId ||
+    items.TryGetById(d.ItemId, out var candidate) &&
+    candidate.Identifier.StartsWith("minecraft:music_disc_", StringComparison.Ordinal)),
+    "Killer-entity tags activate creeper music-disc loot");
+
 string temporary = Path.Combine(Path.GetTempPath(),
     "amethyst-enchant-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(temporary);

@@ -13,13 +13,22 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
     private readonly Dictionary<string, string> _files = new(StringComparer.Ordinal);
     private readonly IShardItemRegistry _items;
     private readonly IShardRecipeRegistry? _recipes;
+    private readonly VanillaLootTags? _tags;
+    private readonly IShardEnchantmentRegistry? _enchantments;
     public int Count => _files.Count;
 
     public VanillaLootTables(string directory, IShardItemRegistry items,
-        IShardRecipeRegistry? recipes = null)
+        IShardRecipeRegistry? recipes = null,
+        string? tagsDirectory = null,
+        IShardEnchantmentRegistry? enchantments = null)
     {
         _items = items ?? throw new ArgumentNullException(nameof(items));
         _recipes = recipes;
+        _enchantments = enchantments;
+        string candidateTags = tagsDirectory ??
+            Path.GetFullPath(Path.Combine(directory, "..", "tags"));
+        if (Directory.Exists(candidateTags))
+            _tags = new VanillaLootTags(candidateTags);
         if (!Directory.Exists(directory))
             throw new DirectoryNotFoundException(
                 $"Vanilla 26.3 loot directory not found: {directory}");
@@ -140,12 +149,21 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
         output.AddRange(tableDrops);
     }
 
-    private static int EffectiveWeight(JsonElement entry, ShardVanillaLootContext c)
+    private int EffectiveWeight(JsonElement entry, ShardVanillaLootContext c)
     {
         int weight = entry.TryGetProperty("weight", out var w) ? w.GetInt32() : 1;
         int quality = entry.TryGetProperty("quality", out var q) ? q.GetInt32() : 0;
-        return (int)Math.Clamp((long)weight +
+        int baseWeight = (int)Math.Clamp((long)weight +
             Math.Floor(quality * c.Luck), 0, 100000);
+        if (Type(entry) == "minecraft:tag" &&
+            entry.TryGetProperty("expand", out var expanded) &&
+            expanded.GetBoolean())
+        {
+            string tag = entry.GetProperty("items").GetString() ?? "";
+            if (tag.StartsWith("#", StringComparison.Ordinal))
+                return checked(baseWeight * ReadTag("item", tag).Count);
+        }
+        return baseWeight;
     }
 
     private bool Emit(JsonElement entry, ShardVanillaLootContext c,
@@ -165,6 +183,22 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
                     definition.ProtocolId == 0)
                     throw new InvalidDataException($"Unregistered loot material {name}.");
                 generated.Add(new Drop(definition.ProtocolId, 1));
+                break;
+            }
+            case "minecraft:tag":
+            {
+                string tag = entry.GetProperty("items").GetString() ?? "";
+                if (!tag.StartsWith("#", StringComparison.Ordinal))
+                    throw new NotSupportedException(
+                        $"Loot item tag {tag} is not a resolved tag reference.");
+                var candidates = ReadTag("item", tag);
+                if (candidates.Count == 0) break;
+                string chosen = candidates[c.Random.Next(candidates.Count)];
+                if (!_items.TryGetByIdentifier(chosen, out var resolved) ||
+                    resolved.ProtocolId == 0)
+                    throw new InvalidDataException(
+                        $"Unregistered item in data-pack tag {chosen}.");
+                generated.Add(new Drop(resolved.ProtocolId, 1));
                 break;
             }
             case "minecraft:loot_table":
@@ -203,11 +237,11 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
         e.GetProperty("type").GetString() ??
             throw new InvalidDataException("Missing loot type.");
 
-    private static bool Pass(JsonElement parent, ShardVanillaLootContext c) =>
+    private bool Pass(JsonElement parent, ShardVanillaLootContext c) =>
         !parent.TryGetProperty("condition", out var condition) ||
         Condition(condition, c);
 
-    private static bool Condition(JsonElement cond, ShardVanillaLootContext c)
+    private bool Condition(JsonElement cond, ShardVanillaLootContext c)
     {
         string type = cond.ValueKind == JsonValueKind.String ?
             cond.GetString()! : Type(cond);
@@ -239,6 +273,22 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
             case "minecraft:killed_by_player": return c.KilledByPlayer;
             case "minecraft:entity_properties":
                 return EntityProperties(cond, c);
+            case "minecraft:match_tool":
+            {
+                if (c.ToolIdentifier is null)
+                    throw new NotSupportedException(
+                        "Tool-match predicate needs the actual mining tool.");
+                JsonElement predicate = cond.GetProperty("predicate");
+                if (!predicate.TryGetProperty("items", out var items))
+                    throw new NotSupportedException(
+                        "Tool-match predicate has unsupported requirements.");
+                string name = items.GetString() ?? "";
+                return name.StartsWith("#", StringComparison.Ordinal)
+                    ? ReadTag("item", name).Contains(c.ToolIdentifier,
+                        StringComparer.Ordinal)
+                    : string.Equals(name, c.ToolIdentifier,
+                        StringComparison.Ordinal);
+            }
             case "minecraft:match_block":
             {
                 JsonElement blocks = cond.GetProperty("blocks");
@@ -318,12 +368,32 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
         }
     }
 
-    private static bool EntityProperties(JsonElement cond, ShardVanillaLootContext c)
+    private bool EntityProperties(JsonElement cond, ShardVanillaLootContext c)
     {
         string who = cond.GetProperty("entity").GetString() ?? "";
         if (who == "direct_attacker" && cond.TryGetProperty("predicate", out var attacker) &&
             attacker.TryGetProperty("minecraft:equipment", out _))
             return c.FireAspect;
+        if (who is "attacker" or "direct_attacker")
+        {
+            if (!cond.TryGetProperty("predicate", out var attackerPredicate))
+                return true;
+            if (attackerPredicate.TryGetProperty("minecraft:entity_type",
+                out var attackerType))
+            {
+                if (c.AttackerKind is null)
+                    throw new NotSupportedException(
+                        "Attacker entity type is missing from loot context.");
+                string type = attackerType.GetString() ?? "";
+                return type.StartsWith("#", StringComparison.Ordinal)
+                    ? ReadTag("entity_type", type).Contains(c.AttackerKind,
+                        StringComparer.Ordinal)
+                    : string.Equals(type, c.AttackerKind,
+                        StringComparison.Ordinal);
+            }
+            throw new NotSupportedException(
+                "Unimplemented attacker loot predicate.");
+        }
         if (who != "this")
             throw new NotSupportedException($"Loot entity predicate for {who} needs a full entity context.");
         if (!cond.TryGetProperty("predicate", out var pred)) return true;
@@ -355,6 +425,11 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
         }
         return true;
     }
+
+    private IReadOnlyList<string> ReadTag(string registry, string name) =>
+        _tags?.Resolve(registry, name) ??
+        throw new NotSupportedException(
+            $"No pinned Java 26.3 tag dataset available for {registry}/{name}.");
 
     private void ApplyModifiers(JsonElement parent,
         ShardVanillaLootContext c, List<Drop> drops)
@@ -419,6 +494,32 @@ public sealed class VanillaLootTables : IShardVanillaLootTables
                                 $"Unsupported Fortune loot formula {formula}.");
                     }
                 }
+                break;
+            }
+            case "minecraft:copy_components":
+            {
+                string origin = modifier.GetProperty("source").GetString() ?? "";
+                if (origin != "block_entity" || c.BlockEntityComponents is null)
+                    throw new NotSupportedException(
+                        $"Loot copy_components({origin}) needs authoritative block entity data.");
+                var included = modifier.TryGetProperty("include", out var incl)
+                    ? incl.EnumerateArray().Select(e => e.GetString()!).ToHashSet(
+                        StringComparer.Ordinal)
+                    : null;
+                var excluded = modifier.TryGetProperty("exclude", out var excl)
+                    ? excl.EnumerateArray().Select(e => e.GetString()!).ToHashSet(
+                        StringComparer.Ordinal)
+                    : new HashSet<string>(StringComparer.Ordinal);
+                foreach (var drop in drops)
+                    foreach (var (component, value) in c.BlockEntityComponents)
+                        if ((included is null || included.Contains(component)) &&
+                            !excluded.Contains(component))
+                        {
+                            if (!ShardItemComponentIds.TryGetId(component, out _))
+                                throw new InvalidDataException(
+                                    $"Unknown block-entity loot component {component}.");
+                            drop.Components[component] = value;
+                        }
                 break;
             }
             case "minecraft:set_enchantments":

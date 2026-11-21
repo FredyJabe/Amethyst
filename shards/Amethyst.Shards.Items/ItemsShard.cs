@@ -610,7 +610,9 @@ public sealed class ItemsShard : IShard
         string vanillaBlocks = Path.Combine(directory, "vanilla-blocks.json");
         if (Directory.Exists(vanillaLootDir) && File.Exists(vanillaBlocks))
         {
-            var vanilla = new VanillaLootTables(vanillaLootDir, catalog, recipes);
+            var vanilla = new VanillaLootTables(vanillaLootDir, catalog,
+                recipes, Path.Combine(directory, "vanilla-tags"),
+                enchantments);
             var states = new VanillaBlockStateLookup(vanillaBlocks);
             if (vanilla.Count != 1447)
                 throw new InvalidDataException(

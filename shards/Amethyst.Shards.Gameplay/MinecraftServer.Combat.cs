@@ -85,7 +85,8 @@ public sealed partial class MinecraftServer
                             lootRuntime.Number("looting_level"), 0, 255),
                         FireAspect = weapon.EnchantmentLevel("fire_aspect") > 0,
                         EntityColor = WoolColors[mob.Color],
-                        EntitySheared = mob.Sheared
+                        EntitySheared = mob.Sheared,
+                        AttackerKind = "minecraft:player"
                     });
                 if (vanillaDrops is not null)
                     SpawnLoot(vanillaDrops, mob.X, mob.Y + 0.25, mob.Z);
