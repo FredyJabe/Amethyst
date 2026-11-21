@@ -74,104 +74,58 @@ public sealed partial class MinecraftServer
             hit = await DamagePlayerAsync(victim, raw, attacker, ct,
                 knockbackBonus: knockbackBonus);
         }
-        else if (_livingEntities is not null &&
-            _livingEntities.TryDamage(targetEntityId, raw,
-                out LivingEntity updated, out bool killed))
+        else if ((sheep || managed) && _entities is not null &&
+            _entities.TryDamageAndTakeDeath(targetEntityId, raw,
+                out ShardEntityInstance damaged, out bool killedEntity))
         {
+            // Both native livestock and generic YAML entities now use
+            // Entities' one-shot death queue and the same Items/vanilla loot
+            // pipeline. No second hard-coded sheep drop path remains.
             hit = true;
-            if (killed)
+            if (killedEntity)
+                await ProcessEntityDeathAsync(damaged, attacker, weapon, ct);
+            if (sheep)
             {
-                SpawnEntityExperience(mob.Kind, attacker, mob.X, mob.Y, mob.Z);
-                // The complete, pinned 26.3 data pack is authoritative,
-                // unless a user has explicitly overridden this mob in YAML.
-                var lootRuntime = new ShardSkillRuntime();
-                if (!mob.Sheared) lootRuntime.SetFlag("not_sheared");
-                lootRuntime.SetFlag("color_" + WoolColors[mob.Color]);
-                await EnchantmentEventAsync(weapon, "onEntityDrop", ct,
-                    lootRuntime, targetKind: "sheep", actor: attacker.PlayerUuid);
-                string lootTable = "minecraft:entities/" +
-                    mob.Kind["minecraft:".Length..];
-                IReadOnlyList<ShardItemDrop>? vanillaDrops =
-                    _loot?.HasOverride(mob.Kind) == true ? null :
-                    TryVanillaLoot(lootTable, new ShardVanillaLootContext
-                    {
-                        Looting = (int)Math.Clamp(
-                            lootRuntime.Number("looting_level"), 0, 255),
-                        FireAspect = weapon.EnchantmentLevel("fire_aspect") > 0,
-                        EntityColor = WoolColors[mob.Color],
-                        EntitySheared = mob.Sheared,
-                        AttackerKind = "minecraft:player"
-                    });
-                if (vanillaDrops is not null)
-                    SpawnLoot(vanillaDrops, mob.X, mob.Y + 0.25, mob.Z);
-                else if (_loot?.HasDefinition(mob.Kind) == true &&
-                    _skills is not null)
-                {
-                    await _skills.DispatchAsync(new ShardSkillEvent(
-                        mob.Kind, "onDeath", mob.X, mob.Y, mob.Z,
-                        EntityId: mob.EntityId, ActorUuid: attacker.PlayerUuid,
-                        TargetKind: "sheep") { Runtime = lootRuntime,
-                        PublisherCommitsDrops = true }, ct);
-                    SpawnLoot(lootRuntime.Drops, mob.X, mob.Y + 0.25, mob.Z);
-                }
-                else if (_groundItems is not null && _items is not null)
-                {
-                    // Compatibility only when no Items loot registry was
-                    // provided (e.g. legacy embedded Gameplay tests).
-                    if (_items.TryGetByIdentifier("minecraft:mutton", out var meat))
-                        _groundItems.TrySpawn(meat.ProtocolId, 1,
-                            mob.X, mob.Y + 0.25, mob.Z, out _);
-                    if (!mob.Sheared &&
-                        _items.TryGetByIdentifier("minecraft:white_wool",
-                            out var wool))
-                        _groundItems.TrySpawn(wool.ProtocolId, 1,
-                            mob.X, mob.Y + 0.25, mob.Z, out _);
-                }
+                LivingEntity current = default;
+                bool alive = !killedEntity && _livingEntities is not null &&
+                    _livingEntities.TryGet(targetEntityId, out current);
                 foreach (ConnectedPlayer viewer in _players.Snapshot()
                     .Where(x => x.Ready))
                 {
-                    await LivingEntityProtocol.SendRemoveAsync(
-                        viewer.Connection, mob.EntityId, ct);
-                    if (_livingViews.TryGetValue(viewer.ConnectionId,
-                        out var seen)) seen.Remove(mob.EntityId);
+                    if (!_livingViews.TryGetValue(viewer.ConnectionId,
+                        out var seen) || !seen.ContainsKey(targetEntityId))
+                        continue;
+                    if (killedEntity)
+                    {
+                        await LivingEntityProtocol.SendRemoveAsync(
+                            viewer.Connection, targetEntityId, ct);
+                        seen.Remove(targetEntityId);
+                    }
+                    else if (alive)
+                    {
+                        await LivingEntityProtocol.SendMetadataAsync(
+                            viewer.Connection, current, ct);
+                        await CombatProtocol.SendHurtAsync(
+                            viewer.Connection, targetEntityId, ct);
+                    }
                 }
             }
             else
             {
                 foreach (ConnectedPlayer viewer in _players.Snapshot()
-                    .Where(x => x.Ready))
+                    .Where(x => x.Ready && _entityViews.TryGetValue(
+                        x.ConnectionId, out var seen) &&
+                        seen.ContainsKey(targetEntityId)))
                 {
-                    if (_livingViews.TryGetValue(viewer.ConnectionId,
-                        out var seen) && seen.ContainsKey(updated.EntityId))
+                    if (killedEntity)
                     {
-                        await LivingEntityProtocol.SendMetadataAsync(
-                            viewer.Connection, updated, ct);
-                        await CombatProtocol.SendHurtAsync(viewer.Connection,
-                            updated.EntityId, ct);
+                        await EntityProtocol.SendRemoveAsync(
+                            viewer.Connection, targetEntityId, ct);
+                        _entityViews[viewer.ConnectionId].Remove(targetEntityId);
                     }
-                }
-            }
-        }
-        else if (managed && _entities is not null &&
-            _entities.TryDamageAndTakeDeath(targetEntityId, raw,
-                out ShardEntityInstance damaged, out bool genericKilled))
-        {
-            hit = true;
-            if (genericKilled)
-                await ProcessEntityDeathAsync(damaged, attacker, weapon, ct);
-            foreach (ConnectedPlayer viewer in _players.Snapshot()
-                .Where(x => x.Ready && _entityViews.TryGetValue(
-                    x.ConnectionId, out var seen) &&
-                    seen.ContainsKey(targetEntityId)))
-            {
-                if (genericKilled)
-                {
-                    await EntityProtocol.SendRemoveAsync(
+                    else await CombatProtocol.SendHurtAsync(
                         viewer.Connection, targetEntityId, ct);
-                    _entityViews[viewer.ConnectionId].Remove(targetEntityId);
                 }
-                else await CombatProtocol.SendHurtAsync(
-                    viewer.Connection, targetEntityId, ct);
             }
         }
         if (!hit) return;
