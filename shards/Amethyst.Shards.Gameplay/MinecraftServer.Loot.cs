@@ -87,15 +87,20 @@ public sealed partial class MinecraftServer
                 actor: attacker.PlayerUuid);
         }
 
-        // The exact bundled/admin Items loot pack is authoritative even
-        // when it has Skills: []; other Shards may still supply ~onDeath
-        // skills when no loot pack exists for this entity kind.
+        // Bundled ~onDeath loot skills compose with explicit custom
+        // items/skills/*.yml and other Shards' skills. An administrator
+        // items/loot/*.yml override instead replaces the complete reward
+        // pack (including custom skills), even for Skills: [].
         IReadOnlyList<ShardSkillInstruction>? selectedSkills = null;
         if (_loot is not null &&
-            (_loot.TryGetSkills(dead.DefinitionId, out var configured) ||
-             vanillaKind is not null &&
-                 _loot.TryGetSkills(vanillaKind, out configured)))
-            selectedSkills = configured;
+            (_loot.HasOverride(dead.DefinitionId) ||
+             vanillaKind is not null && _loot.HasOverride(vanillaKind)))
+        {
+            string overriddenOwner = _loot.HasOverride(dead.DefinitionId)
+                ? dead.DefinitionId : vanillaKind!;
+            if (_loot.TryGetSkills(overriddenOwner, out var configured))
+                selectedSkills = configured;
+        }
 
         if (_skills is not null)
             await _skills.DispatchAsync(new ShardSkillEvent(
