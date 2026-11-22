@@ -252,14 +252,22 @@ try
     starterSkills.RegisterTrigger("entities", "onMilk");
     starterSkills.RegisterTrigger("entities", "onShear");
     starterSkills.RegisterDefinitions("items", skillVanilla);
+    Check(!starterSkills.TryGetSkills("minecraft:cow", out _),
+        "Bundled interaction skills no longer assign any implicit cow death drops");
+    starterSkills.RegisterInstructions("explicit-death-tests", [
+        SkillEngine.Parse("minecraft:cow",
+            "dropItem{item=minecraft:beef;amount=1-3} @self ~onDeath"),
+        SkillEngine.Parse("minecraft:cow",
+            "dropItem{item=minecraft:leather;amount=0-2} @self ~onDeath")
+    ]);
     Check(starterSkills.TryGetSkills("sheep", out var shearing) &&
         shearing.Any(s => s.Trigger.Equals("onShear", StringComparison.OrdinalIgnoreCase)) &&
-        starterSkills.OwnerCount >= 10 &&
+        starterSkills.OwnerCount >= 2 &&
         starterSkills.TryGetSkills("minecraft:cow", out var cowSkills) &&
         cowSkills.Count == 2 &&
         cowSkills.All(s => s.Trigger.Equals("onDeath", StringComparison.OrdinalIgnoreCase) &&
             s.Mechanic.Equals("dropItem", StringComparison.OrdinalIgnoreCase)),
-        "Core parses Items Shard death skills with generic event/mechanic names");
+        "Core executes only explicitly registered Items death mechanics");
     Check(await starterSkills.DispatchAsync(new ShardSkillEvent(
             "minecraft:cow", "onDeath", 2, 80, 3, Random: new Random(123))) &&
         drops.Items.Count > 0 &&
@@ -330,7 +338,7 @@ try
         });
     configured.RegisterDefinitions("other", testCustomPack);
     drops.Items.Clear();
-    Check(configured.OwnerCount >= 10 &&
+    Check(configured.OwnerCount >= 3 &&
         configured.TryGetSkills("cow", out var joined) &&
         joined.Count == 2 &&
         await configured.DispatchAsync(new ShardSkillEvent("cow", "onSpawn")) &&
