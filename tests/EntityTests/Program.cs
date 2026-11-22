@@ -319,6 +319,40 @@ try
         drops.Items.All(d => d.ItemId == sword.ProtocolId),
         "Core executes Items skills honoring aliases, probability and stack limits");
 
+    // A custom alias may configure ~onSpawn without masking the base
+    // cow's explicit ~onDeath reward. Both async and immediate event
+    // publishers resolve the fallback by trigger, not just owner existence.
+    var aliasFallback = CreateEngine();
+    aliasFallback.RegisterTrigger("entities", "onSpawn");
+    aliasFallback.RegisterInstructions("alias-fallback-tests", [
+        SkillEngine.Parse("amethyst:spawn_only_cow",
+            "dropItem{item=minecraft:beef;chance=0} @self ~onSpawn"),
+        SkillEngine.Parse("minecraft:cow",
+            "dropItem{item=minecraft:beef;amount=1} @self ~onDeath")
+    ]);
+    var fallbackAsync = new ShardSkillEvent("amethyst:spawn_only_cow",
+        "onDeath", FallbackOwnerId: "minecraft:cow")
+    { PublisherCommitsDrops = true };
+    Check(await aliasFallback.DispatchAsync(fallbackAsync) &&
+        fallbackAsync.Runtime.Drops.Count == 1 &&
+        fallbackAsync.Runtime.Drops[0].Count == 1,
+        "Alias with only ~onSpawn still inherits explicit canonical ~onDeath drops");
+    var fallbackImmediate = new ShardSkillEvent("amethyst:spawn_only_cow",
+        "onDeath", FallbackOwnerId: "minecraft:cow")
+    { PublisherCommitsDrops = true };
+    Check(aliasFallback.DispatchImmediate(fallbackImmediate) &&
+        fallbackImmediate.Runtime.Drops.Count == 1,
+        "Synchronous skill dispatch uses the same trigger-scoped alias fallback");
+    var restrictedAlias = new ShardSkillEvent("amethyst:spawn_only_cow",
+        "onDeath", FallbackOwnerId: "minecraft:cow")
+    {
+        PublisherCommitsDrops = true,
+        AllowedSkills = Array.Empty<ShardSkillInstruction>()
+    };
+    Check(await aliasFallback.DispatchAsync(restrictedAlias) &&
+        restrictedAlias.Runtime.Drops.Count == 0,
+        "Explicit empty skill-selection filters suppress alias fallback drops");
+
     string testCustomPack = Path.Combine(temp, "other-shard.yml");
     File.WriteAllText(testCustomPack, """
         cow:

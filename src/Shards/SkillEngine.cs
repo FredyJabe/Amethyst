@@ -256,16 +256,35 @@ public sealed class SkillEngine : IShardSkillEngine
         }
     }
 
+    /// <summary>Alias fallback is scoped to the requested trigger.
+    /// A custom entity with only ~onSpawn skills must still inherit
+    /// minecraft:<type> ~onDeath skills. Explicit Skills: [] suppresses
+    /// fallback; selected administrator loot overrides constrain both
+    /// aliases and canonical owner skill packs.</summary>
+    private bool ResolveEventSkills(ShardSkillEvent context,
+        out IReadOnlyList<ShardSkillInstruction> skills)
+    {
+        bool found = TryGetSkills(context.OwnerId, out skills);
+        bool matching = found && skills.Any(skill =>
+            string.Equals(skill.Trigger, context.Trigger,
+                StringComparison.OrdinalIgnoreCase) &&
+            (context.AllowedSkills is null || context.AllowedSkills.Contains(skill)));
+        if (context.FallbackOwnerId is not null &&
+            (!found || (skills.Count > 0 && !matching)) &&
+            TryGetSkills(context.FallbackOwnerId, out var fallback))
+        {
+            skills = fallback;
+            return true;
+        }
+        return found;
+    }
+
     public async Task<bool> DispatchAsync(ShardSkillEvent context, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         if (string.IsNullOrWhiteSpace(context.Trigger))
             throw new ArgumentException("Skill event needs a trigger.", nameof(context));
-        IReadOnlyList<ShardSkillInstruction> skills;
-        bool found = TryGetSkills(context.OwnerId, out skills);
-        if (!found && context.FallbackOwnerId is not null)
-            found = TryGetSkills(context.FallbackOwnerId, out skills);
-        if (!found) return false;
+        if (!ResolveEventSkills(context, out var skills)) return false;
         foreach (var skill in skills)
         {
             ct.ThrowIfCancellationRequested();
@@ -338,14 +357,14 @@ public sealed class SkillEngine : IShardSkillEngine
         ArgumentNullException.ThrowIfNull(context);
         if (string.IsNullOrWhiteSpace(context.Trigger))
             throw new ArgumentException("Skill event needs a trigger.", nameof(context));
-        if (!TryGetSkills(context.OwnerId, out var skills) &&
-            (context.FallbackOwnerId is null ||
-             !TryGetSkills(context.FallbackOwnerId, out skills)))
+        if (!ResolveEventSkills(context, out var skills))
             return false;
         foreach (var skill in skills)
         {
             if (!string.Equals(skill.Trigger, context.Trigger,
-                    StringComparison.OrdinalIgnoreCase))
+                    StringComparison.OrdinalIgnoreCase) ||
+                context.AllowedSkills is { } selectedSkills &&
+                    !selectedSkills.Contains(skill))
                 continue;
             ShardSkillExecutor execute;
             ShardSkillConditionEvaluator[] checks;
