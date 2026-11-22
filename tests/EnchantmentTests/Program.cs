@@ -29,14 +29,21 @@ Check(catalog.ConflictsWith("sharpness", "smite") &&
     "Mutual exclusion and independent effects");
 // The Items Shard owns entity loot, expressed entirely as normal skills.
 var loot = new LootCatalog(Path.Combine(path, "loot-26.3.yml"));
-Check(loot.Count == 2 && loot.HasDefinition("minecraft:sheep") &&
+Check(loot.Count == 93 && loot.HasDefinition("minecraft:sheep") &&
     loot.HasDefinition("minecraft:fishing") &&
-    loot.Instructions.Count == 23,
-    "Sheep loot and six fishing catch options are defined in YAML");
+    loot.HasDefinition("minecraft:cow") &&
+    loot.TryGetSkills("minecraft:cow", out var cowRewards) &&
+    cowRewards.Any(x => x.Mechanic == "dropLootTable" &&
+        x.Trigger == "onDeath") &&
+    cowRewards.Any(x => x.Mechanic == "dropExperience" &&
+        x.Trigger == "onDeath") &&
+    loot.Instructions.Count >= 150,
+    "All entity table and XP rewards are explicit ~onDeath skills in Items YAML");
 var lootEngine = new SkillEngine();
 var lootContext = new TestSkillContext(lootEngine);
 EnchantmentSkills.Register(lootContext);
 LootSkills.Register(lootContext, items);
+DeathLootSkills.Register(lootContext, items);
 lootEngine.RegisterInstructions("loot-tests", loot.Instructions);
 var blueLoot = new ShardSkillRuntime();
 blueLoot.SetFlag("not_sheared");
