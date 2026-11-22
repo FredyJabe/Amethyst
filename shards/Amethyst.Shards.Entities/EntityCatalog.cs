@@ -160,19 +160,12 @@ public sealed class EntityCatalog : IShardEntityRegistry
         double? health = fields.Health ?? entity.MaxHealth;
         if (health is double value && (!double.IsFinite(value) || value <= 0 || value > 2048))
             throw new InvalidDataException($"Invalid Health for entity '{root}' in {file}.");
-        int xpMin = fields.ExperienceMin ?? entity.ExperienceMin;
-        int xpMax = fields.ExperienceMax ?? entity.ExperienceMax;
-        if (xpMin < 0 || xpMax < xpMin || xpMax > short.MaxValue)
-            throw new InvalidDataException(
-                $"Invalid Experience range for entity '{root}' in {file}.");
         return entity with
         {
             Display = fields.Display ?? entity.Display,
             MaxHealth = health,
             Spawnable = fields.Spawnable ?? entity.Spawnable,
-            Invulnerable = fields.Invulnerable ?? entity.Invulnerable,
-            ExperienceMin = xpMin,
-            ExperienceMax = xpMax
+            Invulnerable = fields.Invulnerable ?? entity.Invulnerable
         };
     }
 
@@ -190,8 +183,6 @@ public sealed class EntityCatalog : IShardEntityRegistry
         public double? Width;
         public double? Height;
         public double? Health;
-        public int? ExperienceMin;
-        public int? ExperienceMax;
         public string? Display;
         public bool? Spawnable;
         public bool? Invulnerable;
@@ -297,20 +288,6 @@ public sealed class EntityCatalog : IShardEntityRegistry
     }
 
     /// <summary>XP may be an exact scalar or a two-element inclusive range.</summary>
-    private static (int Min, int Max) Experience(YamlNode node, string file)
-    {
-        if (node is YamlScalarNode)
-        {
-            int amount = Integer(node, file);
-            return (amount, amount);
-        }
-        if (node is YamlSequenceNode { Children.Count: 2 } sequence)
-            return (Integer(sequence.Children[0], file),
-                Integer(sequence.Children[1], file));
-        throw new InvalidDataException(
-            $"Experience must be a number or [min, max] in {file}.");
-    }
-
     private static string Scalar(YamlNode node, string file) =>
         node is YamlScalarNode { Value: { } s } ? s :
         throw new InvalidDataException($"Expected scalar in {file}.");
