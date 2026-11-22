@@ -196,11 +196,17 @@ try
         throw new Exception("FAIL: Gameplay item drop sink not registered");
     Check(skillEngine.OwnerCount >= 10 &&
         skillEngine.TryGetSkills("minecraft:cow", out var configuredSkills) &&
-        configuredSkills.Count == 1 &&
-        configuredSkills[0].Mechanic == "dropItem" &&
+        configuredSkills.Count == 2 &&
+        configuredSkills.Any(s => s.Mechanic == "dropLootTable" &&
+            s.Trigger == "onDeath") &&
+        configuredSkills.Any(s => s.Mechanic == "dropExperience" &&
+            s.Trigger == "onDeath") &&
+        host.GetService<IShardLootRegistry>() is { } lootRegistry &&
+        lootRegistry.TryGetSkills("minecraft:cow", out var cowRewards) &&
+        cowRewards.Count == 2 &&
         host.RegisteredConsoleCommands.Contains("skillinfo") &&
         await host.TryExecuteConsoleAsync("skillinfo cow", CancellationToken.None),
-        "Core skill engine is shared and Items registers its dropItem mechanic");
+        "Items registers explicit ~onDeath vanilla-table and XP mechanics, with no entity defaults");
     string[] itemEvents = [
         "onLeftClick", "onRightClick", "onDrop", "onStackDrop",
         "onSwap", "onPickup", "onEquip", "onUnequip"
