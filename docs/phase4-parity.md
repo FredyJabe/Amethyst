@@ -12,10 +12,10 @@ not the same as implementing the underlying gameplay.** Phase 4 remains
 | Item identity and metadata | Items YAML covers 1,658 vanilla protocol item IDs; only the user's 45 approved component YAML aliases are public, with 77 still pending explicit approval |
 | Stats | Ordered item/enchantment `Stats` assignments; plain `- damage 50` means **set**, while `+10`, `-5`, `*1.5` change the preceding value |
 | Enchantments | 43 entries with Core skills and stats; a subset of triggers is wired to gameplay |
-| Vanilla loot | Pinned 1,447 Mojang JSON tables; audit reports 45 nested polymorphic variants, of which 43 are recognized, not necessarily fully executable for every context |
-| Custom loot | Items YAML uses Core `~onDeath`, `~onShear` and `dropItem`; administrator overrides replace bundled packs, including `Skills: []` |
-| One-shot deaths | Entities Shard is authoritative; melee, ranged and plugin deaths share the same one-shot dequeue and loot publication path |
-| Entity XP | `Experience: 5` or `Experience: [1, 3]` in Entities YAML; player-attributed kills spawn physical persistent XP orbs and console kills do not |
+| Vanilla loot | Pinned 1,447 Mojang JSON tables; **entity** tables roll only when requested by an explicit `~onDeath dropLootTable` skill, never automatically. Audit reports 45 nested polymorphic variants, of which 43 are recognized, not necessarily fully executable for every context |
+| Custom loot | Items YAML exclusively uses Core `~onDeath` `dropItem`, `dropLootTable`, and `dropExperience` for death rewards. `~onShear` is an explicit interaction event; no hard-coded fallback drops. Administrator loot overrides replace bundled packs, including `Skills: []` |
+| One-shot deaths | Entities Shard publishes exactly one death snapshot. Items explicitly chooses all item/XP intents via `~onDeath`. Melee, ranged and plugin kills share that path and preserve attacker/damage source context |
+| Entity XP | **No default rewards.** Items `~onDeath` `dropExperience{amount=5}` or `{amount=1-3}` creates explicit XP intents; optional `?flag{name=killed_by_player}` controls eligibility. Entities only owns physical XP orbs and persistence |
 | Entity persistence | Separate world-scoped stores for native sheep, generic YAML mobs (`AMGEN001`), ground items and XP; fishing hooks and projectiles are deliberately transient |
 | World interaction | Validated sheep shearing, milk buckets, source water/lava buckets, tools, durability and physical dropped items |
 | Equipment | Atomic, cancellable F-key swaps, accepted `~onEquip`/`~onUnequip` transitions, protocol-777 observer updates for main hand, offhand and armor |
