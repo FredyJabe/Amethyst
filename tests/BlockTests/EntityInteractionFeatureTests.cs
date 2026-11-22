@@ -68,6 +68,15 @@ internal static class EntityInteractionFeatureTests
             interactionSkills.RegisterTrigger("interact-tests", "onRightClick");
             interactionSkills.RegisterTrigger("interact-tests", "onShear");
             interactionSkills.RegisterTrigger("interact-tests", "onMilk");
+            // The Items Shard's dropItem mechanic supplies wool through
+            // ~onShear; Gameplay has no automatic wool fallback.
+            var woolMechanic = new DropItemSkillMechanic(items, () => null);
+            interactionSkills.RegisterMechanic("interact-tests", "dropItem",
+                woolMechanic.Validate, woolMechanic.ExecuteAsync);
+            interactionSkills.RegisterInstructions("explicit-shear-loot", [
+                SkillEngine.Parse("minecraft:sheep",
+                    "dropItem{item=minecraft:white_wool;amount=1-3} @self ~onShear")
+            ]);
             interactionSkills.RegisterMechanic("interact-tests", "testCancel",
                 skill => { },
                 (skill, evt, ct) =>
