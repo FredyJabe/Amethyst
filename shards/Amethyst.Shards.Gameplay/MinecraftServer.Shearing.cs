@@ -72,7 +72,7 @@ public sealed partial class MinecraftServer
         // instructions or their explicitly requested physical drop intents.
         var effects = new ShardSkillRuntime();
         effects.SetFlag("color_" + WoolColors[sheep.Color]);
-        bool configured = _skills is not null &&
+        if (_skills is not null)
             await _skills.DispatchAsync(new ShardSkillEvent(
                 "sheep", "onShear", sheep.X, sheep.Y, sheep.Z,
                 EntityId: sheep.EntityId, FallbackOwnerId: sheep.Kind,
@@ -86,14 +86,10 @@ public sealed partial class MinecraftServer
         }
         if (!_livingEntities.TryShear(action.EntityId,
             out LivingEntity changed)) return false;
-        if (configured)
-            SpawnLoot(effects.Drops, sheep.X, sheep.Y + 0.3, sheep.Z);
-        if (!configured && _groundItems is not null &&
-            _items.TryGetByIdentifier(
-                "minecraft:" + WoolColors[changed.Color] + "_wool",
-                out ShardItemDefinition wool))
-            _groundItems.TrySpawn(wool.ProtocolId, Random.Shared.Next(1, 4),
-                sheep.X, sheep.Y + 0.3, sheep.Z, out _);
+        // OnShear is a separate explicit interaction skill. No configured
+        // dropItem means no wool drop: neither Entities nor Gameplay owns a
+        // default sheep reward, even when the interaction itself succeeds.
+        SpawnLoot(effects.Drops, sheep.X, sheep.Y + 0.3, sheep.Z);
         foreach (ConnectedPlayer observer in _players.Snapshot()
             .Where(x => x.Ready))
         {
