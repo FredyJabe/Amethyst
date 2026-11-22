@@ -36,11 +36,10 @@ try
         baseCatalog.TryGetByIdentifier("minecraft:slime", out var slime) &&
         slime.MaxHealth is null,
         "Bundled health is authoritative for fixed-HP mobs; variable-HP mobs stay pending");
-    Check(vanillaCow.ExperienceMin == 0 && vanillaCow.ExperienceMax == 0 &&
-        vanillaZombie.ExperienceMin == 0 && vanillaZombie.ExperienceMax == 0 &&
-        baseCatalog.TryGetByIdentifier("minecraft:blaze", out var blaze) &&
-        blaze.ExperienceMin == 0 && blaze.ExperienceMax == 0,
-        "Entity definitions no longer contain implicit XP drop amounts");
+    Check(baseCatalog.TryGetByIdentifier("minecraft:blaze", out var blaze) &&
+        blaze.Identifier == "minecraft:blaze" &&
+        vanillaCow.MaxHealth == 10 && vanillaZombie.MaxHealth == 20,
+        "Entities definitions expose identity and health, not reward fields");
     string legacyExperienceDir = Path.Combine(temp, "deprecated-experience");
     Directory.CreateDirectory(legacyExperienceDir);
     File.WriteAllText(Path.Combine(legacyExperienceDir, "experience.yml"),
