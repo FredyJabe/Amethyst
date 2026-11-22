@@ -633,11 +633,14 @@ public sealed class ItemsShard : IShard
             Path.Combine(directory, "enchantments-26.3.yml"), enchantmentDirectory);
         EnchantmentSkills.Register(ctx);
         LootSkills.Register(ctx, catalog);
+        DeathLootSkills.Register(ctx, catalog);
         ctx.RegisterSkillDefinitions(Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
         string lootDirectory = Path.Combine(ctx.DataDirectory, "loot");
         var loot = new LootCatalog(Path.Combine(directory, "loot-26.3.yml"),
             lootDirectory);
         ctx.RegisterService<IShardLootRegistry>(loot);
+        // Pinned vanilla tables are data sources for the explicit
+        // dropLootTable ~onDeath mechanic; entity death never rolls them by default.
         // Full vanilla loot JSON and exact block-state IDs are pinned to
         // Java 26.3 by the read-only submodule; missing assets do not cause
         // a silently guessed replacement dataset.

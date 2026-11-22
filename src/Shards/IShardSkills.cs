@@ -32,9 +32,18 @@ public sealed class ShardSkillRuntime
 
     public IReadOnlyCollection<string> Flags => _flags;
     public IReadOnlyList<ShardSkillEffect> Effects => _effects;
-    /// <summary>Explicit skill-generated drops, distinct from the event's
-    /// default vanilla drops. The publisher commits them after dispatch.</summary>
+    /// <summary>Explicit skill-generated drops only. No entity has a
+    /// separately inferred default item drop.</summary>
     public IReadOnlyList<ShardItemDrop> Drops => _drops;
+    /// <summary>Explicit ~onDeath dropExperience mechanic intents only.
+    /// Neither a kill nor cancelEvent implicitly generates experience.</summary>
+    public int Experience { get; private set; }
+    public void AddExperience(int amount)
+    {
+        if (amount < 0 || (long)Experience + amount > 32767)
+            throw new InvalidDataException("Invalid or excessive skill experience drop.");
+        Experience += amount;
+    }
     public double Number(string key, double fallback = 0) =>
         _numbers.TryGetValue(key, out double value) ? value : fallback;
     public void SetNumber(string key, double value)

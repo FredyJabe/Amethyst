@@ -242,11 +242,10 @@ public sealed class EntityCatalog : IShardEntityRegistry
                         fields.Health = Number(property.Value, file);
                         break;
                     case "experience":
-                        if (fields.ExperienceMin.HasValue)
-                            throw new InvalidDataException($"Duplicate Experience for '{key}'.");
-                        (fields.ExperienceMin, fields.ExperienceMax) =
-                            Experience(property.Value, file);
-                        break;
+                        throw new InvalidDataException(
+                            $"Entity '{key}' no longer supports Experience in Entities YAML. " +
+                            "Move experience rewards to Items loot ~onDeath: " +
+                            "dropExperience{amount=5} ?flag{name=killed_by_player}.");
                     case "spawnable":
                         if (fields.Spawnable.HasValue)
                             throw new InvalidDataException($"Duplicate Spawnable for '{key}'.");
@@ -273,11 +272,9 @@ public sealed class EntityCatalog : IShardEntityRegistry
                                     fields.Health = Number(option.Value, file);
                                     break;
                                 case "experience":
-                                    if (fields.ExperienceMin.HasValue)
-                                        throw new InvalidDataException($"Duplicate Experience for '{key}'.");
-                                    (fields.ExperienceMin, fields.ExperienceMax) =
-                                        Experience(option.Value, file);
-                                    break;
+                                    throw new InvalidDataException(
+                                        $"Entity '{key}' no longer accepts Options.Experience. " +
+                                        "Define dropExperience in an Items ~onDeath skill.");
                                 case "spawnable":
                                     if (fields.Spawnable.HasValue) throw new InvalidDataException($"Duplicate Spawnable for '{key}'.");
                                     fields.Spawnable = Boolean(option.Value, file);

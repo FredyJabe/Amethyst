@@ -48,30 +48,21 @@ public sealed partial class MinecraftServer
         return success;
     }
 
-    /// <summary>Player-attributed mob deaths create physical, persistent XP
-    /// orbs from the Entities Shard's YAML. Console/plugin kills do not
-    /// impersonate players or grant XP from nowhere.</summary>
-    private void SpawnEntityExperience(string definitionId,
-        ConnectedPlayer? killer, double x, double y, double z)
+    /// <summary>Commit only XP explicitly produced by an Items-owned
+    /// ~onDeath dropExperience mechanic. An unconfigured entity death cannot
+    /// award XP; attribution is enforced by the configured ?flag condition.</summary>
+    private void SpawnEntityExperience(int amount, string definitionId,
+        double x, double y, double z)
     {
-        if (killer is null || _experienceOrbs is null || _entityTypes is null ||
-            !_entityTypes.TryGetByIdentifier(definitionId, out var definition))
-            return;
-        int minimum = definition.ExperienceMin;
-        int maximum = definition.ExperienceMax;
-        if (maximum <= 0 || minimum < 0 || maximum < minimum) return;
-        int amount = minimum == maximum ? minimum :
-            Random.Shared.Next(minimum, maximum + 1);
-        if (amount > 0 && !_experienceOrbs.TrySpawn(amount, x,
-                y + 0.35, z, out _))
+        if (amount <= 0 || _experienceOrbs is null) return;
+        if (!_experienceOrbs.TrySpawn(amount, x, y + 0.35, z, out _))
             Console.WriteLine($"[xp] Experience orb capacity rejected {amount} for {definitionId}.");
     }
 
-    /// <summary>Single source of truth for all Entities-Shard deaths.
-    /// A pinned Mojang loot table takes precedence unless Items has an
-    /// explicit YAML override. Skills always execute, but their drop intents
-    /// are committed only for a fallback/override so no two drop providers
-    /// can award the same kill.</summary>
+    /// <summary>Every physical entity death dispatches exactly one ~onDeath
+    /// event. Items owns every drop mechanic, including optional vanilla
+    /// table evaluation and experience. There is no automatic entity loot,
+    /// no YAML fallback, and no default XP on missing definitions.</summary>
     private async Task ProcessEntityDeathAsync(ShardEntityInstance dead,
         ConnectedPlayer? attacker, ItemStack weapon, CancellationToken ct)
     {
@@ -79,9 +70,6 @@ public sealed partial class MinecraftServer
             _entityTypes.TryGetById(dead.ProtocolId, out var definition)
                 ? definition.Identifier : null;
         string kind = vanillaKind ?? dead.DefinitionId;
-        string? table = kind.StartsWith("minecraft:", StringComparison.Ordinal)
-            ? "minecraft:entities/" + kind["minecraft:".Length..] : null;
-
         var runtime = new ShardSkillRuntime();
         if (kind == "minecraft:sheep")
         {
@@ -90,67 +78,45 @@ public sealed partial class MinecraftServer
             if (!dead.Sheared) runtime.SetFlag("not_sheared");
         }
         if (attacker is not null)
+        {
+            runtime.SetFlag("killed_by_player");
+            if (weapon.EnchantmentLevel("fire_aspect") > 0)
+                runtime.SetFlag("fire_aspect");
             await EnchantmentEventAsync(weapon, "onEntityDrop", ct,
                 runtime, targetKind: EnchantmentMobCategory(kind),
                 actor: attacker.PlayerUuid);
-        // A user-supplied loot pack is the authoritative owner-level
-        // replacement, not additive with starter death skills from legacy
-        // YAML. Skills: [] is a legitimate way to disable drops entirely.
-        bool overridden = _loot?.HasOverride(dead.DefinitionId) == true ||
-            vanillaKind is not null && _loot?.HasOverride(vanillaKind) == true;
-        IReadOnlyList<ShardSkillInstruction>? selectedSkills = null;
-        if (overridden && _loot is not null)
-        {
-            string owner = _loot.HasOverride(dead.DefinitionId)
-                ? dead.DefinitionId : vanillaKind!;
-            if (_loot.TryGetSkills(owner, out var configured))
-                selectedSkills = configured;
         }
+
+        // The exact bundled/admin Items loot pack is authoritative even
+        // when it has Skills: []; other Shards may still supply ~onDeath
+        // skills when no loot pack exists for this entity kind.
+        IReadOnlyList<ShardSkillInstruction>? selectedSkills = null;
+        if (_loot is not null &&
+            (_loot.TryGetSkills(dead.DefinitionId, out var configured) ||
+             vanillaKind is not null &&
+                 _loot.TryGetSkills(vanillaKind, out configured)))
+            selectedSkills = configured;
+
         if (_skills is not null)
             await _skills.DispatchAsync(new ShardSkillEvent(
                 dead.DefinitionId, "onDeath", dead.X, dead.Y, dead.Z,
                 dead.EntityId, vanillaKind,
                 ActorUuid: attacker?.PlayerUuid,
                 ItemId: weapon.ItemId, Count: weapon.Count,
-                TargetKind: EnchantmentMobCategory(kind))
+                TargetKind: EnchantmentMobCategory(kind),
+                DamageType: attacker is null ? null : "minecraft:player_attack")
             {
                 Runtime = runtime,
                 PublisherCommitsDrops = true,
                 AllowedSkills = selectedSkills
             }, ct);
-        // An onDeath cancelEvent can suppress the default native loot
-        // publication without stopping later configured dropItem mechanics.
-        // The physical death has already been committed by Entities.
-        IReadOnlyList<ShardItemDrop>? vanilla =
-            !runtime.IsCancelled && !overridden && table is not null
-            ? TryVanillaLoot(table, new ShardVanillaLootContext
-            {
-                KilledByPlayer = attacker is not null,
-                AttackerKind = attacker is null ? null : "minecraft:player",
-                DirectDamagerKind = attacker is null ? null : "minecraft:player",
-                DamageTypeIdentifier = attacker is null ? null :
-                    "minecraft:player_attack",
-                ToolIdentifier = attacker is not null && _items is not null &&
-                    _items.TryGetById(weapon.ItemId, out var tool)
-                        ? tool.Identifier : null,
-                Looting = (int)Math.Clamp(
-                    runtime.Number("looting_level"), 0, 255),
-                FireAspect = attacker is not null &&
-                    weapon.EnchantmentLevel("fire_aspect") > 0,
-                EntityColor = kind == "minecraft:sheep"
-                    ? WoolColors[Math.Clamp(dead.Color, 0, WoolColors.Length - 1)]
-                    : null,
-                EntitySheared = dead.Sheared
-            })
-            : null;
 
-        if (vanilla is not null)
-            SpawnLoot(vanilla, dead.X, dead.Y + 0.25, dead.Z);
-        else
-            SpawnLoot(runtime.Drops, dead.X, dead.Y + 0.25, dead.Z);
-        if (!runtime.IsCancelled)
-            SpawnEntityExperience(dead.DefinitionId, attacker,
-                dead.X, dead.Y, dead.Z);
+        // cancelEvent suppresses a publisher's default gameplay action,
+        // never other skill mechanics. Entity death has no default loot to
+        // cancel; explicitly configured item and XP intents always commit.
+        SpawnLoot(runtime.Drops, dead.X, dead.Y + 0.25, dead.Z);
+        SpawnEntityExperience(runtime.Experience, dead.DefinitionId,
+            dead.X, dead.Y, dead.Z);
     }
 
     private IReadOnlyList<ShardItemDrop>? TryVanillaLoot(
