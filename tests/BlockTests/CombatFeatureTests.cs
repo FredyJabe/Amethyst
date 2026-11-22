@@ -112,10 +112,16 @@ internal static class CombatFeatureTests
             var enchantments = new EnchantmentCatalog(Path.Combine(
                 solutionRoot.FullName, "shards", "Amethyst.Shards.Items",
                 "enchantments-26.3.yml"));
+            if (!items.TryGetByIdentifier("minecraft:diamond", out var nativeReward) ||
+                !items.TryGetByIdentifier("minecraft:beef", out var beefReward))
+                throw new InvalidDataException("Expected vanilla mob loot materials.");
+            var nativeMobLoot = new RecordedVanillaMobLoot(
+                nativeReward.ProtocolId, beefReward.ProtocolId);
             var skills = new SkillEngine();
-            var skillContext = new LootTestContext(skills);
+            var skillContext = new LootTestContext(skills, nativeMobLoot);
             EnchantmentSkills.Register(skillContext);
             LootSkills.Register(skillContext, items);
+            DeathLootSkills.Register(skillContext, items);
             var loot = new LootCatalog(Path.Combine(solutionRoot.FullName,
                 "shards", "Amethyst.Shards.Items", "loot-26.3.yml"));
             skills.RegisterInstructions("combat-tests", loot.Instructions.Concat([
@@ -124,15 +130,8 @@ internal static class CombatFeatureTests
                 SkillEngine.Parse("minecraft:diamond_sword",
                     "cancelEvent @self ~onBlockDrop"),
                 SkillEngine.Parse("minecraft:diamond_sword",
-                    "dropItem{item=minecraft:diamond;amount=2} @self ~onBlockDrop"),
-                SkillEngine.Parse("minecraft:cow",
-                    "dropItem{item=minecraft:beef;amount=1} @self ~onDeath"),
-                SkillEngine.Parse("minecraft:zombie",
-                    "dropItem{item=minecraft:rotten_flesh;amount=1} @self ~onDeath")
+                    "dropItem{item=minecraft:diamond;amount=2} @self ~onBlockDrop")
             ]));
-            if (!items.TryGetByIdentifier("minecraft:diamond", out var nativeReward))
-                throw new InvalidDataException("Expected vanilla diamond reward.");
-            var nativeMobLoot = new RecordedVanillaMobLoot(nativeReward.ProtocolId);
             var server = TestServerFactory.Create(settings, world,
                 null!, world, items: items, recipes: recipes,
                 entities: managedMobs, entityTypes: mobTypes,
@@ -256,7 +255,7 @@ internal static class CombatFeatureTests
                 server.GroundItemsForTests.Any(drop =>
                     drop.ItemId == beef.ProtocolId && drop.Count == 1) &&
                 managedMobs.DrainDeaths().Length == 0,
-                "Validated melee kills a generic mob and commits one YAML death reward");
+                "Validated melee kills a generic mob through explicit dropLootTable ~onDeath");
             Check(server.ExperienceOrbsForTests.Length == 2 &&
                 server.ExperienceOrbsForTests.Any(orb =>
                     orb.Value is >= 1 and <= 3),
@@ -276,12 +275,12 @@ internal static class CombatFeatureTests
                 server.GroundItemsForTests.Length == beforeNative + 1 &&
                 server.GroundItemsForTests.Count(d =>
                     d.ItemId == nativeReward.ProtocolId) == 1 &&
-                nativeMobLoot.Contexts.Count == 1 &&
-                nativeMobLoot.Contexts[0].KilledByPlayer &&
-                nativeMobLoot.Contexts[0].AttackerKind == "minecraft:player" &&
-                nativeMobLoot.Contexts[0].DamageTypeIdentifier ==
+                nativeMobLoot.ZombieContexts.Count == 1 &&
+                nativeMobLoot.ZombieContexts[0].KilledByPlayer &&
+                nativeMobLoot.ZombieContexts[0].AttackerKind == "minecraft:player" &&
+                nativeMobLoot.ZombieContexts[0].DamageTypeIdentifier ==
                     "minecraft:player_attack",
-                "Melee death prefers native loot with player attribution over YAML fallback");
+                "An explicit ~onDeath dropLootTable skill rolls pinned zombie loot with player attribution");
             Check(server.ExperienceOrbsForTests.Length == 3 &&
                 server.ExperienceOrbsForTests.Count(orb => orb.Value == 5) == 1,
                 "Vanilla zombie kill awards five persistent XP points");
@@ -290,39 +289,38 @@ internal static class CombatFeatureTests
                 managedMobs.TryKill(consoleZombie.EntityId, out _),
                 "Prepare a non-player entity death");
             await server.TickEntitiesAsync(CancellationToken.None);
-            Check(nativeMobLoot.Contexts.Count == 2 &&
-                !nativeMobLoot.Contexts[1].KilledByPlayer &&
-                nativeMobLoot.Contexts[1].AttackerKind is null &&
+            Check(nativeMobLoot.ZombieContexts.Count == 2 &&
+                !nativeMobLoot.ZombieContexts[1].KilledByPlayer &&
+                nativeMobLoot.ZombieContexts[1].AttackerKind is null &&
                 server.GroundItemsForTests.Length == beforeNative + 2,
-                "Console kills use native loot without player-only eligibility");
+                "Console kills execute explicit ~onDeath table skills without player-only XP");
             Check(server.ExperienceOrbsForTests.Length == 3,
                 "Console kills cannot mint player-only experience rewards");
 
-            // Cancel the default death publication without interrupting the
-            // rest of the skill list or reversing the Entities-owned death.
-            skills.RegisterInstructions("death-cancel-tests", [
+            // cancelEvent does not interrupt the remaining ~onDeath
+            // mechanics. There is no implicit loot or XP to suppress.
+            var explicitDeathSkills = new[]
+            {
                 SkillEngine.Parse("minecraft:zombie",
                     "cancelEvent @self ~onDeath"),
                 SkillEngine.Parse("minecraft:zombie",
                     "dropItem{item=minecraft:emerald;amount=1} @self ~onDeath")
-            ]);
-            ShardEntityInstance cancelledZombie = default;
+            };
+            skills.RegisterInstructions("death-cancel-tests", explicitDeathSkills);
+            var cancelled = new ShardSkillRuntime();
+            await skills.DispatchAsync(new ShardSkillEvent(
+                "minecraft:zombie", "onDeath")
+            {
+                Runtime = cancelled,
+                PublisherCommitsDrops = true,
+                AllowedSkills = explicitDeathSkills
+            });
             Check(items.TryGetByIdentifier("minecraft:emerald",
                     out var emeraldCancel) &&
-                managedMobs.TrySpawn("zombie", 1, 80, 0, out cancelledZombie),
-                "Prepare cancellable vanilla zombie death with later custom reward");
-            int xpBeforeCancelled = server.ExperienceOrbsForTests.Length;
-            int nativeBeforeCancelled = nativeMobLoot.Contexts.Count;
-            await Task.Delay(140);
-            await server.HandleAttackAsync(player1, cancelledZombie.EntityId,
-                CancellationToken.None);
-            Check(!managedMobs.Snapshot().Any(e =>
-                    e.EntityId == cancelledZombie.EntityId) &&
-                nativeMobLoot.Contexts.Count == nativeBeforeCancelled &&
-                server.ExperienceOrbsForTests.Length == xpBeforeCancelled &&
-                server.GroundItemsForTests.Any(x =>
-                    x.ItemId == emeraldCancel.ProtocolId && x.Count == 1),
-                "onDeath cancelEvent suppresses default loot and XP while later skills still drop items");
+                cancelled.IsCancelled && cancelled.Experience == 0 &&
+                cancelled.Drops.Count == 1 &&
+                cancelled.Drops[0].ItemId == emeraldCancel.ProtocolId,
+                "cancelEvent completes later explicit ~onDeath skills without implicit item or XP awards");
 
             string lootOverrides = Path.Combine(root, "loot-overrides");
             Directory.CreateDirectory(lootOverrides);
@@ -330,6 +328,7 @@ internal static class CombatFeatureTests
                 minecraft:cow:
                   Skills:
                     - "dropItem{item=minecraft:emerald;amount=1} @self ~onDeath"
+                    - "dropExperience{amount=2} @self ~onDeath ?flag{name=killed_by_player}"
                 minecraft:zombie:
                   Skills: []
                 """);
@@ -369,16 +368,19 @@ internal static class CombatFeatureTests
             await overrideServer.HandleAttackAsync(
                 overridePlayer, overrideCow.EntityId, CancellationToken.None);
             Check(overrideServer.GroundItemsForTests.Length == 1 &&
-                overrideServer.GroundItemsForTests[0].ItemId == emerald.ProtocolId,
-                "Custom mob loot replaces legacy starter drops, without stacking them");
+                overrideServer.GroundItemsForTests[0].ItemId == emerald.ProtocolId &&
+                overrideServer.ExperienceOrbsForTests.Length == 1 &&
+                overrideServer.ExperienceOrbsForTests[0].Value == 2,
+                "Custom ~onDeath item and XP skills replace bundled table/XP rules");
             Check(overriddenMobs.TrySpawn("zombie", 1, 80, 0,
                 out var silentZombie), "Set up a mob with Skills: []");
             await Task.Delay(140);
             await overrideServer.HandleAttackAsync(
                 overridePlayer, silentZombie.EntityId, CancellationToken.None);
             Check(overrideServer.GroundItemsForTests.Length == 1 &&
+                overrideServer.ExperienceOrbsForTests.Length == 1 &&
                 !overriddenMobs.Snapshot().Any(e => e.EntityId == silentZombie.EntityId),
-                "Explicit empty loot override suppresses both native and legacy drops");
+                "Skills: [] suppresses all entity item drops and XP, even with a pinned table");
 
             Check(items.TryGetByIdentifier("minecraft:diamond", out var rewardDiamond) &&
                 world.TrySetBlockState(0, 81, 1, 10, out _),
@@ -418,30 +420,41 @@ internal static class CombatFeatureTests
         }
     }
 
-    private sealed class RecordedVanillaMobLoot(int rewardId) :
+    private sealed class RecordedVanillaMobLoot(int zombieReward, int cowReward) :
         IShardVanillaLootTables
     {
-        public int Count => 1;
-        public List<ShardVanillaLootContext> Contexts { get; } = [];
-        public bool HasTable(string id) => id == "minecraft:entities/zombie";
+        public int Count => 2;
+        public List<ShardVanillaLootContext> ZombieContexts { get; } = [];
+        public List<ShardVanillaLootContext> CowContexts { get; } = [];
+        public bool HasTable(string id) => id is
+            "minecraft:entities/zombie" or "minecraft:entities/cow";
         public IReadOnlyList<ShardItemDrop> Roll(string id,
             ShardVanillaLootContext context)
         {
-            if (!HasTable(id))
-                throw new InvalidDataException("Unexpected native loot table.");
-            Contexts.Add(context);
-            return [new ShardItemDrop(rewardId, 1)];
+            if (id == "minecraft:entities/zombie")
+            {
+                ZombieContexts.Add(context);
+                return [new ShardItemDrop(zombieReward, 1)];
+            }
+            if (id == "minecraft:entities/cow")
+            {
+                CowContexts.Add(context);
+                return [new ShardItemDrop(cowReward, 1)];
+            }
+            throw new InvalidDataException("Unexpected entity loot table.");
         }
     }
 
-    private sealed class LootTestContext(SkillEngine engine) : IShardContext
+    private sealed class LootTestContext(SkillEngine engine,
+        IShardVanillaLootTables native) : IShardContext
     {
         public string Id => "combat-tests";
         public ServerOptions Options => throw new NotSupportedException();
         public string DataDirectory => Path.GetTempPath();
         public void RegisterService<T>(T service) where T : class { }
         public T GetRequiredService<T>() where T : class => throw new NotSupportedException();
-        public T? GetService<T>() where T : class => null;
+        public T? GetService<T>() where T : class =>
+            typeof(T) == typeof(IShardVanillaLootTables) ? (T)(object)native : null;
         public void Log(string message) { }
         public void RegisterPlayPacketHandler(int packetId, ShardPlayPacketHandler handler) { }
         public void RegisterConsoleCommand(string name, ShardConsoleCommand handler) { }

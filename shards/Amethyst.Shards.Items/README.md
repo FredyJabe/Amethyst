@@ -115,15 +115,39 @@ selects the matching wool, and Gameplay applies shears durability.
 Both `~onShear` and `~onMilk` now run before mutation, so
 `cancelEvent` can prevent the default action without skipping later skills.
 
-The Entities Shard emits a one-time death event on `TryKill` or
-lethal `TryDamage`. Gameplay dispatches `~onDeath` via
-Core's shared `IShardSkillEngine`; the Items-owned `dropItem` mechanic
-calls Gameplay's `IShardItemDropSink` to spawn physical, pickable items.
-`entityremove` does not trigger skills. This is a starter
-event/skill engine, **not** a complete MythicMobs implementation:
-some additional game-specific triggers and target selectors, full mob
-AI, and environment-specific loot contexts remain pending. Looting,
-fire-smelting and player-kill XP are partially integrated already.
+The Entities Shard emits one authoritative death event on `TryKill` or
+lethal `TryDamage`; `entityremove` never triggers skills. Gameplay publishes
+`~onDeath` through Core, and **only explicitly configured Items mechanics**
+produce physical item/XP drops. There is no default mob loot or default XP,
+not even when a pinned Mojang table is installed.
+
+For example, `shards/data/items/loot/mobs.yml` can define:
+
+```yaml
+minecraft:cow:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/cow} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+minecraft:zombie:
+  Skills:
+    - "dropItem{item=minecraft:rotten_flesh;amount=0-2} @self ~onDeath"
+minecraft:warden:
+  Skills: []  # No item drops and no experience
+```
+
+The bundled `loot-26.3.yml` explicitly lists 92 available pinned vanilla
+entity-table invocations and 45 configured XP ranges, not automatic rewards.
+`dropLootTable` may evaluate only its declared table. For an unsupported
+predicate/component, it logs the failed roll and awards nothing; no hidden
+fallback occurs. `dropExperience` is independent of `dropItem`, and
+`?flag{name=killed_by_player}` makes a reward player-only when desired.
+An `onDeath cancelEvent` cannot retroactively reverse a committed entity
+death or stop later explicit skills.
+
+The Entities Shard deliberately rejects `Experience` and
+`Options.Experience` fields: move them into Items `~onDeath` skills.
+Complete mob AI, spawning, environment-specific loot context and all
+specialized native modifiers remain separate Phase 4 parity gaps.
 
 **Migration from earlier experimental Drops YAML:** Files in
 `shards/data/items/loot/` using `Drops:` are not loaded. If they
@@ -841,12 +865,22 @@ the submodule once. For an alternate checkout, run
 `git submodule update --init --recursive` before building.
 The upstream dataset is credited under its accompanying MIT license.
 
-Live mob deaths prefer the original JSON loot table, including nested
-sheep-color lookups, count providers, Looting bonuses, smelting and
-explicit conditions. Live Survival block breaks prefer the actual
+Mob deaths never roll these tables automatically. Only an explicit
+`dropLootTable{table=minecraft:entities/<entity>}` mechanic under
+`~onDeath` can evaluate the pinned source, preserving nested sheep-color
+lookups, count providers, Looting bonuses, smelting and supported conditions.
+`dropItem` and `dropExperience` are equally explicit Items mechanics.
+`Skills: []` suppresses every reward, including XP; a missing death
+definition produces nothing. Administrator loot definitions replace the
+bundled Items pack rather than stacking with it.
+If an explicit pinned table cannot be evaluated, it logs the exact unsupported
+feature and does **not** fall back to guessed rewards.
+
+Live Survival block breaks prefer the actual
 `minecraft:blocks/<block>` JSON using the real block-state report,
 with Fortune, Silk Touch and shear-tool context. Explicit user YAML
-loot overrides **take precedence** over the vanilla mob tables.
+loot overrides **replace** their `~onDeath` skills; no default entity
+loot-table evaluation remains.
 Item-defined `~onBlockDrop` skills still run and can replace vanilla
 drops with `cancelEvent` followed by `dropItem`.
 

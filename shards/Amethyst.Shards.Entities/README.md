@@ -204,34 +204,42 @@ are atomically persisted, and the Entities Shard flushes all durable stores
 on disable. Entity IDs are reallocated at startup; UUIDs remain stable. Projectiles and fishing bobbers
 are intentionally not saved between restarts.
 
-## Configurable mob experience
+## Entity death rewards: Items `~onDeath` skills only
 
-The bundled `entities-26.3.yml` includes fixed XP rewards for 45 mob
-definitions that are eligible for a player kill. Administrators can
-override the server-owned reward in an Entities YAML root:
+The Entities Shard has **no built-in drop rules, default loot table, or XP
+reward**, regardless of an entity's type or source of damage. On lethal damage
+it publishes a single authoritative death snapshot. The Items Shard alone
+decides which item and XP intents to create through configured `~onDeath` skills.
+
+In `shards/data/items/loot/mobs.yml`:
 
 ```yaml
-cow:
-  Health: 10
-  Experience: [1, 3]
-zombie:
-  Experience: 5
+minecraft:cow:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/cow} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+minecraft:zombie:
+  Skills: []  # Completely silent death, even with a pinned vanilla table
 ```
 
-`Experience` is an exact nonnegative number or a bounded inclusive
-`[minimum, maximum]` range; values above 32,767 are rejected.
-Eligible melee and projectile deaths spawn one persistent Entities-owned
-XP orb. Console and plugin kills do not inherit player-only XP. The
-reward definition is separate from Items loot YAML, and it does not
-confer AI, natural spawn rules or vanilla parity on an otherwise inert mob.
+`dropLootTable` explicitly invokes the pinned 26.3 vanilla data pack;
+`dropItem` creates manually chosen items; `dropExperience` awards a
+configured amount. Each skill is optional. An entity with no `~onDeath`
+skills awards **nothing**, including on player kills. Player-kill-only
+eligibility is an explicit `?flag` condition, not hard-coded into Entities.
+
+**Migration:** `Experience` and `Options.Experience` in Entities YAML
+are now invalid and report an actionable startup error. Move these amounts
+to `dropExperience` skills in the Items Shard. Existing world-entity save
+files are unaffected.
 
 ## Current limits
 
 Generic entity instances do not currently perform natural spawning,
 wandering, pathfinding, gravity, collisions, automatic hostile attacks,
 breeding or healing. Player melee and projectile attacks already damage
-health-bearing generic mobs; their one-shot deaths run Items YAML and
-pinned vanilla loot with configurable player-kill XP. Configured Display
+health-bearing generic mobs; their one-shot deaths dispatch Items `~onDeath` skills exclusively; no
+unconfigured table or experience is awarded. Configured Display
 is not yet sent as custom-name entity metadata.
 Generic YAML-spawned instances now use a separate atomic, world-scoped
 `AMGEN001` save file with stable UUIDs, authoritative health and positions,

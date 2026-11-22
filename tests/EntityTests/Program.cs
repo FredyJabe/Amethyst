@@ -36,11 +36,25 @@ try
         baseCatalog.TryGetByIdentifier("minecraft:slime", out var slime) &&
         slime.MaxHealth is null,
         "Bundled health is authoritative for fixed-HP mobs; variable-HP mobs stay pending");
-    Check(vanillaCow.ExperienceMin == 1 && vanillaCow.ExperienceMax == 3 &&
-        vanillaZombie.ExperienceMin == 5 && vanillaZombie.ExperienceMax == 5 &&
+    Check(vanillaCow.ExperienceMin == 0 && vanillaCow.ExperienceMax == 0 &&
+        vanillaZombie.ExperienceMin == 0 && vanillaZombie.ExperienceMax == 0 &&
         baseCatalog.TryGetByIdentifier("minecraft:blaze", out var blaze) &&
-        blaze.ExperienceMin == 10 && blaze.ExperienceMax == 10,
-        "Vanilla XP is a bounded scalar or inclusive range from entity YAML");
+        blaze.ExperienceMin == 0 && blaze.ExperienceMax == 0,
+        "Entity definitions no longer contain implicit XP drop amounts");
+    string legacyExperienceDir = Path.Combine(temp, "deprecated-experience");
+    Directory.CreateDirectory(legacyExperienceDir);
+    File.WriteAllText(Path.Combine(legacyExperienceDir, "experience.yml"),
+        "cow:\\n  Experience: 5\\n".Replace("\\n", "\n"));
+    bool migratedXp = false;
+    try { _ = new EntityCatalog(vanilla, legacyExperienceDir); }
+    catch (InvalidDataException e)
+    {
+        migratedXp = e.Message.Contains("dropExperience",
+            StringComparison.OrdinalIgnoreCase);
+    }
+    Directory.Delete(legacyExperienceDir, recursive: true);
+    Check(migratedXp,
+        "Legacy Entities Experience YAML fails with a clear ~onDeath migration message");
 
     string path = Path.Combine(temp, "override.yml");
     File.WriteAllText(path, """

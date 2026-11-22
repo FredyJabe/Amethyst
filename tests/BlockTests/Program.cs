@@ -1535,6 +1535,12 @@ try
         deathSkills.RegisterTrigger("items", trigger);
     deathSkills.RegisterDefinitions("items", Path.Combine(solutionRoot.FullName,
         "shards", "Amethyst.Shards.Items", "skills-26.3.yml"));
+    // Death rewards are never inferred from the entity ID or registry:
+    // this explicit test-owned ~onDeath skill is the sole source of beef.
+    deathSkills.RegisterInstructions("death-test", [
+        SkillEngine.Parse("minecraft:cow",
+            "dropItem{item=minecraft:beef;amount=1-3} @self ~onDeath")
+    ]);
     lootGame = TestServerFactory.Create(settings, stationWorld, null!, stationWorld,
         Path.Combine(stationsRoot, "loot-gameplay"), itemsCatalog, recipesCatalog,
         lootWorld, lootTypes, lootWorld, skills: deathSkills);
@@ -1557,6 +1563,21 @@ try
     await lootGame.TickEntitiesAsync(CancellationToken.None);
     Check(lootGame.GroundItemsForTests.Length == spawnedDrops.Length,
         "An ordinary entity despawn does not generate loot");
+
+    // Even with a pinned vanilla table and an Entities XP field, no
+    // explicitly registered ~onDeath mechanic means no item or XP drop.
+    var emptyDeathEntities = new EntityManager(lootTypes);
+    var emptyDeathGame = TestServerFactory.Create(settings,
+        stationWorld, null!, stationWorld,
+        Path.Combine(stationsRoot, "no-entity-loot"), itemsCatalog, recipesCatalog,
+        emptyDeathEntities, lootTypes, emptyDeathEntities);
+    Check(emptyDeathEntities.TrySpawn("cow", 11, 80, 12,
+            out var noSkillCow) && emptyDeathEntities.TryKill(noSkillCow.EntityId, out _),
+        "Prepare an entity with no configured death skills");
+    await emptyDeathGame.TickEntitiesAsync(CancellationToken.None);
+    Check(emptyDeathGame.GroundItemsForTests.Length == 0 &&
+        emptyDeathGame.ExperienceOrbsForTests.Length == 0,
+        "Unconfigured entity deaths never generate default item drops or XP");
 
     string bonusMilkFile = Path.Combine(stationsRoot, "bonus-milk-skills.yml");
     File.WriteAllText(bonusMilkFile, """
