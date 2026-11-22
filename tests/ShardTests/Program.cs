@@ -196,7 +196,8 @@ try
         throw new Exception("FAIL: Gameplay item drop sink not registered");
     Check(skillEngine.OwnerCount >= 10 &&
         skillEngine.TryGetSkills("minecraft:cow", out var configuredSkills) &&
-        configuredSkills.Count == 2 &&
+        configuredSkills.Count == 3 &&
+        configuredSkills.Any(s => s.Mechanic == "dropItem" && s.Trigger == "onDeath") &&
         configuredSkills.Any(s => s.Mechanic == "dropLootTable" &&
             s.Trigger == "onDeath") &&
         configuredSkills.Any(s => s.Mechanic == "dropExperience" &&
