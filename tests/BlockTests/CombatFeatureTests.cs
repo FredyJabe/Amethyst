@@ -297,6 +297,22 @@ internal static class CombatFeatureTests
             Check(server.ExperienceOrbsForTests.Length == 3,
                 "Console kills cannot mint player-only experience rewards");
 
+            // A registered Mojang vanilla table is not itself a source of
+            // any entity drop. An explicit Items ~onDeath skill is required.
+            var noLootManager = new EntityManager(mobTypes);
+            var noLootGame = TestServerFactory.Create(settings, world, null!,
+                world, items: items, recipes: recipes, entities: noLootManager,
+                entityTypes: mobTypes, vanillaLoot: nativeMobLoot);
+            int nativeCowRolls = nativeMobLoot.CowContexts.Count;
+            Check(noLootManager.TrySpawn("cow", 1, 80, 0, out var silentCow) &&
+                noLootManager.TryKill(silentCow.EntityId, out _),
+                "Prepare a killed cow with a registered native table but no death skills");
+            await noLootGame.TickEntitiesAsync(CancellationToken.None);
+            Check(noLootGame.GroundItemsForTests.Length == 0 &&
+                noLootGame.ExperienceOrbsForTests.Length == 0 &&
+                nativeMobLoot.CowContexts.Count == nativeCowRolls,
+                "Pinned vanilla loot tables and entity identity never generate implicit item or XP rewards");
+
             // cancelEvent does not interrupt the remaining ~onDeath
             // mechanics. There is no implicit loot or XP to suppress.
             var explicitDeathSkills = new[]
