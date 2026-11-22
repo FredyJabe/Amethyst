@@ -774,8 +774,14 @@ try
         lootOverrides);
     Check(emptyLoot.HasDefinition("minecraft:sheep") &&
         emptyLoot.HasDefinition("minecraft:fishing") &&
-        emptyLoot.Instructions.Count == 6 &&
-        emptyLoot.Instructions.All(skill => skill.OwnerId == "minecraft:fishing"),
+        loot.TryGetSkills("minecraft:sheep", out var bundledSheep) &&
+        emptyLoot.TryGetSkills("minecraft:sheep", out var disabledSheep) &&
+        disabledSheep.Count == 0 &&
+        emptyLoot.Instructions.Count == loot.Instructions.Count - bundledSheep.Count &&
+        emptyLoot.TryGetSkills("minecraft:cow", out var remainingCow) &&
+        remainingCow.Any(skill => skill.Trigger == "onDeath") &&
+        emptyLoot.TryGetSkills("minecraft:fishing", out var remainingFishing) &&
+        remainingFishing.Count == 6,
         "Loot Skills: [] disables only that entity's drops, keeping other packs");
     File.WriteAllText(Path.Combine(lootOverrides, "sheep.yml"), """
         minecraft:sheep:
@@ -789,6 +795,7 @@ try
     var customContext = new TestSkillContext(customLootEngine);
     EnchantmentSkills.Register(customContext);
     LootSkills.Register(customContext, items);
+    DeathLootSkills.Register(customContext, items);
     customLootEngine.RegisterInstructions("custom-loot", customLoot.Instructions);
     var customDeath = new ShardSkillEvent("minecraft:sheep", "onDeath");
     await customLootEngine.DispatchAsync(customDeath);
