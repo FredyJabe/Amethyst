@@ -301,7 +301,21 @@ public sealed partial class MinecraftServer
             {
                 if (killedMob)
                     await ProcessEntityDeathAsync(injured, attacker,
-                        p.SourceWeapon, ct);
+                        p.SourceWeapon, ct,
+                        damageType: p.Kind switch
+                        {
+                            ProjectileKind.Trident => "minecraft:trident",
+                            ProjectileKind.Arrow or ProjectileKind.SpectralArrow =>
+                                "minecraft:arrow",
+                            _ => null
+                        },
+                        directDamagerKind: p.Kind switch
+                        {
+                            ProjectileKind.Trident => "minecraft:trident",
+                            ProjectileKind.Arrow or ProjectileKind.SpectralArrow =>
+                                "minecraft:arrow",
+                            _ => null
+                        });
                 else
                     foreach (ConnectedPlayer viewer in players.Where(v =>
                         _entityViews.TryGetValue(v.ConnectionId, out var seen) &&

@@ -79,7 +79,8 @@ public sealed record ShardSkillEvent(
     string OwnerId, string Trigger, double X = 0, double Y = 0, double Z = 0,
     int EntityId = 0, string? FallbackOwnerId = null, Random? Random = null,
     Guid? ActorUuid = null, int ItemId = 0, int Count = 0,
-    int EnchantmentLevel = 0, string? TargetKind = null, string? DamageType = null)
+    int EnchantmentLevel = 0, string? TargetKind = null, string? DamageType = null,
+    string? DirectDamagerKind = null)
 {
     public Random Rng => Random ?? System.Random.Shared;
     public ShardSkillRuntime Runtime { get; init; } = new();

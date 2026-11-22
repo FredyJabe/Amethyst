@@ -98,7 +98,8 @@ public static class DeathLootSkills
                 Random = evt.Rng,
                 KilledByPlayer = evt.ActorUuid.HasValue,
                 AttackerKind = evt.ActorUuid.HasValue ? "minecraft:player" : null,
-                DirectDamagerKind = evt.ActorUuid.HasValue ? "minecraft:player" : null,
+                DirectDamagerKind = evt.DirectDamagerKind ??
+                    (evt.ActorUuid.HasValue ? "minecraft:player" : null),
                 DamageTypeIdentifier = evt.DamageType ??
                     (evt.ActorUuid.HasValue ? "minecraft:player_attack" : null),
                 ToolIdentifier = tool,

@@ -64,7 +64,8 @@ public sealed partial class MinecraftServer
     /// table evaluation and experience. There is no automatic entity loot,
     /// no YAML fallback, and no default XP on missing definitions.</summary>
     private async Task ProcessEntityDeathAsync(ShardEntityInstance dead,
-        ConnectedPlayer? attacker, ItemStack weapon, CancellationToken ct)
+        ConnectedPlayer? attacker, ItemStack weapon, CancellationToken ct,
+        string? damageType = null, string? directDamagerKind = null)
     {
         string? vanillaKind = _entityTypes is not null &&
             _entityTypes.TryGetById(dead.ProtocolId, out var definition)
@@ -109,7 +110,10 @@ public sealed partial class MinecraftServer
                 ActorUuid: attacker?.PlayerUuid,
                 ItemId: weapon.ItemId, Count: weapon.Count,
                 TargetKind: EnchantmentMobCategory(kind),
-                DamageType: attacker is null ? null : "minecraft:player_attack")
+                DamageType: damageType ??
+                    (attacker is null ? null : "minecraft:player_attack"),
+                DirectDamagerKind: directDamagerKind ??
+                    (attacker is null ? null : "minecraft:player"))
             {
                 Runtime = runtime,
                 PublisherCommitsDrops = true,

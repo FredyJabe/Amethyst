@@ -297,6 +297,29 @@ internal static class CombatFeatureTests
             Check(server.ExperienceOrbsForTests.Length == 3,
                 "Console kills cannot mint player-only experience rewards");
 
+            Check(loot.TryGetSkills("minecraft:zombie", out var rangedRewards),
+                "Resolve the exact Items-owned zombie death skill pack");
+            var rangedIntent = new ShardSkillRuntime();
+            rangedIntent.SetFlag("killed_by_player");
+            await skills.DispatchAsync(new ShardSkillEvent(
+                "minecraft:zombie", "onDeath", ActorUuid: player1.PlayerUuid,
+                ItemId: sword.ProtocolId, DamageType: "minecraft:arrow",
+                DirectDamagerKind: "minecraft:arrow")
+            {
+                Runtime = rangedIntent,
+                PublisherCommitsDrops = true,
+                AllowedSkills = rangedRewards
+            });
+            Check(nativeMobLoot.ZombieContexts.Count == 3 &&
+                nativeMobLoot.ZombieContexts[^1].KilledByPlayer &&
+                nativeMobLoot.ZombieContexts[^1].DirectDamagerKind ==
+                    "minecraft:arrow" &&
+                nativeMobLoot.ZombieContexts[^1].DamageTypeIdentifier ==
+                    "minecraft:arrow" &&
+                rangedIntent.Drops.Count == 1 &&
+                rangedIntent.Experience == 5,
+                "Explicit ranged ~onDeath skills preserve authoritative projectile damage context");
+
             // A registered Mojang vanilla table is not itself a source of
             // any entity drop. An explicit Items ~onDeath skill is required.
             var noLootManager = new EntityManager(mobTypes);
