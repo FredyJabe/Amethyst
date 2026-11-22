@@ -27,6 +27,7 @@ public sealed class ConnectedPlayer : IShardPlayer
     }
     public PlayerInventory Inventory { get; }
     public PlayerVitals Vitals { get; }
+    public PlayerActiveEffects ActiveEffects { get; }
     public PlayerUseState UseState { get; } = new();
     public PlayerFlightState Flight { get; } = new();
     public PlayerExperience Experience { get; }
@@ -46,6 +47,18 @@ public sealed class ConnectedPlayer : IShardPlayer
     // Count these in stream order so stalled packet processing does not make
     // an entire real dig look like START and STOP in the same millisecond.
     private long _clientTicks;
+    // Attack packet precedes the punch packet in the same client tick.
+    // Keep cancellation for only that tick, so a lost punch cannot suppress
+    // an unrelated later swing. The receive loop consumes this once.
+    private long _cancelledPunchTick = -1;
+    public void RecordAttackSwingCancellation(bool cancelled) =>
+        _cancelledPunchTick = cancelled ? _clientTicks : -1;
+    public bool ConsumeAttackSwingCancellation()
+    {
+        bool cancelled = _cancelledPunchTick == _clientTicks;
+        _cancelledPunchTick = -1;
+        return cancelled;
+    }
     public void AdvanceClientTick() => _clientTicks++;
     private (int X, int Y, int Z, ushort State, int HeldItem, long Started,
         int RequiredMs, long ClientTicksAtStart)? _mining;
@@ -144,12 +157,14 @@ public sealed class ConnectedPlayer : IShardPlayer
     }
     public ConnectedPlayer(Guid id, string name, ProfileProperty[] properties, int entityId,
         PacketChannel connection, IShardWorld world, string? inventoryDirectory = null,
-        IShardItemRegistry? items = null)
+        IShardItemRegistry? items = null, IShardEnchantmentRegistry? enchantments = null,
+        IShardSkillEngine? skills = null)
     {
         PlayerUuid = id; Username = name; Properties = properties;
         EntityId = entityId; Connection = connection; View = world.CreateView();
-        Inventory = new PlayerInventory(inventoryDirectory, id, items);
+        Inventory = new PlayerInventory(inventoryDirectory, id, items, enchantments, skills);
         Vitals = new PlayerVitals(inventoryDirectory, id);
+        ActiveEffects = new PlayerActiveEffects(inventoryDirectory, id);
         Experience = new PlayerExperience(inventoryDirectory, id);
     }
 }

@@ -10,6 +10,17 @@
     <None Include="items-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="recipes-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="skills-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="enchantments-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../vendor/minecraft-26.3-data/data/minecraft/loot_table/**/*.json"
+          Link="vanilla-loot/%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../vendor/minecraft-26.3-data/blocks.json"
+          Link="vanilla-blocks.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../vendor/minecraft-26.3-data/data/minecraft/tags/**/*.json"
+          Link="vanilla-tags/%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="loot-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="consumables-26.3.yml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="InstallShard" AfterTargets="Build">
     <MakeDir Directories="$(MSBuildProjectDirectory)/../../shards/installed/items" />
@@ -18,5 +29,21 @@
     <Copy SourceFiles="$(MSBuildProjectDirectory)/items-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)/recipes-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)/skills-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/enchantments-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/loot-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/consumables-26.3.yml" DestinationFolder="$(MSBuildProjectDirectory)/../../shards/installed/items" />
+    <ItemGroup>
+      <VanillaLootAssets Include="../../vendor/minecraft-26.3-data/data/minecraft/loot_table/**/*.json" />
+      <VanillaTagAssets Include="../../vendor/minecraft-26.3-data/data/minecraft/tags/**/*.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(VanillaLootAssets)"
+          DestinationFiles="@(VanillaLootAssets->'$(MSBuildProjectDirectory)/../../shards/installed/items/vanilla-loot/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VanillaTagAssets)"
+          DestinationFiles="@(VanillaTagAssets->'$(MSBuildProjectDirectory)/../../shards/installed/items/vanilla-tags/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/../../vendor/minecraft-26.3-data/blocks.json"
+          DestinationFiles="$(MSBuildProjectDirectory)/../../shards/installed/items/vanilla-blocks.json"
+          SkipUnchangedFiles="true" Condition="Exists('$(MSBuildProjectDirectory)/../../vendor/minecraft-26.3-data/blocks.json')" />
   </Target>
 </Project>

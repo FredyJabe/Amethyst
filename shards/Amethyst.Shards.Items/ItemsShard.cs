@@ -21,6 +21,8 @@ public sealed class ItemCatalog : IShardItemRegistry
 
     public IReadOnlyDictionary<string, string> ComponentNodes => _componentNodes.Nodes;
     private readonly IReadOnlyList<ShardItemDefinition> _all;
+    private readonly List<ShardItemDefinition> _aliases = [];
+    public IReadOnlyList<ShardItemDefinition> Aliases => _aliases.AsReadOnly();
     private readonly Dictionary<string, ShardItemDefinition> _byName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -54,7 +56,7 @@ public sealed class ItemCatalog : IShardItemRegistry
                 (maxDurability > 0 && max != 1))
                 throw new InvalidDataException($"Invalid vanilla durability for {root}.");
             var item = new ShardItemDefinition(options.ProtocolId.Value, key,
-                max, options.BlockItem.Value) { MaxDurability = maxDurability };
+                max, options.BlockItem.Value) { MaxDurability = maxDurability, Stats = options.Stats };
             if (_byName.ContainsKey(key) || _byName.ContainsKey(root))
                 throw new InvalidDataException($"Duplicate vanilla item {key}.");
             definitions.Add(item);
@@ -166,6 +168,7 @@ public sealed class ItemCatalog : IShardItemRegistry
         var alias = ApplyMetadata(material with { Identifier = aliasId }, fields);
         _byName.Add(aliasId, alias);
         if (aliasId != key) _byName.Add(key, alias);
+        _aliases.Add(alias);
     }
 
     private int VanillaMax(int id) => _vanillaMax[id];
@@ -241,6 +244,11 @@ public sealed class ItemCatalog : IShardItemRegistry
             Lore = fields.Lore is null ? item.Lore : Array.AsReadOnly(fields.Lore),
             CustomModelData = fields.CustomModelData ?? item.CustomModelData,
             Hidden = fields.Hidden ?? item.Hidden,
+            Stats = fields.Stats ?? item.Stats,
+            Skills = fields.Skills is null ? item.Skills :
+                Array.AsReadOnly(fields.Skills
+                    .Select(expression => SkillEngine.Parse(item.Identifier, expression))
+                    .ToArray()),
             Components = new ReadOnlyDictionary<string, string>(patch)
         };
     }
@@ -287,6 +295,8 @@ public sealed class ItemCatalog : IShardItemRegistry
         public bool? Glint;
         public bool? Unbreakable;
         public IReadOnlyDictionary<string, string>? Components;
+        public IReadOnlyList<ShardStatModifier>? Stats;
+        public string[]? Skills;
     }
 
     private static IEnumerable<(string Key, ItemFields Fields)> ReadEntries(
@@ -367,6 +377,17 @@ public sealed class ItemCatalog : IShardItemRegistry
                         break;
                     case "unbreakable":
                         fields.Unbreakable = Boolean(field.Value, path, key);
+                        break;
+                    case "stats":
+                        fields.Stats = StatModifiers.Parse(field.Value, key);
+                        break;
+                    case "skills":
+                        if (field.Value is not YamlSequenceNode skills ||
+                            skills.Children.Count > 32)
+                            throw new InvalidDataException(
+                                $"Skills for '{key}' must be a sequence (max 32).");
+                        fields.Skills = skills.Children
+                            .Select(line => LimitedString(line, path, key)).ToArray();
                         break;
                     case "components":
                         foreach (var (component, json) in
@@ -497,6 +518,10 @@ public sealed class ItemsShard : IShard
                 #   Id: minecraft:diamond_pickaxe
                 #   Display: "<aqua>Miner's Pickaxe</aqua>"
                 #   ItemModel: amethyst:miners_pickaxe
+                #   Stats:
+                #     - mining_speed 1.5   # set
+                #     - mining_speed +0.5  # add
+                #     - mining_speed *2    # multiply
                 #   Components:
                 #     Rarity: rare
                 #     GlintOverride: true
@@ -578,23 +603,89 @@ public sealed class ItemsShard : IShard
                     throw new InvalidDataException(
                         $"Legacy loot YAML '{file}' requires migration to the Items Shard Skills format: " +
                         "dropItem{item=...;amount=...} ~onDeath. See Items Shard README.");
-        var dropItem = new DropItemSkillMechanic(catalog,
-            () => ctx.GetService<IShardItemDropSink>(), ctx.Log);
-        ctx.RegisterSkillMechanic("dropItem", dropItem.Validate, dropItem.ExecuteAsync);
-        // Item-originated events are owned by Items even though Gameplay
-        // detects packet/inventory actions and Core dispatches their skills.
-        // Register every trigger before loading administrator YAML so unknown
-        // actions are still rejected but valid new triggers can be configured.
-        foreach (string trigger in new[]
-        {
-            "onLeftClick", "onRightClick", "onDrop", "onSwap",
-            "onStackDrop", "onPickup", "onEquip", "onUnequip"
-        })
-            ctx.RegisterSkillTrigger(trigger);
-        ctx.RegisterSkillDefinitions(Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
-        IShardSkillEngine skills = ctx.GetRequiredService<IShardSkillEngine>();
+        // LootSkills already owns the shared dropItem mechanic and cancellation semantics.
+        // EnchantmentSkills registers the item events for both YAML packs.
+        // Register their bundled and administrator skills after the mechanic and
+        // condition providers have been registered below.
         ctx.RegisterService<IShardItemRegistry>(catalog);
         ctx.RegisterService<IShardRecipeRegistry>(recipes);
+        string consumableDir = Path.Combine(ctx.DataDirectory, "consumables");
+        var consumables = new ConsumableCatalog(catalog,
+            Path.Combine(directory, "consumables-26.3.yml"), consumableDir);
+        ctx.RegisterService<IShardConsumableRegistry>(consumables);
+        string enchantmentDirectory = Path.Combine(ctx.DataDirectory, "enchantments");
+        Directory.CreateDirectory(enchantmentDirectory);
+        string exampleEnchantment = Path.Combine(enchantmentDirectory, "example-enchantments.yml");
+        if (!File.Exists(exampleEnchantment))
+            File.WriteAllText(exampleEnchantment, """
+                # Copy an enchantment key from the bundled enchantments-26.3.yml.
+                # Only fields provided here replace bundled values.
+                # sharpness:
+                #   MaxLevel: 6
+                #   Stats:
+                #     damage:
+                #       Trigger: onAttack
+                #       Base: 0.5
+                #       PerLevel: 0.75
+                #       Conditions: ["level{min=1}"]
+                """ + Environment.NewLine);
+        var enchantments = new EnchantmentCatalog(
+            Path.Combine(directory, "enchantments-26.3.yml"), enchantmentDirectory);
+        EnchantmentSkills.Register(ctx);
+        LootSkills.Register(ctx, catalog);
+        DeathLootSkills.Register(ctx, catalog);
+        ctx.RegisterSkillDefinitions(Path.Combine(directory, "skills-26.3.yml"), skillsDirectory);
+        string lootDirectory = Path.Combine(ctx.DataDirectory, "loot");
+        var loot = new LootCatalog(Path.Combine(directory, "loot-26.3.yml"),
+            lootDirectory);
+        ctx.RegisterService<IShardLootRegistry>(loot);
+        // Pinned vanilla tables are data sources for the explicit
+        // dropLootTable ~onDeath mechanic; entity death never rolls them by default.
+        // Full vanilla loot JSON and exact block-state IDs are pinned to
+        // Java 26.3 by the read-only submodule; missing assets do not cause
+        // a silently guessed replacement dataset.
+        string vanillaLootDir = Path.Combine(directory, "vanilla-loot");
+        string vanillaBlocks = Path.Combine(directory, "vanilla-blocks.json");
+        if (Directory.Exists(vanillaLootDir) && File.Exists(vanillaBlocks))
+        {
+            var vanilla = new VanillaLootTables(vanillaLootDir, catalog,
+                recipes, Path.Combine(directory, "vanilla-tags"),
+                enchantments);
+            var states = new VanillaBlockStateLookup(vanillaBlocks);
+            if (vanilla.Count != 1447)
+                throw new InvalidDataException(
+                    $"Wrong 26.3 loot table count: expected 1447, got {vanilla.Count}.");
+            ctx.RegisterService<IShardVanillaLootTables>(vanilla);
+            ctx.RegisterService<IShardVanillaBlockStates>(states);
+            ctx.Log($"Loaded {vanilla.Count} pinned Java 26.3 loot tables and " +
+                $"{states.Count} block states.");
+        }
+        else
+            ctx.Log("WARNING: vanilla 26.3 loot assets unavailable; " +
+                "initial skill-based loot fallback remains active.");
+        // Fail fast for unknown/invalid Stats conditions instead of throwing
+        // only after a player triggers an affected event.
+        var skillEngine = ctx.GetRequiredService<IShardSkillEngine>();
+        foreach (var stat in catalog.All.SelectMany(item => item.Stats ?? []))
+            skillEngine.ValidateConditions(stat.Conditions);
+        foreach (var stat in enchantments.All.SelectMany(e => e.Stats))
+            skillEngine.ValidateConditions(stat.Conditions);
+        // Only one skill pack per Shard: item and enchantment skills share
+        // triggers, mechanics, and conditions, but have distinct owner IDs.
+        ctx.RegisterSkillInstructions(enchantments.Instructions
+            .Concat(catalog.All.SelectMany(item => item.Skills ?? []))
+            .Concat(catalog.Aliases.SelectMany(item => item.Skills ?? []))
+            .Concat(loot.Instructions));
+        ctx.RegisterService<IShardEnchantmentRegistry>(enchantments);
+        ctx.RegisterConsoleCommand("enchantments", (args, token) =>
+        {
+            string filter = args.Trim();
+            var found = enchantments.All.Where(e => filter.Length == 0 ||
+                e.Identifier.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                .Take(43).Select(e => $"{e.Identifier} (I..{e.MaxLevel})");
+            ctx.Log($"Enchantments ({enchantments.Count}): " + string.Join(", ", found));
+            return Task.CompletedTask;
+        });
         ctx.RegisterConsoleCommand("iteminfo", (args, token) =>
         {
             string query = args.Trim();
@@ -613,7 +704,7 @@ public sealed class ItemsShard : IShard
                     $"max stack {item.MaxStackSize} | max durability: {item.MaxDurability} | block item: {item.IsBlockItem}" +
                     (item.Display is null ? "" : $" | display: {item.Display}") +
                     (item.ItemModel is null ? "" : $" | model: {item.ItemModel}") +
-                    $" | components: {item.Components?.Count ?? 0}");
+                    $" | components: {item.Components?.Count ?? 0} | stats: {item.Stats?.Count ?? 0}");
                 return true;
             }
         });
@@ -655,8 +746,8 @@ public sealed class ItemsShard : IShard
         ctx.RegisterConsoleCommand("skillinfo", (args, token) =>
         {
             string key = args.Trim();
-            if (!skills.TryGetSkills(key, out var selected))
-                ctx.Log("Usage: skillinfo <entity-id> (configured entity skills)");
+            if (!skillEngine.TryGetSkills(key, out var selected))
+                ctx.Log("Usage: skillinfo <entity-id|item-id> (configured skills)");
             else
                 ctx.Log($"Skills {key}: " + (selected.Count == 0 ? "(none)" :
                     string.Join(", ", selected.Select(skill =>
@@ -667,10 +758,14 @@ public sealed class ItemsShard : IShard
             return Task.CompletedTask;
         });
         ctx.Log($"Registered {catalog.Count} Java {catalog.MinecraftVersion} items, " +
-            $"{recipes.RecipeCount} recipes, and Core has {skills.Definitions.Count} skills " +
-            $"for {skills.OwnerCount} entity types; Items skills YAML: {skillsDirectory}; " +
+            $"{recipes.RecipeCount} recipes, {enchantments.Count} enchantments, " +
+            $"{loot.Count} loot owners, {consumables.Count} consumables; " +
+            $"Core skills: {skillEngine.Definitions.Count} instructions; " +
             $"fixed component nodes: {componentNodes.Nodes.Count} assigned, " +
-            $"{componentNodes.PendingCount} pending.");
+            $"{componentNodes.PendingCount} pending. " +
+            $"Item overrides: {definitions}; recipe overrides: {recipeDirectory}; " +
+            $"enchantment overrides: {enchantmentDirectory}; " +
+            $"loot overrides: {lootDirectory}; consumable overrides: {consumableDir}.");
         return Task.CompletedTask;
     }
 

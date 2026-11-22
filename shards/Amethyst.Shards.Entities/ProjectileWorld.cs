@@ -1,32 +1,15 @@
 using Amethyst.Shards;
 
-namespace Amethyst;
+using Amethyst;
+
+namespace Amethyst.BuiltinShards;
 
 /// <summary>Supported physical projectile families for Java 26.3.</summary>
-public enum ProjectileKind : byte
-{
-    Arrow, SpectralArrow, Trident, Snowball, Egg, EnderPearl, SplashPotion
-}
-
-public readonly record struct ProjectileEntity(
-    int EntityId, Guid Uuid, Guid Owner, ProjectileKind Kind,
-    double X, double Y, double Z, double Vx, double Vy, double Vz,
-    float Damage, int AgeTicks, ItemStack Recoverable)
-{
-    public bool CanRecover => Recoverable.Count > 0;
-}
-
-public readonly record struct ProjectileImpact(ProjectileEntity Projectile,
-    Guid PlayerHit, int MobHit, bool HitBlock);
-
-public readonly record struct ProjectileFrame(ProjectileEntity[] Moving,
-    ProjectileImpact[] Impacts);
-
 /// <summary>20Hz server-authoritative projectiles. Trajectories are ray-marched
 /// to avoid tunneling, with collision against blocks, players and livestock.
 /// Projectiles are transient; recoverable arrows/tridents become normal
 /// persistent ground items when they land.</summary>
-public sealed class ProjectileWorld
+public sealed class ProjectileWorld : IShardProjectileWorld
 {
     private readonly object _gate = new();
     private readonly Func<int> _allocate;
@@ -42,7 +25,8 @@ public sealed class ProjectileWorld
 
     public bool TryLaunch(Guid owner, ProjectileKind kind,
         PlayerPose source, double speed, float damage,
-        ItemStack recoverable, out ProjectileEntity projectile)
+        ItemStack recoverable, out ProjectileEntity projectile,
+        ItemStack payload = default, ItemStack sourceWeapon = default)
     {
         projectile = default;
         if (!double.IsFinite(speed) || speed <= 0 || speed > 6 ||
@@ -62,15 +46,16 @@ public sealed class ProjectileWorld
             projectile = new ProjectileEntity(_allocate(), Guid.NewGuid(), owner,
                 kind, source.X + vx * 0.55, source.Y + 1.52 + vy * 0.25,
                 source.Z + vz * 0.55, vx * speed, vy * speed,
-                vz * speed, damage, 0, recoverable);
+                vz * speed, damage, 0, recoverable)
+                { Payload = payload, SourceWeapon = sourceWeapon };
             _entities.Add(projectile.EntityId, projectile);
             return true;
         }
     }
 
     public ProjectileFrame Tick(IShardBlockWorld world,
-        IReadOnlyList<ConnectedPlayer> players,
-        IReadOnlyList<LivingEntity> mobs)
+        IReadOnlyList<ProjectilePlayer> players,
+        IReadOnlyList<ShardEntityInstance> mobs)
     {
         var moving = new List<ProjectileEntity>();
         var impacts = new List<ProjectileImpact>();
@@ -107,11 +92,9 @@ public sealed class ProjectileWorld
                         blockHit = true;
                         break;
                     }
-                    foreach (ConnectedPlayer candidate in players)
+                    foreach (ProjectilePlayer candidate in players)
                     {
-                        if (!candidate.Ready ||
-                            candidate.GameMode == PlayerGameMode.Spectator ||
-                            candidate.PlayerUuid == old.Owner) continue;
+                        if (candidate.PlayerUuid == old.Owner) continue;
                         PlayerPose p = candidate.Pose;
                         double dx = p.X - x, dz = p.Z - z;
                         if (dx * dx + dz * dz < 0.45 * 0.45 &&
@@ -122,7 +105,7 @@ public sealed class ProjectileWorld
                         }
                     }
                     if (playerHit != Guid.Empty) break;
-                    foreach (LivingEntity mob in mobs)
+                    foreach (ShardEntityInstance mob in mobs)
                     {
                         double dx = mob.X - x, dz = mob.Z - z;
                         if (dx * dx + dz * dz < 0.6 * 0.6 &&

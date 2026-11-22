@@ -16,7 +16,13 @@ public readonly record struct ShardEntityDefinition(
 
 public readonly record struct ShardEntityInstance(
     int EntityId, Guid Uuid, string DefinitionId, int ProtocolId,
-    double X, double Y, double Z, float Yaw, float Pitch, double? Health);
+    double X, double Y, double Z, float Yaw, float Pitch, double? Health)
+{
+    /// <summary>Server-owned livestock metadata captured before removal,
+    /// so onDeath skills can evaluate the actual killed animal's state.</summary>
+    public bool Sheared { get; init; }
+    public int Color { get; init; }
+}
 
 /// <summary>Immutable version-pinned entity type catalog; custom YAML names
 /// map to existing vanilla types, not to additional protocol IDs.</summary>
@@ -50,6 +56,10 @@ public interface IShardEntityInteractions
 /// <summary>Authoritative entity store and network identifier allocator.</summary>
 public interface IShardEntityManager
 {
+    /// <summary>Bind legacy-compatible world persistence once, before
+    /// Gameplay begins spawning or viewing living entities.</summary>
+    void BindWorldEntities(string? directory, string worldPath,
+        IShardItemRegistry? items = null);
     int AllocateEntityId();
     ShardEntityInstance[] Snapshot();
     bool TrySpawn(string definitionId, double x, double y, double z,
@@ -58,10 +68,17 @@ public interface IShardEntityManager
     bool TryTeleport(int entityId, double x, double y, double z,
         float yaw, float pitch);
     bool TryDamage(int entityId, double amount, out ShardEntityInstance updated);
+    /// <summary>Atomic player-attack damage and one-shot death collection.
+    /// Killed entities are removed from the general death queue before other
+    /// tick consumers can process them without attacker attribution.</summary>
+    bool TryDamageAndTakeDeath(int entityId, double amount,
+        out ShardEntityInstance updated, out bool killed);
     /// <summary>Kill one managed entity, honoring its invulnerability flag.
     /// Unlike TryRemove, a kill creates a death event for loot processing.</summary>
     bool TryKill(int entityId, out ShardEntityInstance killed);
     /// <summary>Consume deaths once; Gameplay owns the drop generation.
     /// Despawns (TryRemove) are never counted as deaths.</summary>
+    /// <summary>Consume a queued death from a specific instance.</summary>
+    bool TryTakeDeath(int entityId, out ShardEntityInstance killed);
     ShardEntityInstance[] DrainDeaths();
 }

@@ -29,69 +29,134 @@ public sealed partial class MinecraftServer
         LivingEntity mob = default;
         bool sheep = victim is null &&
             _livingEntities?.TryGet(targetEntityId, out mob) == true;
-        if (victim is null && !sheep) return;
+        ShardEntityInstance managedTarget = default;
+        bool managed = false;
+        if (victim is null && !sheep && _entities is not null)
+            foreach (ShardEntityInstance candidate in _entities.Snapshot())
+                if (candidate.EntityId == targetEntityId && candidate.Health is > 0)
+                {
+                    managedTarget = candidate;
+                    managed = true;
+                    break;
+                }
+        if (victim is null && !sheep && !managed) return;
         PlayerPose source = attacker.Pose;
         PlayerPose destination = victim?.Pose ??
-            new PlayerPose(mob.X, mob.Y, mob.Z, 0, 0, true);
+            (sheep ? new PlayerPose(mob.X, mob.Y, mob.Z, 0, 0, true) :
+                new PlayerPose(managedTarget.X, managedTarget.Y,
+                    managedTarget.Z, 0, 0, true));
+        string targetKind = victim is not null ? "player" :
+            EnchantmentMobCategory(sheep ? mob.Kind : managedTarget.DefinitionId);
         if (!CombatRules.InReach(source, destination)) return;
         ItemStack weapon = attacker.Inventory.Held();
         string identifier = _items is not null &&
             _items.TryGetById(weapon.ItemId, out ShardItemDefinition definition)
             ? definition.Identifier : "";
-        float raw = CombatRules.MeleeDamage(identifier);
+        float raw = CombatRules.MeleeDamageWithEffects(
+            identifier, attacker.ActiveEffects.Snapshot());
+        var attackEffects = new ShardSkillRuntime();
+        attackEffects.SetNumber("damage", raw);
+        attackEffects.SetNumber("knockback", 0.4);
+        await EnchantmentEventAsync(weapon, "onLeftClick", ct, attackEffects,
+            targetKind: targetKind, actor: attacker.PlayerUuid);
+        await EnchantmentEventAsync(weapon, "onAttack", ct, attackEffects,
+            targetKind: targetKind, actor: attacker.PlayerUuid);
+        // Every skill has executed. Only the underlying server-side attack
+        // (damage, knockback and weapon wear) is now cancelled.
+        attacker.RecordAttackSwingCancellation(attackEffects.IsCancelled);
+        if (attackEffects.IsCancelled) return;
+        raw = (float)Math.Clamp(attackEffects.Number("damage", raw), 0, 1000);
+        if (raw <= 0) return;
+        double knockbackBonus = Math.Max(0, attackEffects.Number("knockback", 0.4) - 0.4);
         bool hit = false;
         if (victim is not null)
         {
-            hit = await DamagePlayerAsync(victim, raw, attacker, ct);
+            hit = await DamagePlayerAsync(victim, raw, attacker, ct,
+                knockbackBonus: knockbackBonus);
         }
-        else if (_livingEntities is not null &&
-            _livingEntities.TryDamage(targetEntityId, raw,
-                out LivingEntity updated, out bool killed))
+        else if ((sheep || managed) && _entities is not null &&
+            _entities.TryDamageAndTakeDeath(targetEntityId, raw,
+                out ShardEntityInstance damaged, out bool killedEntity))
         {
+            // Both native livestock and generic YAML entities now use
+            // Entities' one-shot death queue and the same Items/vanilla loot
+            // pipeline. No second hard-coded sheep drop path remains.
             hit = true;
-            if (killed)
+            if (killedEntity)
+                await ProcessEntityDeathAsync(damaged, attacker, weapon, ct);
+            if (sheep)
             {
-                // Server-generated mob drops, never client-authoritative.
-                if (_groundItems is not null && _items is not null)
-                {
-                    if (_items.TryGetByIdentifier("minecraft:mutton", out var meat))
-                        _groundItems.TrySpawn(meat.ProtocolId, 1,
-                            mob.X, mob.Y + 0.25, mob.Z, out _);
-                    if (!mob.Sheared &&
-                        _items.TryGetByIdentifier("minecraft:white_wool",
-                            out var wool))
-                        _groundItems.TrySpawn(wool.ProtocolId, 1,
-                            mob.X, mob.Y + 0.25, mob.Z, out _);
-                }
+                LivingEntity current = default;
+                bool alive = !killedEntity && _livingEntities is not null &&
+                    _livingEntities.TryGet(targetEntityId, out current);
                 foreach (ConnectedPlayer viewer in _players.Snapshot()
                     .Where(x => x.Ready))
                 {
-                    await LivingEntityProtocol.SendRemoveAsync(
-                        viewer.Connection, mob.EntityId, ct);
-                    if (_livingViews.TryGetValue(viewer.ConnectionId,
-                        out var seen)) seen.Remove(mob.EntityId);
+                    if (!_livingViews.TryGetValue(viewer.ConnectionId,
+                        out var seen) || !seen.ContainsKey(targetEntityId))
+                        continue;
+                    if (killedEntity)
+                    {
+                        await LivingEntityProtocol.SendRemoveAsync(
+                            viewer.Connection, targetEntityId, ct);
+                        seen.Remove(targetEntityId);
+                    }
+                    else if (alive)
+                    {
+                        await LivingEntityProtocol.SendMetadataAsync(
+                            viewer.Connection, current, ct);
+                        await CombatProtocol.SendHurtAsync(
+                            viewer.Connection, targetEntityId, ct);
+                    }
                 }
             }
             else
             {
                 foreach (ConnectedPlayer viewer in _players.Snapshot()
-                    .Where(x => x.Ready))
+                    .Where(x => x.Ready && _entityViews.TryGetValue(
+                        x.ConnectionId, out var seen) &&
+                        seen.ContainsKey(targetEntityId)))
                 {
-                    if (_livingViews.TryGetValue(viewer.ConnectionId,
-                        out var seen) && seen.ContainsKey(updated.EntityId))
+                    if (killedEntity)
                     {
-                        await LivingEntityProtocol.SendMetadataAsync(
-                            viewer.Connection, updated, ct);
-                        await CombatProtocol.SendHurtAsync(viewer.Connection,
-                            updated.EntityId, ct);
+                        await EntityProtocol.SendRemoveAsync(
+                            viewer.Connection, targetEntityId, ct);
+                        _entityViews[viewer.ConnectionId].Remove(targetEntityId);
                     }
+                    else await CombatProtocol.SendHurtAsync(
+                        viewer.Connection, targetEntityId, ct);
                 }
             }
         }
         if (!hit) return;
         if (attacker.Inventory.DamageHeld(weapon.ItemId, 1))
+        {
             await InventoryProtocol.SendSlotAsync(attacker.Connection,
                 attacker.Inventory, attacker.Inventory.SelectedSlot, ct);
+            await BroadcastEquipmentAsync(attacker,
+                [new EntityEquipment(0, attacker.Inventory.Held())], ct);
+        }
+    }
+
+    /// <summary>Broadcast the vanilla swing only when the preceding attack
+    /// did not cancel its gameplay event. A vanilla client animates its own
+    /// local arm before sending punch, so there is no packet to undo that.</summary>
+    internal async Task HandlePunchAsync(ConnectedPlayer player, CancellationToken ct)
+    {
+        if (!player.Ready || player.GameMode == PlayerGameMode.Spectator ||
+            player.Vitals.Snapshot().Health <= 0) return;
+        if (player.ConsumeAttackSwingCancellation()) return;
+        foreach (ConnectedPlayer viewer in _players.Snapshot()
+            .Where(p => p.Ready && p != player))
+        {
+            try
+            {
+                await CombatProtocol.SendSwingAsync(viewer.Connection,
+                    player.EntityId, ct);
+            }
+            catch (IOException) { /* Disconnected peer. */ }
+            catch (ObjectDisposedException) { }
+        }
     }
 
     /// <summary>Damage a player from a verified physical source. Armor
@@ -99,7 +164,8 @@ public sealed partial class MinecraftServer
     /// Shields can intercept this call before health loss.</summary>
     internal async Task<bool> DamagePlayerAsync(ConnectedPlayer victim,
         float raw, ConnectedPlayer? attacker, CancellationToken ct,
-        bool projectile = false)
+        bool projectile = false, double knockbackBonus = 0,
+        bool suppressThorns = false)
     {
         if (!victim.Ready || victim.GameMode is PlayerGameMode.Creative or
             PlayerGameMode.Spectator || raw <= 0) return false;
@@ -110,12 +176,33 @@ public sealed partial class MinecraftServer
         ItemStack[] gear = victim.Inventory.Snapshot().Slots;
         float armor = CombatRules.ArmorPoints(gear, _items);
         float damage = CombatRules.Mitigate(raw, armor);
+        var hurt = new ShardSkillRuntime();
+        hurt.SetNumber("damage", damage);
+        for (int slot = 5; slot <= 8; slot++)
+        {
+            if (gear[slot].Count == 0) continue;
+            await EnchantmentEventAsync(gear[slot], "onHurt", ct, hurt,
+                targetKind: "player", damageType: projectile ? "projectile" : "generic",
+                actor: victim.PlayerUuid);
+        }
+        // Keep executing all armor skills; cancellation prevents the vanilla
+        // hit and armor wear after the entire event has been dispatched.
+        if (hurt.IsCancelled) return false;
+        damage = (float)Math.Clamp(hurt.Number("damage", damage), 0, 1000);
+        if (damage <= 0) return false;
+        // Apply Resistance and consume absorption hearts only after the
+        // target's invulnerability-frame check. This is used for both melee
+        // and ranged damage, and never spends absorption on rejected hits.
         if (!victim.Vitals.TryDamage(damage, Environment.TickCount64,
-            out bool killed)) return false;
+            out bool killed, mitigation: victim.ActiveEffects.Mitigate))
+            return false;
         int durability = Math.Max(1, (int)Math.Ceiling(raw / 4));
         if (victim.Inventory.DamageArmor(durability) > 0)
+        {
             await InventoryProtocol.SendContentAsync(victim.Connection,
                 victim.Inventory, ct);
+            await NotifyEquipmentChangesAsync(victim, gear, ct);
+        }
         await CombatProtocol.SendHealthAsync(victim, ct);
         foreach (ConnectedPlayer observer in _players.Snapshot().Where(p =>
             p.Ready && p.ConnectionId != victim.ConnectionId))
@@ -125,13 +212,19 @@ public sealed partial class MinecraftServer
             victim.EntityId, ct);
         if (attacker is not null && !killed)
         {
-            var (vx, vz) = CombatRules.Knockback(origin, victim.Pose);
+            var (vx, vz) = CombatRules.Knockback(origin, victim.Pose,
+                strength: 0.4 + Math.Clamp(knockbackBonus, 0, 5));
             await CombatProtocol.SendMotionAsync(victim.Connection,
                 victim.EntityId, vx, 0.26, vz, ct);
         }
         if (killed)
             await CombatProtocol.SendDeathAsync(victim.Connection,
                 victim.EntityId, ct);
+        if (!suppressThorns && attacker is not null &&
+            attacker != victim && !killed)
+            foreach (ShardSkillEffect effect in hurt.Effects.Where(e => e.Id == "thorns"))
+                await DamagePlayerAsync(attacker, Math.Max(1, effect.Duration),
+                    victim, ct, suppressThorns: true);
         return true;
     }
 
@@ -140,6 +233,7 @@ public sealed partial class MinecraftServer
     {
         if (player.Vitals.Snapshot().Health > 0) return;
         player.Vitals.Respawn();
+        player.ActiveEffects.Clear();
         player.SetPose(new PlayerPose(_world.SpawnXPosition,
             _world.SpawnYPosition, _world.SpawnZPosition, 0, 0, true));
         await CombatProtocol.SendRespawnAsync(player, _world, ct);

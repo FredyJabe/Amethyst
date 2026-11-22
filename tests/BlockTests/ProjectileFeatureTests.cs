@@ -1,5 +1,6 @@
 using Amethyst;
 using Amethyst.BuiltinShards;
+using Amethyst.Shards;
 
 internal static class ProjectileFeatureTests
 {
@@ -47,7 +48,7 @@ internal static class ProjectileFeatureTests
             ProjectileImpact? impact = null;
             for (int i = 0; i < 20; i++)
             {
-                ProjectileFrame frame = physics.Tick(world, [target], []);
+                ProjectileFrame frame = physics.Tick(world, [new ProjectilePlayer(target.PlayerUuid, target.Pose)], []);
                 if (frame.Impacts.Length > 0)
                 {
                     impact = frame.Impacts[0];
@@ -59,6 +60,24 @@ internal static class ProjectileFeatureTests
                 collision.Projectile.EntityId == launched.EntityId &&
                 physics.Snapshot().Length == 0,
                 "Swept server physics collides with the player and removes projectile");
+            var mob = new Amethyst.Shards.ShardEntityInstance(
+                33333, Guid.NewGuid(), "minecraft:zombie", 136,
+                0.5, 115.2, 3.5, 0, 0, 20);
+            Check(physics.TryLaunch(Guid.NewGuid(), ProjectileKind.Arrow, source,
+                1.5, 6, new ItemStack(arrow.ProtocolId, 1),
+                out var mobArrow), "Launch a second arrow at a generic living mob");
+            ProjectileImpact? mobImpact = null;
+            for (int i = 0; i < 20; i++)
+            {
+                ProjectileFrame frame = physics.Tick(world, [], [mob]);
+                if (frame.Impacts.Length == 0) continue;
+                mobImpact = frame.Impacts[0];
+                break;
+            }
+            Check(mobImpact is { } collidedMob &&
+                collidedMob.MobHit == mob.EntityId &&
+                collidedMob.Projectile.EntityId == mobArrow.EntityId,
+                "Projectile collision uses the generic Entities Shard population");
             await ProjectileProtocol.SendSpawnAsync(channel, launched,
                 CancellationToken.None);
             targetStream.Position = 0;
@@ -73,8 +92,35 @@ internal static class ProjectileFeatureTests
 
             using var playStream = new MemoryStream();
             using var conn = new PacketChannel(playStream);
-            var server = new MinecraftServer(settings, world,
-                null!, world, items: items, recipes: recipes);
+            DirectoryInfo? repository = new(AppContext.BaseDirectory);
+            while (repository is not null &&
+                !File.Exists(Path.Combine(repository.FullName, "Amethyst.slnx")))
+                repository = repository.Parent;
+            if (repository is null)
+                throw new InvalidOperationException("Missing repository root.");
+            var entityCatalog = new EntityCatalog(Path.Combine(
+                repository.FullName, "shards", "Amethyst.Shards.Entities",
+                "entities-26.3.yml"));
+            var managed = new EntityManager(entityCatalog);
+            int impactSkillsRun = 0;
+            var skillEngine = new Amethyst.Shards.SkillEngine();
+            skillEngine.RegisterTrigger("projectile-test", "onProjectileHit");
+            skillEngine.RegisterMechanic("projectile-test", "testImpact",
+                skill => { },
+                (skill, evt, ct) =>
+                {
+                    impactSkillsRun++;
+                    evt.Runtime.SetNumber("damage", 20);
+                    return ValueTask.CompletedTask;
+                });
+            skillEngine.RegisterInstructions("projectile-test", [
+                Amethyst.Shards.SkillEngine.Parse("minecraft:bow",
+                    "testImpact @self ~onProjectileHit")
+            ]);
+            var server = TestServerFactory.Create(settings, world,
+                null!, world, items: items, recipes: recipes,
+                entities: managed, entityTypes: entityCatalog,
+                skills: skillEngine);
             Guid playerId = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(playerId,
                 "ProjectileTester", []), conn, 0, out _),
@@ -95,6 +141,16 @@ internal static class ProjectileFeatureTests
                 player.Inventory.Held().Damage == 1 &&
                 player.Inventory.Snapshot().Slots[37].Count == 2,
                 "Charged bow consumes an arrow and wears the bow exactly once");
+            ShardEntityInstance targetCow = default;
+            Check(server.ProjectilesForTests[0].SourceWeapon.ItemId == bow.ProtocolId &&
+                managed.TrySpawn("cow", 0.5, 115.3, 3.5,
+                    out targetCow),
+                "Ranged projectile retains authoritative firing weapon and has a mob target");
+            for (int t = 0; t < 20 && impactSkillsRun == 0; t++)
+                await server.TickProjectilesAsync(CancellationToken.None);
+            Check(impactSkillsRun == 1 &&
+                !managed.Snapshot().Any(m => m.EntityId == targetCow.EntityId),
+                "~onProjectileHit item skill runs once and changes actual mob damage");
             Check(player.Inventory.TryCreativeSet(36, trident.ProtocolId, 1, true),
                 "Equip trident for throwing");
             player.UseState.BeginCharge(0, trident.ProtocolId,
@@ -116,6 +172,44 @@ internal static class ProjectileFeatureTests
                 server.ProjectilesForTests.Any(p =>
                     p.Kind == ProjectileKind.Snowball),
                 "Throwing snowballs consumes one item and creates a physical entity");
+
+            if (!items.TryGetByIdentifier("minecraft:splash_potion",
+                out var splashMaterial))
+                throw new InvalidDataException("Missing splash potion definition.");
+            var splashPayload = new ItemStack(splashMaterial.ProtocolId, 1)
+                .WithComponents(new Dictionary<string, string>
+                {
+                    ["minecraft:potion_contents"] =
+                        System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            potion = "minecraft:water",
+                            custom_effects = new[]
+                            {
+                                new { id = "minecraft:speed", duration = 200,
+                                    amplifier = 1 }
+                            }
+                        })
+                });
+            Check(physics.TryLaunch(player.PlayerUuid,
+                    ProjectileKind.SplashPotion, player.Pose,
+                    1.5, 0, ItemStack.Empty, out var thrownPotion,
+                    splashPayload) &&
+                thrownPotion.Payload == splashPayload && !thrownPotion.CanRecover,
+                "A physical splash potion retains its custom component payload without becoming pickable");
+            ProjectileEntity potionImpact = thrownPotion with
+                { X = player.Pose.X, Y = player.Pose.Y + 0.9,
+                    Z = player.Pose.Z };
+            await server.ApplySplashPotionAsync(potionImpact,
+                player.PlayerUuid, [player], CancellationToken.None);
+            Check(player.ActiveEffects.Snapshot().Any(effect =>
+                    effect.Id == "minecraft:speed" &&
+                    effect.RemainingTicks == 200 && effect.Amplifier == 1),
+                "Splash impacts apply per-stack potion effects to nearby players");
+            player.ActiveEffects.Remove("minecraft:speed");
+            await server.ApplySplashPotionAsync(potionImpact with { X = 100 },
+                Guid.Empty, [player], CancellationToken.None);
+            Check(!player.ActiveEffects.Has("minecraft:speed"),
+                "Splash potion effects cannot reach players outside the four-block radius");
         }
         finally
         {

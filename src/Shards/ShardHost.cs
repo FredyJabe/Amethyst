@@ -76,6 +76,11 @@ public sealed class ShardHost : IAsyncDisposable, IShardPacketBus
             ShardSkillExecutor executor) => _host._skills.RegisterMechanic(Id, name, validator, executor);
         public void RegisterSkillDefinitions(string builtInFile, string? overridesDirectory = null) =>
             _host._skills.RegisterDefinitions(Id, builtInFile, overridesDirectory);
+        public void RegisterSkillCondition(string name, ShardSkillConditionValidator validator,
+            ShardSkillConditionEvaluator evaluator) =>
+            _host._skills.RegisterCondition(Id, name, validator, evaluator);
+        public void RegisterSkillInstructions(IEnumerable<ShardSkillInstruction> instructions) =>
+            _host._skills.RegisterInstructions(Id, instructions);
     }
 
     private readonly SkillEngine _skills = new();

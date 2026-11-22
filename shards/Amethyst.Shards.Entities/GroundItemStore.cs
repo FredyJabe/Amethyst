@@ -1,29 +1,20 @@
 using System.Text;
+
+using Amethyst;
 using Amethyst.Shards;
 
-namespace Amethyst;
+namespace Amethyst.BuiltinShards;
 
 /// <summary>A plain item entity in the Overworld. Coordinates are world-space,
 /// Y is the bottom of the entity's 0.25-block bounding box.</summary>
-public readonly record struct GroundItem(
-    int EntityId, Guid Uuid, int ItemId, int Count,
-    double X, double Y, double Z, double VelocityY, bool OnGround, long CreatedAtMs)
-{
-    /// <summary>Full authoritative stack. Null/default means an old
-    /// ID/count-only drop created before the durability milestone.</summary>
-    public ItemStack Data { get; init; }
-    public ItemStack ResolvedStack => Data.Count == 0
-        ? new ItemStack(ItemId, Count)
-        : Data with { Count = Count };
-}
-
 /// <summary>Owns loose item entities and atomically persists them, separately from
 /// player inventories. Packet visibility is managed by the Gameplay Shard.
 /// First milestone physics models gravity and full-block floors; fluids, damage,
 /// merging, partial collision shapes and hopper interaction are not included.</summary>
-public sealed class GroundItemStore
+public sealed class GroundItemStore : IShardGroundItems
 {
-    private static readonly byte[] Magic = "AMDROP02"u8.ToArray();
+    private static readonly byte[] Magic = "AMDROP03"u8.ToArray();
+    private static readonly byte[] PreviousMagic = "AMDROP02"u8.ToArray();
     private static readonly byte[] LegacyMagic = "AMDROP01"u8.ToArray();
     public const int MaximumEntities = 8192;
     public const long PickupDelayMilliseconds = 500;
@@ -53,19 +44,25 @@ public sealed class GroundItemStore
     private bool ValidStack(ItemStack stack)
     {
         if (stack.Count < 1 || stack.Damage < 0 ||
+            !ItemStackComponents.IsValid(stack.ComponentData) ||
             stack.Unbreaking is < 0 or > 3 ||
             stack.RepairCost is < 0 or > 1_000_000) return false;
         bool patched = stack.Damage > 0 || stack.Unbreaking > 0 ||
-            stack.Mending || stack.Unbreakable || stack.RepairCost > 0;
+            stack.Mending || stack.Unbreakable || stack.RepairCost > 0 ||
+            !string.IsNullOrEmpty(stack.EnchantmentData);
         if (_items is null)
             return !patched && stack.ItemId is > 0 and <= 1657 &&
                 stack.Count <= 64;
         if (!_items.IsValidStack(stack.ItemId, stack.Count)) return false;
         if (!patched) return true;
-        return stack.Count == 1 &&
-            _items.TryGetById(stack.ItemId, out var definition) &&
-            definition.MaxDurability > 0 &&
-            stack.Damage < definition.MaxDurability;
+        if (stack.Count != 1 ||
+            !_items.TryGetById(stack.ItemId, out var definition)) return false;
+        if (definition.MaxDurability > 0)
+            return stack.Damage < definition.MaxDurability;
+        return stack.Damage == 0 && stack.Unbreaking == 0 &&
+            !stack.Mending && !stack.Unbreakable &&
+            stack.RepairCost == 0 && !string.IsNullOrEmpty(stack.EnchantmentData) &&
+            definition.Identifier is "minecraft:book" or "minecraft:enchanted_book";
     }
 
     public GroundItem[] Snapshot()
@@ -167,7 +164,7 @@ public sealed class GroundItemStore
     /// <summary>Complete or partial pickup. Inventory insertion is authoritative
     /// and persisted before the loose stack is adjusted. Uninserted items stay
     /// on the ground, including when the player is full.</summary>
-    public int TryCollect(int entityId, PlayerInventory inventory,
+    public int TryCollect(int entityId, IShardPickupInventory inventory,
         out GroundItem remaining, long? nowMilliseconds = null)
     {
         remaining = default;
@@ -191,6 +188,19 @@ public sealed class GroundItemStore
         }
     }
 
+    /// <summary>Discard an uncommitted drop when its source inventory
+    /// transaction is rejected. Never turn a failed drop into free items.</summary>
+    public bool TryDiscard(int entityId)
+    {
+        lock (_gate)
+        {
+            if (!_entities.Remove(entityId, out GroundItem entity)) return false;
+            try { Persist(); }
+            catch { _entities[entityId] = entity; throw; }
+            return true;
+        }
+    }
+
     public void Save()
     {
         lock (_gate) Persist();
@@ -203,7 +213,8 @@ public sealed class GroundItemStore
         using var reader = new BinaryReader(stream, Encoding.UTF8);
         byte[] header = reader.ReadBytes(Magic.Length);
         bool legacy = header.SequenceEqual(LegacyMagic);
-        if (!legacy && !header.SequenceEqual(Magic))
+        bool previous = header.SequenceEqual(PreviousMagic);
+        if (!legacy && !previous && !header.SequenceEqual(Magic))
             throw new InvalidDataException($"Invalid ground-items header in {_path}");
         int count = reader.ReadInt32();
         if (count is < 0 or > MaximumEntities)
@@ -218,10 +229,17 @@ public sealed class GroundItemStore
             bool mending = !legacy && reader.ReadBoolean();
             bool unbreakable = !legacy && reader.ReadBoolean();
             int repairCost = legacy ? 0 : reader.ReadInt32();
+            string enchantments = legacy || previous ? "" : reader.ReadString();
+            string components = legacy || previous ? "" : reader.ReadString();
+            if (enchantments.Length > 4096 ||
+                components.Length > ItemStackComponents.MaximumCharacters)
+                throw new InvalidDataException("Oversized dropped-item component.");
             var stack = new ItemStack(item, amount)
             {
                 Damage = damage, Unbreaking = unbreaking, Mending = mending,
-                Unbreakable = unbreakable, RepairCost = repairCost
+                Unbreakable = unbreakable, RepairCost = repairCost,
+                EnchantmentData = enchantments.Length == 0 ? null : enchantments,
+                ComponentData = components.Length == 0 ? null : components
             };
             double x = reader.ReadDouble(), y = reader.ReadDouble(), z = reader.ReadDouble();
             double velocityY = reader.ReadDouble();
@@ -262,6 +280,8 @@ public sealed class GroundItemStore
                     writer.Write(data.Mending);
                     writer.Write(data.Unbreakable);
                     writer.Write(data.RepairCost);
+                    writer.Write(data.EnchantmentData ?? "");
+                    writer.Write(data.ComponentData ?? "");
                     writer.Write(item.X);
                     writer.Write(item.Y);
                     writer.Write(item.Z);

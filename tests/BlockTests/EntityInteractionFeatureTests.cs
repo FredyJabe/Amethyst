@@ -1,5 +1,6 @@
 using Amethyst;
 using Amethyst.BuiltinShards;
+using Amethyst.Shards;
 
 internal static class EntityInteractionFeatureTests
 {
@@ -60,8 +61,72 @@ internal static class EntityInteractionFeatureTests
             await using var world = new TerrainWorld(settings);
             using var stream = new MemoryStream();
             using var channel = new PacketChannel(stream);
-            var server = new MinecraftServer(settings, world,
-                null!, world, items: items, recipes: recipes);
+            bool cancelRightClick = false;
+            bool cancelShear = false, cancelMilk = false;
+            int rightClickRuns = 0, shearRuns = 0, milkRuns = 0;
+            var interactionSkills = new SkillEngine();
+            interactionSkills.RegisterTrigger("interact-tests", "onRightClick");
+            interactionSkills.RegisterTrigger("interact-tests", "onShear");
+            interactionSkills.RegisterTrigger("interact-tests", "onMilk");
+            // The Items Shard's dropItem mechanic supplies wool through
+            // ~onShear; Gameplay has no automatic wool fallback.
+            var woolMechanic = new DropItemSkillMechanic(items, () => null);
+            interactionSkills.RegisterMechanic("interact-tests", "dropItem",
+                woolMechanic.Validate, woolMechanic.ExecuteAsync);
+            interactionSkills.RegisterInstructions("explicit-shear-loot", [
+                SkillEngine.Parse("minecraft:sheep",
+                    "dropItem{item=minecraft:white_wool;amount=1-3} @self ~onShear")
+            ]);
+            interactionSkills.RegisterMechanic("interact-tests", "testCancel",
+                skill => { },
+                (skill, evt, ct) =>
+                {
+                    if (cancelRightClick) evt.Runtime.Cancel();
+                    return ValueTask.CompletedTask;
+                });
+            interactionSkills.RegisterMechanic("interact-tests", "testRecord",
+                skill => { },
+                (skill, evt, ct) =>
+                {
+                    rightClickRuns++;
+                    return ValueTask.CompletedTask;
+                });
+            interactionSkills.RegisterMechanic("interact-tests", "testEntityCancel",
+                skill => { },
+                (skill, evt, ct) =>
+                {
+                    if (evt.Trigger == "onShear" && cancelShear ||
+                        evt.Trigger == "onMilk" && cancelMilk)
+                        evt.Runtime.Cancel();
+                    return ValueTask.CompletedTask;
+                });
+            interactionSkills.RegisterMechanic("interact-tests", "testEntityRecord",
+                skill => { },
+                (skill, evt, ct) =>
+                {
+                    if (evt.Trigger == "onShear") shearRuns++;
+                    if (evt.Trigger == "onMilk") milkRuns++;
+                    return ValueTask.CompletedTask;
+                });
+            interactionSkills.RegisterInstructions("interact-tests", [
+                SkillEngine.Parse("minecraft:shears",
+                    "testCancel @self ~onRightClick"),
+                SkillEngine.Parse("minecraft:shears",
+                    "testRecord @self ~onRightClick")
+            ]);
+            DirectoryInfo? repository = new(AppContext.BaseDirectory);
+            while (repository is not null &&
+                !File.Exists(Path.Combine(repository.FullName, "Amethyst.slnx")))
+                repository = repository.Parent;
+            if (repository is null)
+                throw new InvalidOperationException("Missing repository root.");
+            var mobCatalog = new EntityCatalog(Path.Combine(repository.FullName,
+                "shards", "Amethyst.Shards.Entities", "entities-26.3.yml"));
+            var mobManager = new EntityManager(mobCatalog);
+            var server = TestServerFactory.Create(settings, world,
+                null!, world, items: items, recipes: recipes,
+                entities: mobManager, entityTypes: mobCatalog,
+                interactions: mobManager, skills: interactionSkills);
             Guid id = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(id, "SheepTester", []),
                 channel, 0, out _), "Player can join sheep interaction test");
@@ -94,6 +159,103 @@ internal static class EntityInteractionFeatureTests
                     CancellationToken.None) &&
                 actor.Inventory.Held().Damage == 1,
                 "Creative shearing transforms sheep without consuming durability");
+
+            actor.SetGameMode(PlayerGameMode.Survival);
+            Check(server.SummonSheepAt(actor),
+                "Prepare an extra sheep to test cancellable entity interactions");
+            LivingEntity toCancel = server.LivingEntitiesForTests.Last();
+            int dropsBeforeCancel = server.GroundItemsForTests.Length;
+            int wearBeforeCancel = actor.Inventory.Held().Damage;
+            cancelRightClick = true;
+            Check(await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(toCancel.EntityId, 0, false),
+                    CancellationToken.None) &&
+                !server.LivingEntitiesForTests.Single(x =>
+                    x.EntityId == toCancel.EntityId).Sheared &&
+                actor.Inventory.Held().Damage == wearBeforeCancel &&
+                server.GroundItemsForTests.Length == dropsBeforeCancel &&
+                rightClickRuns == 1,
+                "onRightClick cancellation prevents shearing but executes later item skills once");
+            cancelRightClick = false;
+            Check(await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(toCancel.EntityId, 0, false),
+                    CancellationToken.None) &&
+                server.LivingEntitiesForTests.Single(x =>
+                    x.EntityId == toCancel.EntityId).Sheared &&
+                actor.Inventory.Held().Damage == wearBeforeCancel + 1 &&
+                rightClickRuns == 2,
+                "Accepted right-click shears the authoritative sheep and dispatches once");
+            Check(!await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(int.MaxValue, 0, false),
+                    CancellationToken.None) && rightClickRuns == 2,
+                "Forged entity IDs cannot trigger item skills or spawn loot");
+
+            interactionSkills.RegisterInstructions("entity-event-tests", [
+                SkillEngine.Parse("minecraft:sheep",
+                    "testEntityCancel @self ~onShear"),
+                SkillEngine.Parse("minecraft:sheep",
+                    "testEntityRecord @self ~onShear"),
+                SkillEngine.Parse("minecraft:cow",
+                    "testEntityCancel @self ~onMilk"),
+                SkillEngine.Parse("minecraft:cow",
+                    "testEntityRecord @self ~onMilk")
+            ]);
+            Check(server.SummonSheepAt(actor),
+                "Spawn a fresh sheep for pre-commit onShear cancellation");
+            LivingEntity conditionalSheep = server.LivingEntitiesForTests.Last();
+            int wearBeforeShear = actor.Inventory.Held().Damage;
+            cancelShear = true;
+            Check(await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(conditionalSheep.EntityId, 0, false),
+                    CancellationToken.None) &&
+                !server.LivingEntitiesForTests.Single(e =>
+                    e.EntityId == conditionalSheep.EntityId).Sheared &&
+                actor.Inventory.Held().Damage == wearBeforeShear && shearRuns == 1,
+                "onShear cancellation prevents wool removal and wear while executing later skills");
+            cancelShear = false;
+            Check(await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(conditionalSheep.EntityId, 0, false),
+                    CancellationToken.None) &&
+                server.LivingEntitiesForTests.Single(e =>
+                    e.EntityId == conditionalSheep.EntityId).Sheared &&
+                actor.Inventory.Held().Damage == wearBeforeShear + 1 &&
+                shearRuns == 2,
+                "Accepted ~onShear occurs exactly once before the sheep changes");
+
+            ShardItemDefinition emptyBucket = default;
+            ShardItemDefinition filledBucket = default;
+            ShardEntityInstance milkingCow = default;
+            Check(items.TryGetByIdentifier("minecraft:bucket", out emptyBucket) &&
+                items.TryGetByIdentifier("minecraft:milk_bucket", out filledBucket) &&
+                mobManager.TrySpawn("cow", 2, 81, 1,
+                    out milkingCow) &&
+                actor.Inventory.TryCreativeSet(
+                    36, emptyBucket.ProtocolId, 1, true),
+                "Prepare a generic cow for cancellable main-hand milking");
+            cancelMilk = true;
+            Check(await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(milkingCow.EntityId, 0, false),
+                    CancellationToken.None) &&
+                actor.Inventory.Held().ItemId == emptyBucket.ProtocolId &&
+                milkRuns == 1,
+                "onMilk cancelEvent prevents bucket conversion but runs later skills");
+            cancelMilk = false;
+            Check(await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(milkingCow.EntityId, 0, false),
+                    CancellationToken.None) &&
+                actor.Inventory.Held().ItemId == filledBucket.ProtocolId &&
+                milkRuns == 2,
+                "Successful milking converts the validated bucket once");
+            Check(mobManager.TrySpawn("cow", 2, 81, 1,
+                    out var offhandCow) &&
+                actor.Inventory.TryCreativeSet(45, emptyBucket.ProtocolId, 1, true),
+                "Prepare offhand bucket milking");
+            Check(await server.HandleValidatedEntityInteractionAsync(actor,
+                    new EntityInteraction(offhandCow.EntityId, 1, false),
+                    CancellationToken.None) &&
+                actor.Inventory.Snapshot().Slots[45].ItemId == filledBucket.ProtocolId &&
+                milkRuns == 3,
+                "Offhand milk conversion preserves main hand and emits the entity skill");
         }
         finally
         {

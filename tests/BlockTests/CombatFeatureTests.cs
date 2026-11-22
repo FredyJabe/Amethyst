@@ -1,5 +1,6 @@
 using Amethyst;
 using Amethyst.BuiltinShards;
+using Amethyst.Shards;
 
 internal static class CombatFeatureTests
 {
@@ -29,12 +30,31 @@ internal static class CombatFeatureTests
             CombatRules.Mitigate(8, 20) < 8 &&
             CombatRules.MeleeDamage("minecraft:diamond_sword") == 7,
             "Combat uses reach, armor mitigation, and weapon damage rules");
+        var meleeEffects = new PlayerActiveEffects();
+        Check(meleeEffects.Apply("minecraft:strength", 200, 1) &&
+            CombatRules.MeleeDamageWithEffects(
+                "minecraft:diamond_sword", meleeEffects.Snapshot()) == 13f &&
+            meleeEffects.Apply("minecraft:weakness", 200, 0) &&
+            CombatRules.MeleeDamageWithEffects(
+                "minecraft:diamond_sword", meleeEffects.Snapshot()) == 9f,
+            "Strength II adds six and Weakness I subtracts four melee damage");
+
         var parserWriter = new PacketWriter();
         parserWriter.WriteVarInt(42);
         Check(CombatProtocol.ReadAttack(new Packet(
             CombatProtocol.ServerboundAttack,
             parserWriter.ToArray())) == 42,
             "Protocol 777 attack payload accepts precisely one entity ID");
+        CombatProtocol.ReadPunch(new Packet(CombatProtocol.ServerboundPunch,
+            ReadOnlyMemory<byte>.Empty));
+        bool malformedPunch = false;
+        try
+        {
+            CombatProtocol.ReadPunch(new Packet(CombatProtocol.ServerboundPunch,
+                new byte[] { 1 }));
+        }
+        catch (InvalidDataException) { malformedPunch = true; }
+        Check(malformedPunch, "Protocol 777 punch packet requires an empty body");
 
         string root = Path.Combine(Path.GetTempPath(),
             "amethyst-combat-" + Guid.NewGuid().ToString("N"));
@@ -73,8 +93,50 @@ internal static class CombatFeatureTests
             using var stream2 = new MemoryStream();
             using var connection1 = new PacketChannel(stream1);
             using var connection2 = new PacketChannel(stream2);
-            var server = new MinecraftServer(settings, world,
-                null!, world, items: items, recipes: recipes);
+            // The attack event is cancelled by a configured enchantment
+            // without changing the semantics of ordinary unenchanted hits.
+            DirectoryInfo? solutionRoot = new(AppContext.BaseDirectory);
+            while (solutionRoot is not null &&
+                !File.Exists(Path.Combine(solutionRoot.FullName, "Amethyst.slnx")))
+                solutionRoot = solutionRoot.Parent;
+            if (solutionRoot is null)
+                throw new InvalidOperationException("Amethyst.slnx not found.");
+            string healthDir = Path.Combine(root, "entity-definitions");
+            Directory.CreateDirectory(healthDir);
+            File.WriteAllText(Path.Combine(healthDir, "health.yml"),
+                "cow:\n  Health: 4\nzombie:\n  Health: 4\n");
+            var mobTypes = new EntityCatalog(Path.Combine(
+                solutionRoot.FullName, "shards", "Amethyst.Shards.Entities",
+                "entities-26.3.yml"), healthDir);
+            var managedMobs = new EntityManager(mobTypes);
+            var enchantments = new EnchantmentCatalog(Path.Combine(
+                solutionRoot.FullName, "shards", "Amethyst.Shards.Items",
+                "enchantments-26.3.yml"));
+            if (!items.TryGetByIdentifier("minecraft:diamond", out var nativeReward) ||
+                !items.TryGetByIdentifier("minecraft:beef", out var beefReward))
+                throw new InvalidDataException("Expected vanilla mob loot materials.");
+            var nativeMobLoot = new RecordedVanillaMobLoot(
+                nativeReward.ProtocolId, beefReward.ProtocolId);
+            var skills = new SkillEngine();
+            var skillContext = new LootTestContext(skills, nativeMobLoot);
+            EnchantmentSkills.Register(skillContext);
+            LootSkills.Register(skillContext, items);
+            DeathLootSkills.Register(skillContext, items);
+            var loot = new LootCatalog(Path.Combine(solutionRoot.FullName,
+                "shards", "Amethyst.Shards.Items", "loot-26.3.yml"));
+            skills.RegisterInstructions("combat-tests", loot.Instructions.Concat([
+                SkillEngine.Parse("minecraft:sharpness",
+                    "cancelEvent @self ~onAttack"),
+                SkillEngine.Parse("minecraft:diamond_sword",
+                    "cancelEvent @self ~onBlockDrop"),
+                SkillEngine.Parse("minecraft:diamond_sword",
+                    "dropItem{item=minecraft:diamond;amount=2} @self ~onBlockDrop")
+            ]));
+            var server = TestServerFactory.Create(settings, world,
+                null!, world, items: items, recipes: recipes,
+                entities: managedMobs, entityTypes: mobTypes,
+                enchantments: enchantments, skills: skills, loot: loot,
+                vanillaLoot: nativeMobLoot);
             Guid id1 = Guid.NewGuid(), id2 = Guid.NewGuid();
             Check(server.TryAdmit(new VerifiedProfile(id1, "FighterOne", []),
                 connection1, 0, out _) &&
@@ -96,6 +158,28 @@ internal static class CombatFeatureTests
             Check(player2.Vitals.Snapshot().Health < 20 &&
                 player1.Inventory.Held().Damage == 1,
                 "A successful PvP attack reduces health and sword durability");
+
+            long observerBeforeSwing = stream2.Length;
+            long attackerBeforeSwing = stream1.Length;
+            await server.HandlePunchAsync(player1, CancellationToken.None);
+            Check(stream2.Length > observerBeforeSwing &&
+                stream1.Length == attackerBeforeSwing,
+                "Uncancelled punch broadcasts a swing to observers, not attacker");
+            using (var outbound = new MemoryStream(stream2.ToArray()
+                .AsSpan((int)observerBeforeSwing).ToArray()))
+            {
+                Packet? swing = await Protocol.ReadPacketAsync(
+                    outbound, CancellationToken.None);
+                var fields = swing?.Reader() ?? throw new Exception(
+                    "Missing swing animation frame");
+                Check(swing.Value.Id == CombatProtocol.ClientboundSwingAnimation &&
+                    fields.ReadVarInt() == player1.EntityId &&
+                    fields.ReadVarInt() == 0 && // main hand
+                    fields.ReadVarInt() == 1 && // whack
+                    fields.ReadVarInt() == 6 && // duration in ticks
+                    fields.Remaining == 0,
+                    "Swing animation packet matches Java 26.3 protocol 777");
+            }
             float previous = player2.Vitals.Snapshot().Health;
             await server.HandleAttackAsync(player1, player2.EntityId,
                 CancellationToken.None);
@@ -118,11 +202,309 @@ internal static class CombatFeatureTests
             Check(server.LivingEntitiesForTests.Single().Health < 8 &&
                 player1.Inventory.Held().Damage == 2,
                 "Sheep receive melee damage through the same validated pathway");
+            float healthBeforeCancel = server.LivingEntitiesForTests.Single().Health;
+            Check(player1.Inventory.EnchantHeld("sharpness", 1, enchantments),
+                "Prepare enchanted weapon with cancellable ~onAttack");
+            await Task.Delay(140);
+            await server.HandleAttackAsync(player1, summoned.EntityId,
+                CancellationToken.None);
+            Check(server.LivingEntitiesForTests.Single().Health == healthBeforeCancel &&
+                player1.Inventory.Held().Damage == 2,
+                "cancelEvent prevents vanilla attack damage and weapon wear");
+            long beforeCancelledPunch = stream2.Length;
+            await server.HandlePunchAsync(player1, CancellationToken.None);
+            Check(stream2.Length == beforeCancelledPunch,
+                "cancelEvent suppresses observer-side swing animation");
+            await server.HandlePunchAsync(player1, CancellationToken.None);
+            Check(stream2.Length > beforeCancelledPunch,
+                "Cancelled swing suppression is consumed only once");
+            player1.RecordAttackSwingCancellation(true);
+            player1.AdvanceClientTick();
+            Check(!player1.ConsumeAttackSwingCancellation(),
+                "A missing punch cannot suppress animation in the next tick");
+
+            // A second, uncancelled attack kills the sheep. Gameplay now
+            // executes the Items Shard's YAML loot skills instead of a
+            // hardcoded mutton/white-wool drop.
+            Check(player1.Inventory.TryCreativeSet(36, sword.ProtocolId, 1, true),
+                "Clear attack-cancelling enchantment to test a real kill");
+            await Task.Delay(140);
+            await server.HandleAttackAsync(player1, summoned.EntityId,
+                CancellationToken.None);
+            Check(server.LivingEntitiesForTests.Length == 0 &&
+                items.TryGetByIdentifier("minecraft:mutton", out var mutton) &&
+                items.TryGetByIdentifier("minecraft:white_wool", out var wool) &&
+                server.GroundItemsForTests.Any(x => x.ItemId == mutton.ProtocolId) &&
+                server.GroundItemsForTests.Any(x => x.ItemId == wool.ProtocolId),
+                "Killing a sheep commits the YAML-defined meat and wool skill drops");
+            Check(server.ExperienceOrbsForTests.Length == 1 &&
+                server.ExperienceOrbsForTests[0].Value is >= 1 and <= 3,
+                "Player-killed sheep creates an Entities-owned 1–3 XP orb");
+
+            ShardItemDefinition beef = default;
+            Check(managedMobs.TrySpawn("cow", 1, 80, 0,
+                    out ShardEntityInstance cow) && cow.Health == 4 &&
+                items.TryGetByIdentifier("minecraft:beef", out beef),
+                "Spawn a YAML-configured cow in the shared Entities runtime");
+            int beforeGeneric = server.GroundItemsForTests.Length;
+            await Task.Delay(140);
+            await server.HandleAttackAsync(player1, cow.EntityId,
+                CancellationToken.None);
+            Check(!managedMobs.Snapshot().Any(e => e.EntityId == cow.EntityId) &&
+                server.GroundItemsForTests.Length == beforeGeneric + 1 &&
+                server.GroundItemsForTests.Any(drop =>
+                    drop.ItemId == beef.ProtocolId && drop.Count == 1) &&
+                managedMobs.DrainDeaths().Length == 0,
+                "Validated melee kills a generic mob through explicit dropLootTable ~onDeath");
+            Check(server.ExperienceOrbsForTests.Length == 2 &&
+                server.ExperienceOrbsForTests.Any(orb =>
+                    orb.Value is >= 1 and <= 3),
+                "Generic cow kill awards configured XP without duplicate death intents");
+            await server.TickEntitiesAsync(CancellationToken.None);
+            Check(server.GroundItemsForTests.Length == beforeGeneric + 1,
+                "Generic melee kill cannot award the same death loot twice");
+
+            Check(managedMobs.TrySpawn("zombie", 1, 80, 0,
+                    out ShardEntityInstance zombie) && zombie.Health == 4,
+                "Spawn a health-bearing zombie for authoritative native loot");
+            int beforeNative = server.GroundItemsForTests.Length;
+            await Task.Delay(140);
+            await server.HandleAttackAsync(player1, zombie.EntityId,
+                CancellationToken.None);
+            Check(!managedMobs.Snapshot().Any(e => e.EntityId == zombie.EntityId) &&
+                server.GroundItemsForTests.Length == beforeNative + 1 &&
+                server.GroundItemsForTests.Count(d =>
+                    d.ItemId == nativeReward.ProtocolId) == 1 &&
+                nativeMobLoot.ZombieContexts.Count == 1 &&
+                nativeMobLoot.ZombieContexts[0].KilledByPlayer &&
+                nativeMobLoot.ZombieContexts[0].AttackerKind == "minecraft:player" &&
+                nativeMobLoot.ZombieContexts[0].DamageTypeIdentifier ==
+                    "minecraft:player_attack",
+                "An explicit ~onDeath dropLootTable skill rolls pinned zombie loot with player attribution");
+            Check(server.ExperienceOrbsForTests.Length == 3 &&
+                server.ExperienceOrbsForTests.Count(orb => orb.Value == 5) == 1,
+                "Vanilla zombie kill awards five persistent XP points");
+            Check(managedMobs.TrySpawn("zombie", 1, 80, 0,
+                    out var consoleZombie) &&
+                managedMobs.TryKill(consoleZombie.EntityId, out _),
+                "Prepare a non-player entity death");
+            await server.TickEntitiesAsync(CancellationToken.None);
+            Check(nativeMobLoot.ZombieContexts.Count == 2 &&
+                !nativeMobLoot.ZombieContexts[1].KilledByPlayer &&
+                nativeMobLoot.ZombieContexts[1].AttackerKind is null &&
+                server.GroundItemsForTests.Length == beforeNative + 2,
+                "Console kills execute explicit ~onDeath table skills without player-only XP");
+            Check(server.ExperienceOrbsForTests.Length == 3,
+                "Console kills cannot mint player-only experience rewards");
+
+            Check(loot.TryGetSkills("minecraft:zombie", out var rangedRewards),
+                "Resolve the exact Items-owned zombie death skill pack");
+            var rangedIntent = new ShardSkillRuntime();
+            rangedIntent.SetFlag("killed_by_player");
+            await skills.DispatchAsync(new ShardSkillEvent(
+                "minecraft:zombie", "onDeath", ActorUuid: player1.PlayerUuid,
+                ItemId: sword.ProtocolId, DamageType: "minecraft:arrow",
+                DirectDamagerKind: "minecraft:arrow")
+            {
+                Runtime = rangedIntent,
+                PublisherCommitsDrops = true,
+                AllowedSkills = rangedRewards
+            });
+            Check(nativeMobLoot.ZombieContexts.Count == 3 &&
+                nativeMobLoot.ZombieContexts[^1].KilledByPlayer &&
+                nativeMobLoot.ZombieContexts[^1].DirectDamagerKind ==
+                    "minecraft:arrow" &&
+                nativeMobLoot.ZombieContexts[^1].DamageTypeIdentifier ==
+                    "minecraft:arrow" &&
+                rangedIntent.Drops.Count == 1 &&
+                rangedIntent.Experience == 5,
+                "Explicit ranged ~onDeath skills preserve authoritative projectile damage context");
+
+            // A registered Mojang vanilla table is not itself a source of
+            // any entity drop. An explicit Items ~onDeath skill is required.
+            var noLootManager = new EntityManager(mobTypes);
+            var noLootGame = TestServerFactory.Create(settings, world, null!,
+                world, items: items, recipes: recipes, entities: noLootManager,
+                entityTypes: mobTypes, vanillaLoot: nativeMobLoot);
+            int nativeCowRolls = nativeMobLoot.CowContexts.Count;
+            Check(noLootManager.TrySpawn("cow", 1, 80, 0, out var silentCow) &&
+                noLootManager.TryKill(silentCow.EntityId, out _),
+                "Prepare a killed cow with a registered native table but no death skills");
+            await noLootGame.TickEntitiesAsync(CancellationToken.None);
+            Check(noLootGame.GroundItemsForTests.Length == 0 &&
+                noLootGame.ExperienceOrbsForTests.Length == 0 &&
+                nativeMobLoot.CowContexts.Count == nativeCowRolls,
+                "Pinned vanilla loot tables and entity identity never generate implicit item or XP rewards");
+
+            // cancelEvent does not interrupt the remaining ~onDeath
+            // mechanics. There is no implicit loot or XP to suppress.
+            var explicitDeathSkills = new[]
+            {
+                SkillEngine.Parse("minecraft:zombie",
+                    "cancelEvent @self ~onDeath"),
+                SkillEngine.Parse("minecraft:zombie",
+                    "dropItem{item=minecraft:emerald;amount=1} @self ~onDeath")
+            };
+            skills.RegisterInstructions("death-cancel-tests", explicitDeathSkills);
+            var cancelled = new ShardSkillRuntime();
+            await skills.DispatchAsync(new ShardSkillEvent(
+                "minecraft:zombie", "onDeath")
+            {
+                Runtime = cancelled,
+                PublisherCommitsDrops = true,
+                AllowedSkills = explicitDeathSkills
+            });
+            Check(items.TryGetByIdentifier("minecraft:emerald",
+                    out var emeraldCancel) &&
+                cancelled.IsCancelled && cancelled.Experience == 0 &&
+                cancelled.Drops.Count == 1 &&
+                cancelled.Drops[0].ItemId == emeraldCancel.ProtocolId,
+                "cancelEvent completes later explicit ~onDeath skills without implicit item or XP awards");
+
+            string lootOverrides = Path.Combine(root, "loot-overrides");
+            Directory.CreateDirectory(lootOverrides);
+            File.WriteAllText(Path.Combine(lootOverrides, "mobs.yml"), """
+                minecraft:cow:
+                  Skills:
+                    - "dropItem{item=minecraft:emerald;amount=1} @self ~onDeath"
+                    - "dropExperience{amount=2} @self ~onDeath ?flag{name=killed_by_player}"
+                minecraft:zombie:
+                  Skills: []
+                """);
+            var overrideLoot = new LootCatalog(Path.Combine(
+                solutionRoot.FullName, "shards", "Amethyst.Shards.Items",
+                "loot-26.3.yml"), lootOverrides);
+            skills.RegisterInstructions("override-tests", overrideLoot.Instructions);
+            Check(overrideLoot.HasOverride("minecraft:cow") &&
+                overrideLoot.HasOverride("minecraft:zombie") &&
+                overrideLoot.TryGetSkills("minecraft:zombie", out var emptyOverride) &&
+                emptyOverride.Count == 0,
+                "Administrator loot override preserves explicit empty Skills lists");
+            var overriddenMobs = new EntityManager(mobTypes);
+            var overrideServer = TestServerFactory.Create(settings, world,
+                null!, world, items: items, recipes: recipes,
+                entities: overriddenMobs, entityTypes: mobTypes,
+                enchantments: enchantments, skills: skills, loot: overrideLoot,
+                vanillaLoot: nativeMobLoot);
+            using var overrideStream = new MemoryStream();
+            using var overrideChannel = new PacketChannel(overrideStream);
+            Guid overrideId = Guid.NewGuid();
+            Check(overrideServer.TryAdmit(new VerifiedProfile(
+                    overrideId, "OverrideTester", []), overrideChannel, 0, out _),
+                "Admit a player for authoritative loot override integration");
+            ConnectedPlayer overridePlayer =
+                overrideServer.GetPlayerForTests(overrideId)!;
+            overridePlayer.MarkReady();
+            overridePlayer.SetGameMode(PlayerGameMode.Survival);
+            overridePlayer.SetPose(new PlayerPose(0, 80, 0, 0, 0, true));
+            ShardItemDefinition emerald = default;
+            ShardEntityInstance overrideCow = default;
+            Check(items.TryGetByIdentifier("minecraft:emerald", out emerald) &&
+                overridePlayer.Inventory.TryCreativeSet(
+                    36, sword.ProtocolId, 1, true) &&
+                overriddenMobs.TrySpawn("cow", 1, 80, 0, out overrideCow),
+                "Set up a custom emerald-only cow death skill");
+            await overrideServer.HandleAttackAsync(
+                overridePlayer, overrideCow.EntityId, CancellationToken.None);
+            Check(overrideServer.GroundItemsForTests.Length == 1 &&
+                overrideServer.GroundItemsForTests[0].ItemId == emerald.ProtocolId &&
+                overrideServer.ExperienceOrbsForTests.Length == 1 &&
+                overrideServer.ExperienceOrbsForTests[0].Value == 2,
+                "Custom ~onDeath item and XP skills replace bundled table/XP rules");
+            Check(overriddenMobs.TrySpawn("zombie", 1, 80, 0,
+                out var silentZombie), "Set up a mob with Skills: []");
+            await Task.Delay(140);
+            await overrideServer.HandleAttackAsync(
+                overridePlayer, silentZombie.EntityId, CancellationToken.None);
+            Check(overrideServer.GroundItemsForTests.Length == 1 &&
+                overrideServer.ExperienceOrbsForTests.Length == 1 &&
+                !overriddenMobs.Snapshot().Any(e => e.EntityId == silentZombie.EntityId),
+                "Skills: [] suppresses all entity item drops and XP, even with a pinned table");
+
+            Check(items.TryGetByIdentifier("minecraft:diamond", out var rewardDiamond) &&
+                world.TrySetBlockState(0, 81, 1, 10, out _),
+                "Prepare a Survival dirt block for onBlockDrop custom skills");
+            await server.HandleBlockActionAsync(player1,
+                new PlayerBlockAction(BlockInteractionProtocol.StartDestroyBlock,
+                    0, 81, 1, 1, 101), CancellationToken.None);
+            await Task.Delay(950);
+            await server.HandleBlockActionAsync(player1,
+                new PlayerBlockAction(BlockInteractionProtocol.StopDestroyBlock,
+                    0, 81, 1, 1, 102), CancellationToken.None);
+            Check(world.GetBlockState(0, 81, 1) == 0 &&
+                server.GroundItemsForTests.Any(x =>
+                    x.ItemId == rewardDiamond.ProtocolId && x.Count == 2) &&
+                !server.GroundItemsForTests.Any(x => x.ItemId == 55),
+                "onBlockDrop cancelEvent suppresses the dirt drop but commits later dropItem skills");
+
+            player2.SetGameMode(PlayerGameMode.Survival);
+            Check(player2.ActiveEffects.Apply("minecraft:resistance", 200, 0) &&
+                player2.ActiveEffects.Apply("minecraft:absorption", 200, 0) &&
+                Math.Abs(player2.ActiveEffects.Absorption - 4) < 0.01,
+                "Set up Resistance I and four absorption hearts on a real player");
+            float beforeMitigated = player2.Vitals.Snapshot().Health;
+            await Task.Delay(520);
+            bool mitigated = await server.DamagePlayerAsync(
+                player2, 10, null, CancellationToken.None);
+            Check(mitigated &&
+                Math.Abs(player2.Vitals.Snapshot().Health -
+                    (beforeMitigated - 4)) < 0.01 &&
+                Math.Abs(player2.ActiveEffects.Absorption) < 0.01,
+                "Gameplay damage applies 20% Resistance and absorbs four hearts before health");
         }
         finally
         {
             try { Directory.Delete(root, true); }
             catch (IOException) { }
         }
+    }
+
+    private sealed class RecordedVanillaMobLoot(int zombieReward, int cowReward) :
+        IShardVanillaLootTables
+    {
+        public int Count => 2;
+        public List<ShardVanillaLootContext> ZombieContexts { get; } = [];
+        public List<ShardVanillaLootContext> CowContexts { get; } = [];
+        public bool HasTable(string id) => id is
+            "minecraft:entities/zombie" or "minecraft:entities/cow";
+        public IReadOnlyList<ShardItemDrop> Roll(string id,
+            ShardVanillaLootContext context)
+        {
+            if (id == "minecraft:entities/zombie")
+            {
+                ZombieContexts.Add(context);
+                return [new ShardItemDrop(zombieReward, 1)];
+            }
+            if (id == "minecraft:entities/cow")
+            {
+                CowContexts.Add(context);
+                return [new ShardItemDrop(cowReward, 1)];
+            }
+            throw new InvalidDataException("Unexpected entity loot table.");
+        }
+    }
+
+    private sealed class LootTestContext(SkillEngine engine,
+        IShardVanillaLootTables native) : IShardContext
+    {
+        public string Id => "combat-tests";
+        public ServerOptions Options => throw new NotSupportedException();
+        public string DataDirectory => Path.GetTempPath();
+        public void RegisterService<T>(T service) where T : class { }
+        public T GetRequiredService<T>() where T : class => throw new NotSupportedException();
+        public T? GetService<T>() where T : class =>
+            typeof(T) == typeof(IShardVanillaLootTables) ? (T)(object)native : null;
+        public void Log(string message) { }
+        public void RegisterPlayPacketHandler(int packetId, ShardPlayPacketHandler handler) { }
+        public void RegisterConsoleCommand(string name, ShardConsoleCommand handler) { }
+        public void RegisterSkillTrigger(string trigger) => engine.RegisterTrigger(Id, trigger);
+        public void RegisterSkillMechanic(string name, ShardSkillValidator validator,
+            ShardSkillExecutor executor) => engine.RegisterMechanic(Id, name, validator, executor);
+        public void RegisterSkillCondition(string name, ShardSkillConditionValidator validator,
+            ShardSkillConditionEvaluator evaluator) => engine.RegisterCondition(Id, name, validator, evaluator);
+        public void RegisterSkillDefinitions(string file, string? directory = null) =>
+            engine.RegisterDefinitions(Id, file, directory);
+        public void RegisterSkillInstructions(IEnumerable<ShardSkillInstruction> instructions) =>
+            engine.RegisterInstructions(Id, instructions);
     }
 }

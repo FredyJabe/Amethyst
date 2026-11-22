@@ -8,4 +8,5 @@
   <Project Path="tests/ShardTests/ShardTests.csproj" />
   <Project Path="tests/EntityTests/EntityTests.csproj" />
   <Project Path="tests/BlockTests/BlockTests.csproj" />
+  <Project Path="tests/EnchantmentTests/EnchantmentTests.csproj" />
 </Solution>

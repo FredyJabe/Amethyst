@@ -1,3 +1,4 @@
+using Amethyst;
 using Amethyst.BuiltinShards;
 using Amethyst.Shards;
 
@@ -23,6 +24,36 @@ try
         baseCatalog.TryGetByIdentifier("minecraft:zombie", out var zombie) &&
         zombie.ProtocolId >= 0 && zombie.Category == "monster",
         "Vanilla entity registry reads all 161 wire types");
+    ShardEntityDefinition vanillaZombie = default;
+    Check(baseCatalog.TryGetByIdentifier("minecraft:cow", out var vanillaCow) &&
+        vanillaCow.MaxHealth == 10 &&
+        baseCatalog.TryGetByIdentifier("minecraft:zombie", out vanillaZombie) &&
+        vanillaZombie.MaxHealth == 20 &&
+        baseCatalog.TryGetByIdentifier("minecraft:iron_golem", out var golem) &&
+        golem.MaxHealth == 100 &&
+        baseCatalog.TryGetByIdentifier("minecraft:horse", out var horse) &&
+        horse.MaxHealth is null &&
+        baseCatalog.TryGetByIdentifier("minecraft:slime", out var slime) &&
+        slime.MaxHealth is null,
+        "Bundled health is authoritative for fixed-HP mobs; variable-HP mobs stay pending");
+    Check(baseCatalog.TryGetByIdentifier("minecraft:blaze", out var blaze) &&
+        blaze.Identifier == "minecraft:blaze" &&
+        vanillaCow.MaxHealth == 10 && vanillaZombie.MaxHealth == 20,
+        "Entities definitions expose identity and health, not reward fields");
+    string legacyExperienceDir = Path.Combine(temp, "deprecated-experience");
+    Directory.CreateDirectory(legacyExperienceDir);
+    File.WriteAllText(Path.Combine(legacyExperienceDir, "experience.yml"),
+        "cow:\\n  Experience: 5\\n".Replace("\\n", "\n"));
+    bool migratedXp = false;
+    try { _ = new EntityCatalog(vanilla, legacyExperienceDir); }
+    catch (InvalidDataException e)
+    {
+        migratedXp = e.Message.Contains("dropExperience",
+            StringComparison.OrdinalIgnoreCase);
+    }
+    Directory.Delete(legacyExperienceDir, recursive: true);
+    Check(migratedXp,
+        "Legacy Entities Experience YAML fails with a clear ~onDeath migration message");
 
     string path = Path.Combine(temp, "override.yml");
     File.WriteAllText(path, """
@@ -95,17 +126,124 @@ try
         entities.DrainDeaths() is { Length: 1 } &&
         !entities.TryKill(toKill.EntityId, out _),
         "Explicit kill reports death exactly once");
+    Check(entities.TrySpawn("cow", 3, 80, 3, out var combatCow) &&
+        entities.TryDamageAndTakeDeath(combatCow.EntityId, 3,
+            out var wounded, out bool initiallyKilled) &&
+        !initiallyKilled && wounded.Health == 37 &&
+        entities.TryDamageAndTakeDeath(combatCow.EntityId, 100,
+            out var combatDeath, out bool wasKilled) &&
+        wasKilled && combatDeath.Health == 0 &&
+        !entities.TryTakeDeath(combatCow.EntityId, out _) &&
+        entities.DrainDeaths().Length == 0,
+        "Atomic melee damage preserves surviving mobs and consumes each kill once");
     string skillVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
         "skills-26.3.yml");
     string itemVanilla = Path.Combine(root.FullName, "shards", "Amethyst.Shards.Items",
         "items-26.3.yml");
     var items = new ItemCatalog(itemVanilla);
+
+    // The Entities Shard owns all physical world entities. One shared ID
+    // allocator and world binding preserve existing save paths after moving
+    // storage out of Gameplay; only projectiles and bobbers are transient.
+    string ownedWorld = Path.Combine(temp, "entity-owned-world");
+    var authoritative = new EntityManager(catalog);
+    authoritative.BindWorldEntities(temp, ownedWorld, items);
+    var native = (IShardLivingEntities)authoritative;
+    var itemEntities = (IShardGroundItems)authoritative;
+    var xpEntities = (IShardExperienceOrbs)authoritative;
+    var fishingEntities = (IShardFishingWorld)authoritative;
+    var projectiles = (IShardProjectileWorld)authoritative;
+    GroundItem dropped = default;
+    ExperienceOrb orb = default;
+    Check(native.TrySpawnSheep(4, 80, 4, out LivingEntity redSheep, 14) &&
+        native.TryShear(redSheep.EntityId, out var shearedRed) &&
+        shearedRed.Sheared && shearedRed.Color == 14 &&
+        authoritative.Snapshot().Any(x => x.EntityId == redSheep.EntityId) &&
+        items.TryGetByIdentifier("minecraft:diamond", out var diamond) &&
+        itemEntities.TrySpawn(diamond.ProtocolId, 2, 4, 80, 4,
+            out dropped) &&
+        xpEntities.TrySpawn(5, 4, 80, 4, out orb),
+        "Entities owns colored sheep, ground items and XP with one allocator");
+    Guid fisher = Guid.NewGuid();
+    var launchPose = new PlayerPose(4, 80, 4, 0, 0, true);
+    Check(fishingEntities.TryCast(fisher, 123, launchPose,
+            out FishingBobber hook) &&
+        projectiles.TryLaunch(fisher, ProjectileKind.Arrow, launchPose, 1.5f,
+            2, ItemStack.Empty, out ProjectileEntity arrow) &&
+        new[] { redSheep.EntityId, dropped.EntityId, orb.EntityId,
+            hook.EntityId, arrow.EntityId }.Distinct().Count() == 5,
+        "Entity ID allocation is unique across livestock, items, XP, hooks and projectiles");
+    // Generic mobs now use their own AMGEN001 world-scoped store, separate
+    // from the legacy sheep, dropped item and XP persistence formats.
+    if (!authoritative.TrySpawn("cow", 7, 80, 7, out var managedCow))
+        throw new Exception("Could not spawn persistent generic cow.");
+    Check(authoritative.TryDamage(managedCow.EntityId, 6,
+        out var woundedCow) && woundedCow.Health == 34 &&
+        authoritative.TryTeleport(managedCow.EntityId, 8, 81, 8, 35, 0),
+        "Generic mob health and teleport are writable persistent state");
+    authoritative.SaveWorldEntities();
+    var restartedWorld = new EntityManager(catalog);
+    restartedWorld.BindWorldEntities(temp, ownedWorld, items);
+    Check(((IShardLivingEntities)restartedWorld).Snapshot()
+            .Any(x => x.Uuid == redSheep.Uuid && x.Sheared && x.Color == 14) &&
+        ((IShardGroundItems)restartedWorld).Snapshot()
+            .Any(x => x.Uuid == dropped.Uuid && x.Count == 2) &&
+        ((IShardExperienceOrbs)restartedWorld).Snapshot()
+            .Any(x => x.Value == 5) &&
+        ((IShardFishingWorld)restartedWorld).Snapshot().Length == 0 &&
+        ((IShardProjectileWorld)restartedWorld).Snapshot().Length == 0,
+        "Entities restores durable living/item/XP state without resurrecting transient projectiles");
+
+    ShardEntityInstance loadedCow = restartedWorld.Snapshot().Single(
+        x => x.Uuid == managedCow.Uuid);
+    Check(loadedCow.EntityId != managedCow.EntityId &&
+        loadedCow.DefinitionId == managedCow.DefinitionId &&
+        loadedCow.Health == 34 && loadedCow.X == 8 && loadedCow.Y == 81 &&
+        loadedCow.Z == 8 && loadedCow.Yaw == 35 &&
+        restartedWorld.Snapshot().Select(x => x.EntityId)
+            .Distinct().Count() == restartedWorld.Snapshot().Length,
+        "Generic mobs restore identity, health and position with fresh unique network IDs");
+    Check(restartedWorld.TryDamageAndTakeDeath(loadedCow.EntityId, 100,
+        out var deadCow, out bool killedPersisted) &&
+        killedPersisted && deadCow.Uuid == managedCow.Uuid &&
+        restartedWorld.DrainDeaths().Length == 0,
+        "Lethal generic damage persists removal and consumes the one-shot death");
+    var afterKill = new EntityManager(catalog);
+    afterKill.BindWorldEntities(temp, ownedWorld, items);
+    Check(!afterKill.Snapshot().Any(x => x.Uuid == managedCow.Uuid),
+        "Killed generic mobs do not resurrect after restart");
+
+    // The dead entity disappears before Gameplay can process the one-shot
+    // onDeath event; its last color/sheared metadata must remain on the queued
+    // snapshot or configurable native wool drops would be incorrect.
+    var reloadedLivestock = (IShardLivingEntities)restartedWorld;
+    Check(reloadedLivestock.TrySpawnSheep(6, 80, 6,
+        out LivingEntity blueSheep, color: 11),
+        "Spawn a blue sheep using the unified native entity store");
+    bool killedBlue = restartedWorld.TryKill(blueSheep.EntityId,
+        out ShardEntityInstance blueDeath);
+    ShardEntityInstance[] deathQueue = restartedWorld.DrainDeaths();
+    Check(killedBlue && blueDeath.Color == 11 && !blueDeath.Sheared &&
+        deathQueue.Length == 1 && deathQueue[0].Color == 11 &&
+        deathQueue[0].EntityId == blueSheep.EntityId &&
+        restartedWorld.DrainDeaths().Length == 0,
+        "Sheep death events retain server-owned wool metadata exactly once");
+
     var drops = new TestDropSink();
     SkillEngine CreateEngine()
     {
         var engine = new SkillEngine();
         var mechanic = new DropItemSkillMechanic(items, () => drops);
         engine.RegisterMechanic("items", "dropItem", mechanic.Validate, mechanic.ExecuteAsync);
+        engine.RegisterCondition("items", "flag",
+            condition =>
+            {
+                if (condition.Arguments.Count != 1 ||
+                    !condition.Arguments.ContainsKey("name"))
+                    throw new InvalidDataException("flag condition needs name.");
+            },
+            (condition, evt) =>
+                evt.Runtime.HasFlag(condition.Arguments["name"]));
         return engine;
     }
 
@@ -113,14 +251,22 @@ try
     starterSkills.RegisterTrigger("entities", "onMilk");
     starterSkills.RegisterTrigger("entities", "onShear");
     starterSkills.RegisterDefinitions("items", skillVanilla);
+    Check(!starterSkills.TryGetSkills("minecraft:cow", out _),
+        "Bundled interaction skills no longer assign any implicit cow death drops");
+    starterSkills.RegisterInstructions("explicit-death-tests", [
+        SkillEngine.Parse("minecraft:cow",
+            "dropItem{item=minecraft:beef;amount=1-3} @self ~onDeath"),
+        SkillEngine.Parse("minecraft:cow",
+            "dropItem{item=minecraft:leather;amount=0-2} @self ~onDeath")
+    ]);
     Check(starterSkills.TryGetSkills("sheep", out var shearing) &&
         shearing.Any(s => s.Trigger.Equals("onShear", StringComparison.OrdinalIgnoreCase)) &&
-        starterSkills.OwnerCount >= 10 &&
+        starterSkills.OwnerCount >= 2 &&
         starterSkills.TryGetSkills("minecraft:cow", out var cowSkills) &&
         cowSkills.Count == 2 &&
         cowSkills.All(s => s.Trigger.Equals("onDeath", StringComparison.OrdinalIgnoreCase) &&
             s.Mechanic.Equals("dropItem", StringComparison.OrdinalIgnoreCase)),
-        "Core parses Items Shard death skills with generic event/mechanic names");
+        "Core executes only explicitly registered Items death mechanics");
     Check(await starterSkills.DispatchAsync(new ShardSkillEvent(
             "minecraft:cow", "onDeath", 2, 80, 3, Random: new Random(123))) &&
         drops.Items.Count > 0 &&
@@ -128,6 +274,17 @@ try
         drops.Items.Any(d => d.ItemId == beef.ProtocolId && d.Count is >= 1 and <= 3 &&
             d.X == 2 && d.Z == 3),
         "Core dispatches Items dropItem with real resolved item effects");
+
+    drops.Items.Clear();
+    var deferredDeath = new ShardSkillEvent("minecraft:cow", "onDeath",
+        2, 80, 3, Random: new Random(123))
+        { PublisherCommitsDrops = true };
+    Check(await starterSkills.DispatchAsync(deferredDeath) &&
+        deferredDeath.Runtime.Drops.Count > 0 &&
+        deferredDeath.Runtime.Drops.All(d => d.ItemId > 0 &&
+            d.Count is > 0 and <= 64) &&
+        drops.Items.Count == 0,
+        "Legacy dropItem stages loot for a publisher-owned event until the transaction commits");
 
     string skillsDir = Path.Combine(temp, "skills");
     Directory.CreateDirectory(skillsDir);
@@ -162,6 +319,40 @@ try
         drops.Items.All(d => d.ItemId == sword.ProtocolId),
         "Core executes Items skills honoring aliases, probability and stack limits");
 
+    // A custom alias may configure ~onSpawn without masking the base
+    // cow's explicit ~onDeath reward. Both async and immediate event
+    // publishers resolve the fallback by trigger, not just owner existence.
+    var aliasFallback = CreateEngine();
+    aliasFallback.RegisterTrigger("entities", "onSpawn");
+    aliasFallback.RegisterInstructions("alias-fallback-tests", [
+        SkillEngine.Parse("amethyst:spawn_only_cow",
+            "dropItem{item=minecraft:beef;chance=0} @self ~onSpawn"),
+        SkillEngine.Parse("minecraft:cow",
+            "dropItem{item=minecraft:beef;amount=1} @self ~onDeath")
+    ]);
+    var fallbackAsync = new ShardSkillEvent("amethyst:spawn_only_cow",
+        "onDeath", FallbackOwnerId: "minecraft:cow")
+    { PublisherCommitsDrops = true };
+    Check(await aliasFallback.DispatchAsync(fallbackAsync) &&
+        fallbackAsync.Runtime.Drops.Count == 1 &&
+        fallbackAsync.Runtime.Drops[0].Count == 1,
+        "Alias with only ~onSpawn still inherits explicit canonical ~onDeath drops");
+    var fallbackImmediate = new ShardSkillEvent("amethyst:spawn_only_cow",
+        "onDeath", FallbackOwnerId: "minecraft:cow")
+    { PublisherCommitsDrops = true };
+    Check(aliasFallback.DispatchImmediate(fallbackImmediate) &&
+        fallbackImmediate.Runtime.Drops.Count == 1,
+        "Synchronous skill dispatch uses the same trigger-scoped alias fallback");
+    var restrictedAlias = new ShardSkillEvent("amethyst:spawn_only_cow",
+        "onDeath", FallbackOwnerId: "minecraft:cow")
+    {
+        PublisherCommitsDrops = true,
+        AllowedSkills = Array.Empty<ShardSkillInstruction>()
+    };
+    Check(await aliasFallback.DispatchAsync(restrictedAlias) &&
+        restrictedAlias.Runtime.Drops.Count == 0,
+        "Explicit empty skill-selection filters suppress alias fallback drops");
+
     string testCustomPack = Path.Combine(temp, "other-shard.yml");
     File.WriteAllText(testCustomPack, """
         cow:
@@ -180,7 +371,7 @@ try
         });
     configured.RegisterDefinitions("other", testCustomPack);
     drops.Items.Clear();
-    Check(configured.OwnerCount >= 10 &&
+    Check(configured.OwnerCount >= 3 &&
         configured.TryGetSkills("cow", out var joined) &&
         joined.Count == 2 &&
         await configured.DispatchAsync(new ShardSkillEvent("cow", "onSpawn")) &&

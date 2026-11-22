@@ -1,22 +1,5 @@
 namespace Amethyst;
 
-public readonly record struct ItemStack(int ItemId, int Count)
-{
-    public static readonly ItemStack Empty = new(0, 0);
-
-    /// <summary>Accumulated item damage. Zero is undamaged; valid nonzero
-    /// damage must be strictly below the item definition's MaxDurability.</summary>
-    public int Damage { get; init; }
-    /// <summary>Vanilla Unbreaking I–III and Mending I.
-    /// These are authoritative item enchantments, not client input.</summary>
-    public int Unbreaking { get; init; }
-    public bool Mending { get; init; }
-    /// <summary>Vanilla unbreakable component (prevents all item wear).</summary>
-    public bool Unbreakable { get; init; }
-    /// <summary>Anvil prior-work penalty; retained through item moves.</summary>
-    public int RepairCost { get; init; }
-}
-
 public readonly record struct InventoryClick(int Window, int Revision, int Slot,
     int Button, int Mode);
 
@@ -40,6 +23,8 @@ public static class InventoryProtocol
         var removed = new SortedSet<int>();
         if (items is not null && items.TryGetById(stack.ItemId, out var definition))
             ItemComponentWire.AddDefinition(added, removed, definition);
+        if (!string.IsNullOrEmpty(stack.ComponentData))
+            ItemComponentWire.AddComponents(added, removed, stack.Components);
 
         // Authoritative instance components override a definition's defaults.
         if (stack.Damage > 0)
@@ -49,23 +34,20 @@ public static class InventoryProtocol
             added[4] = static _ => { }; // 26.3 unit component
             removed.Remove(4);
         }
-        if (stack.Unbreaking > 0 || stack.Mending)
+        // Preserve the legacy Unbreaking -> Mending write order used by
+        // existing inventory/packet fixtures. Additional levels are already
+        // canonicalized on write by PlayerInventory.
+        var enchants = stack.AllEnchantments().ToArray();
+        if (enchants.Length > 0)
         {
             added[13] = w =>
             {
-                w.WriteVarInt((stack.Unbreaking > 0 ? 1 : 0) +
-                    (stack.Mending ? 1 : 0));
-                if (stack.Unbreaking > 0)
+                w.WriteVarInt(enchants.Length);
+                foreach (var (id, level) in enchants)
                 {
                     w.WriteVarInt(VanillaRegistries.IndexOf(
-                        "minecraft:enchantment", "minecraft:unbreaking"));
-                    w.WriteVarInt(stack.Unbreaking);
-                }
-                if (stack.Mending)
-                {
-                    w.WriteVarInt(VanillaRegistries.IndexOf(
-                        "minecraft:enchantment", "minecraft:mending"));
-                    w.WriteVarInt(1);
+                        "minecraft:enchantment", id));
+                    w.WriteVarInt(level);
                 }
             };
         }

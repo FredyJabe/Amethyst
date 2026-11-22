@@ -17,9 +17,9 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     private readonly IShardPacketBus _packetBus;
     private readonly PlayerRegistry _players;
     private readonly OperatorStore _operators;
-    private readonly GroundItemStore? _groundItems;
-    private readonly ExperienceOrbStore? _experienceOrbs;
-    private readonly LivingEntityStore? _livingEntities;
+    private readonly IShardGroundItems? _groundItems;
+    private readonly IShardExperienceOrbs? _experienceOrbs;
+    private readonly IShardLivingEntities? _livingEntities;
     private readonly PlayerPositionStore _positions;
     private readonly WorkstationManager _stations;
     private readonly IShardItemRegistry? _items;
@@ -27,6 +27,11 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     private readonly IShardSkillEngine? _skills;
     private readonly IShardEntityRegistry? _entityTypes;
     private readonly IShardEntityInteractions? _interactions;
+    private readonly IShardEnchantmentRegistry? _enchantments;
+    private readonly IShardLootRegistry? _loot;
+    private readonly IShardVanillaLootTables? _vanillaLoot;
+    private readonly IShardVanillaBlockStates? _vanillaBlockStates;
+    private readonly IShardConsumableRegistry? _consumables;
     // Only the 20Hz item ticker mutates these per-viewer entity tracking maps.
     private readonly Dictionary<Guid, Dictionary<int, GroundItem>> _itemViews = new();
     private readonly Dictionary<Guid, Dictionary<int, ExperienceOrb>> _experienceViews = new();
@@ -41,9 +46,18 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     public MinecraftServer(ServerOptions options, IShardWorld world, IShardPacketBus packetBus,
         IShardBlockWorld? blocks = null, string? inventoryDirectory = null,
         IShardItemRegistry? items = null, IShardRecipeRegistry? recipes = null,
-        IShardEntityManager? entities = null, IShardSkillEngine? skills = null,
-        IShardEntityRegistry? entityTypes = null,
-        IShardEntityInteractions? interactions = null)
+        IShardEntityManager? entities = null, IShardEntityRegistry? entityTypes = null,
+        IShardEntityInteractions? interactions = null,
+        IShardEnchantmentRegistry? enchantments = null, IShardSkillEngine? skills = null,
+        IShardLootRegistry? loot = null,
+        IShardVanillaLootTables? vanillaLoot = null,
+        IShardVanillaBlockStates? vanillaBlockStates = null,
+        IShardConsumableRegistry? consumables = null,
+        IShardLivingEntities? livestock = null,
+        IShardExperienceOrbs? experienceOrbs = null,
+        IShardFishingWorld? fishing = null,
+        IShardGroundItems? groundItems = null,
+        IShardProjectileWorld? projectiles = null)
     {
         _options = options;
         _world = world;
@@ -54,6 +68,17 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         _skills = skills;
         _entityTypes = entityTypes;
         _interactions = interactions;
+        _livingEntities = livestock;
+        _experienceOrbs = experienceOrbs;
+        _fishing = fishing;
+        _groundItems = groundItems;
+        _projectiles = projectiles;
+        entities?.BindWorldEntities(inventoryDirectory, options.WorldPath, items);
+        _enchantments = enchantments;
+        _loot = loot;
+        _vanillaLoot = vanillaLoot;
+        _vanillaBlockStates = vanillaBlockStates;
+        _consumables = consumables;
         _packetBus = packetBus;
         _players = new PlayerRegistry(options.MaxPlayers, entities is null ? null : entities.AllocateEntityId);
         _operators = new OperatorStore(options.OperatorsFile);
@@ -63,14 +88,10 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             items, recipes ?? throw new ArgumentNullException(nameof(recipes)));
         if (_blocks is not null)
         {
-            _groundItems = new GroundItemStore(inventoryDirectory,
-                options.WorldPath, _players.AllocateEntityId, items);
-            _experienceOrbs = new ExperienceOrbStore(inventoryDirectory,
-                options.WorldPath, _players.AllocateEntityId);
-            _livingEntities = new LivingEntityStore(inventoryDirectory,
-                options.WorldPath, _players.AllocateEntityId);
-            _projectiles = new ProjectileWorld(_players.AllocateEntityId);
-            _fishing = new FishingWorld(_players.AllocateEntityId);
+            // Ground items are persisted and simulated by the Entities Shard.
+            // XP orbs belong to the Entities Shard.
+            // Projectiles are simulated by the Entities Shard.
+            // Fishing bobbers belong to the Entities Shard.
         }
     }
 
@@ -142,7 +163,8 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     public bool TryAdmit(VerifiedProfile profile, PacketChannel channel, int chatMode, out string reason)
     {
         var player = new ConnectedPlayer(profile.Uuid, profile.Username, profile.Properties,
-            _players.AllocateEntityId(), channel, _world, _inventoryDirectory, _items);
+            _players.AllocateEntityId(), channel, _world, _inventoryDirectory,
+            _items, _enchantments, _skills);
         // Set the game mode before SpawnPackets.SendAsync constructs the Join Game
         // packet, player abilities, and the initial tab-list state.
         player.SetGameMode(Enum.Parse<PlayerGameMode>(_options.DefaultGameMode, ignoreCase: true));
@@ -176,6 +198,11 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         await ExperienceProtocol.SendExperienceAsync(player.Connection,
             player.Experience, ct);
         await CombatProtocol.SendHealthAsync(player, ct);
+        foreach (var effect in player.ActiveEffects.Snapshot())
+            if (StatusEffectProtocol.TryGetId(effect.Id, out int effectId))
+                await StatusEffectProtocol.ApplyAsync(player.Connection,
+                    player.EntityId, effectId, effect.Amplifier,
+                    effect.RemainingTicks, ct);
         int actualOpLevel = _options.OnlineMode ? _operators.Level(player.PlayerUuid) : 0;
         await GameModeProtocol.SendClientPermissionsAsync(player.Connection, player.EntityId, actualOpLevel, ct);
         await CommandTree.SendAsync(player.Connection, actualOpLevel, ct);
@@ -191,8 +218,12 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         // who completed login; rejected/half-loaded sessions must not overwrite
         // a valid previous save with the initial spawn placeholder.
         CloseStation(player);
+        CancelConsumableUse(player.PlayerUuid);
         _fishing?.Cancel(player.PlayerUuid);
         TrySavePosition(player);
+        try { player.ActiveEffects.Save(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { Console.WriteLine($"[effects] Unable to save {player.Username}: {ex.Message}"); }
         _players.Remove(player.ConnectionId);
         await NotifyDepartureAsync(player);
         Console.WriteLine($"[leave] {player.Username}; {_players.Snapshot().Length} connected");
@@ -285,15 +316,18 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                         await HandleAttackAsync(player, entityId, lifetime.Token);
                         break;
                     }
+                    case CombatProtocol.ServerboundPunch:
+                    {
+                        CombatProtocol.ReadPunch(packet.Value);
+                        await HandlePunchAsync(player, lifetime.Token);
+                        break;
+                    }
                     case EntityInteractionProtocol.ServerboundInteract:
                     {
                         EntityInteraction interaction =
                             EntityInteractionProtocol.Read(packet.Value);
-                        await HandleEntityInteractAsync(player, interaction,
-                            lifetime.Token);
-                        if (player.Ready && _entities is not null)
-                            await HandleEntityInteractionAsync(player, interaction,
-                                lifetime.Token);
+                        await HandleValidatedEntityInteractionAsync(
+                            player, interaction, lifetime.Token);
                         break;
                     }
                     case 0x1C: // KeepAlive reply
@@ -405,17 +439,23 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                         ChatProtocol.ParseSessionUpdate(packet.Value);
                         break;
                     case BlockInteractionProtocol.ServerboundSetHeldItem:
+                        int previousSelected = player.Inventory.SelectedSlot;
                         player.UseState.CancelCharge();
                         player.SelectHotbar(BlockInteractionProtocol.ReadHeldItem(packet.Value));
                         await ReleaseUsingItemAsync(player, lifetime.Token);
+                        await BroadcastSelectedEquipmentAsync(player, previousSelected,
+                            lifetime.Token);
                         break;
                     case BlockInteractionProtocol.ServerboundCreativeSlot:
                     {
                         CreativeSlotUpdate update = BlockInteractionProtocol.ReadCreativeSlot(packet.Value);
                         if (player.Ready)
                         {
+                            ItemStack[] oldEquipment = player.Inventory.Snapshot().Slots;
                             player.SetCreativeSlot(update.Slot, update.ItemId,
                                 update.Count, update.PlainItem);
+                            await NotifyEquipmentChangesAsync(player,
+                                oldEquipment, lifetime.Token);
                             await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
                         }
                         break;
@@ -425,6 +465,7 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                         InventoryClick click = InventoryProtocol.ReadClick(packet.Value);
                         if (player.Ready)
                         {
+                            ItemStack[] oldEquipment = player.Inventory.Snapshot().Slots;
                             if (_stations.GetMenu(player.PlayerUuid) is not null || click.Window != 0)
                                 await HandleStationClickAsync(player, click, lifetime.Token);
                             else
@@ -432,6 +473,8 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                                 player.Inventory.ApplyClick(click);
                                 await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, lifetime.Token);
                             }
+                            await NotifyEquipmentChangesAsync(player,
+                                oldEquipment, lifetime.Token);
                         }
                         break;
                     }
@@ -561,42 +604,54 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                 player.Connection, action.Sequence, ct);
             return;
         }
+        if (action.Status == BlockInteractionProtocol.SwapItemWithOffhand)
+        {
+            await HandleOffhandSwapAsync(player, ct);
+            await BlockInteractionProtocol.SendAckAsync(
+                player.Connection, action.Sequence, ct);
+            return;
+        }
         if (action.Status is BlockInteractionProtocol.DropAllItems
             or BlockInteractionProtocol.DropItem)
         {
-            if (player.Ready && _groundItems is not null)
+            if (!player.Ready || player.GameMode == PlayerGameMode.Spectator ||
+                _groundItems is null)
             {
-                ItemStack held = player.Inventory.Held();
-                int count = action.Status == BlockInteractionProtocol.DropAllItems
-                    ? held.Count : Math.Min(held.Count, 1);
-                if (held.ItemId > 0 && count > 0)
+                await InventoryProtocol.SendContentAsync(player.Connection,
+                    player.Inventory, ct);
+                return;
+            }
+            ItemStack held = player.Inventory.Held();
+            if (held.Count <= 0) return;
+            bool stackDrop = action.Status == BlockInteractionProtocol.DropAllItems;
+            // Ctrl+Q is a regular drop AND a whole-stack drop. Both sets
+            // of skills run and share one cancellation decision.
+            var evt = await EnchantmentEventAsync(held,
+                "onDrop", ct, actor: player.PlayerUuid);
+            if (stackDrop)
+                await EnchantmentEventAsync(held, "onStackDrop", ct,
+                    evt, actor: player.PlayerUuid);
+            if (!evt.IsCancelled)
+            {
+                int amount = stackDrop ? held.Count : 1;
+                PlayerPose pose = player.Pose;
+                var item = held with { Count = amount };
+                if (_groundItems.TrySpawn(item, pose.X, pose.Y + 1.1,
+                    pose.Z, out GroundItem created))
                 {
-                    PlayerPose pose = player.Pose;
-                    if (_groundItems.TrySpawn(held.ItemId, count,
-                        pose.X, pose.Y + 1.2, pose.Z, out GroundItem ground))
+                    bool consumed;
+                    try { consumed = player.Inventory.TryDropHeld(held, amount); }
+                    catch
                     {
-                        bool committed;
-                        try { committed = player.Inventory.TryTakeHeld(held.ItemId, count); }
-                        catch
-                        {
-                            _groundItems.TryRemove(ground.EntityId);
-                            throw;
-                        }
-                        if (committed)
-                        {
-                            await DispatchItemSkillAsync(player, held.ItemId,
-                                "onDrop", ct, count, ground.X, ground.Y, ground.Z);
-                            if (action.Status == BlockInteractionProtocol.DropAllItems)
-                                await DispatchItemSkillAsync(player, held.ItemId,
-                                    "onStackDrop", ct, count, ground.X, ground.Y, ground.Z);
-                        }
-                        else _groundItems.TryRemove(ground.EntityId);
+                        _groundItems.TryDiscard(created.EntityId);
+                        throw;
                     }
+                    if (!consumed) _groundItems.TryDiscard(created.EntityId);
                 }
             }
-            // Always reconcile the client, including empty slots, full ground
-            // item stores and creative inventories with modified hotbar items.
-            await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+            // Correct predicted inventory regardless of accepted/cancelled drop.
+            await InventoryProtocol.SendContentAsync(player.Connection,
+                player.Inventory, ct);
             return;
         }
         // RELEASE_USE_ITEM, SWAP_ITEM_WITH_OFFHAND, STAB need separate
@@ -626,6 +681,30 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                 int held = player.Inventory.Held().ItemId;
                 int duration = player.GameMode == PlayerGameMode.Creative ? 0 :
                     MiningRules.RequiredMilliseconds(state, held);
+                if (duration < int.MaxValue)
+                {
+                    var miningContext = new ShardSkillRuntime();
+                    miningContext.SetNumber("mining_speed", 1);
+                    await EnchantmentEventAsync(player.Inventory.Held(),
+                        "onMine", ct, miningContext, actor: player.PlayerUuid);
+                    if (miningContext.IsCancelled)
+                    {
+                        // A cancelled ~onMine suppresses vanilla block breaking
+                        // even for Creative and one-tick Survival mining.
+                        // Reconcile client-side predicted AIR with server state.
+                        outcome = "mining cancelled by skill";
+                        await BlockInteractionProtocol.SendBlockUpdateAsync(
+                            player.Connection, action.X, action.Y, action.Z,
+                            state, ct);
+                        break;
+                    }
+                    if (survival && duration > 0)
+                    {
+                        double bonus = Math.Clamp(
+                            miningContext.Number("mining_speed", 1), 0.05, 256);
+                        duration = (int)Math.Max(0, Math.Ceiling(duration / bonus));
+                    }
+                }
                 if (duration == int.MaxValue)
                 {
                     outcome = "unbreakable";
@@ -694,15 +773,77 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             if (survival)
             {
                 MiningRules.BlockInfo info = MiningRules.ForState(state);
-                if (info.DropItem > 0 && MiningRules.IsHarvestable(info, miningTool))
+                if (MiningRules.IsHarvestable(info, miningTool))
                 {
-                    // A break produces a world item. The player receives it
-                    // only after touching the item and after its pickup delay.
-                    // The shared 20Hz item ticker handles spawn/pickup packets.
-                    if (_groundItems is null || !_groundItems.TrySpawn(info.DropItem, 1,
-                        action.X + 0.5, action.Y + 0.35, action.Z + 0.5, out _))
-                        Console.WriteLine($"[items] No capacity to spawn drop {info.DropItem} " +
-                            $"at {action.X},{action.Y},{action.Z}");
+                    var drops = new ShardSkillRuntime();
+                    drops.SetNumber("drop_count", 1);
+                    ItemStack tool = player.Inventory.Held();
+                    await EnchantmentEventAsync(tool, "onBlockDrop",
+                        ct, drops, actor: player.PlayerUuid);
+                    // A cancelled block-drop event suppresses only vanilla
+                    // results, not any explicit dropItem skill intents.
+                    bool usedNative = false;
+                    bool silk = drops.HasFlag("silk_touch") ||
+                        tool.EnchantmentLevel("silk_touch") > 0;
+                    if (!drops.IsCancelled && _vanillaBlockStates is not null &&
+                        _vanillaBlockStates.TryGet(state,
+                            out string blockId, out var properties))
+                    {
+                        string table = "minecraft:blocks/" +
+                            blockId["minecraft:".Length..];
+                        var native = TryVanillaLoot(table,
+                            new ShardVanillaLootContext
+                            {
+                                BlockId = blockId,
+                                BlockProperties = properties,
+                                Fortune = (int)Math.Clamp(drops.Number(
+                                    "fortune_level"), 0, 255),
+                                SilkTouch = silk,
+                                ToolIdentifier = _items is not null &&
+                                    _items.TryGetById(tool.ItemId,
+                                        out var definition) ?
+                                    definition.Identifier : null,
+                                Shears = _items is not null &&
+                                    _items.TryGetById(tool.ItemId,
+                                        out var toolDefinition) &&
+                                    toolDefinition.Identifier == "minecraft:shears"
+                            });
+                        if (native is not null)
+                        {
+                            usedNative = true;
+                            SpawnLoot(native, action.X + 0.5,
+                                action.Y + 0.35, action.Z + 0.5);
+                        }
+                    }
+                    if (!usedNative && !drops.IsCancelled && info.DropItem > 0)
+                    {
+                        // Compatibility fallback when the pinned data pack is
+                        // unavailable or its table needs an unsupported
+                        // vanilla function. The fallback is not full parity.
+                        int count = (int)Math.Clamp(
+                            drops.Number("drop_count", 1), 0, 64);
+                        if (!silk && _items is not null &&
+                            _items.TryGetById(info.DropItem, out var dropped) &&
+                            dropped.Identifier is "minecraft:coal" or
+                                "minecraft:diamond" or "minecraft:emerald" or
+                                "minecraft:lapis_lazuli" or "minecraft:redstone" or
+                                "minecraft:raw_iron" or "minecraft:raw_gold" or
+                                "minecraft:raw_copper" or "minecraft:quartz")
+                        {
+                            int fortune = (int)Math.Clamp(
+                                drops.Number("fortune_level"), 0, 255);
+                            if (fortune > 0)
+                                count = Math.Min(64, count +
+                                    Random.Shared.Next(fortune + 2));
+                        }
+                        if (count > 0 && (_groundItems is null ||
+                            !_groundItems.TrySpawn(info.DropItem, count,
+                                action.X + 0.5, action.Y + 0.35,
+                                action.Z + 0.5, out _)))
+                            Console.WriteLine($"[items] Cannot spawn fallback block drop {info.DropItem}.");
+                    }
+                    SpawnLoot(drops.Drops, action.X + 0.5,
+                        action.Y + 0.35, action.Z + 0.5);
                 }
                 int wear = MiningRules.DurabilityCostForBlock(state, miningTool, _items);
                 toolWearChanged = wear > 0 &&
@@ -948,65 +1089,90 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     /// is checked against the authoritative Entities manager, reach distance,
     /// and the held stack. Entities owns species and sheared state; Gameplay
     /// owns inventory transactions and physical drops; Core dispatches events.</summary>
+    /// <summary>Milk a known cow, mooshroom or goat after reach and item
+    /// validation. The outer entity publisher has already evaluated
+    /// ~onRightClick; ~onMilk is dispatched once before inventory changes.
+    /// Skills cannot mint default milk from a cancelled vanilla action.</summary>
     internal async Task HandleEntityInteractionAsync(ConnectedPlayer player,
         EntityInteraction hit, CancellationToken ct)
     {
-        if (!player.Ready || _entities is null || _interactions is null ||
-            _items is null || _skills is null || hit.Hand != 0)
-            return; // Offhand items are not represented by PlayerInventory yet.
+        if (!player.Ready || player.GameMode == PlayerGameMode.Spectator ||
+            _entities is null || _interactions is null || _items is null ||
+            hit.Hand is < 0 or > 1)
+            return;
+        int slot = hit.Hand == 0 ? player.Inventory.SelectedSlot : 45;
+        ItemStack held = player.Inventory.Snapshot().Slots[slot];
+        if (held.Count < 1 ||
+            !_items.TryGetByIdentifier("minecraft:bucket", out var bucket) ||
+            !_items.TryGetByIdentifier("minecraft:milk_bucket", out var milk) ||
+            held.ItemId != bucket.ProtocolId)
+            return;
         ShardEntityInstance entity = default;
-        bool found = false;
         foreach (ShardEntityInstance next in _entities.Snapshot())
-            if (next.EntityId == hit.EntityId)
-            {
-                entity = next;
-                found = true;
-                break;
-            }
-        if (!found) return;
+            if (next.EntityId == hit.EntityId) { entity = next; break; }
+        if (entity.EntityId <= 0) return;
         PlayerPose pose = player.Pose;
         double dx = entity.X - pose.X, dz = entity.Z - pose.Z;
         double dy = entity.Y + 0.8 - (pose.Y + 1.62);
-        if (dx * dx + dy * dy + dz * dz > 25) return;
-        ItemStack held = player.Inventory.Held();
-        if (held.Count < 1) return;
-        await DispatchItemSkillAsync(player, held.ItemId, "onRightClick", ct);
-        string? trigger = null;
-        if (_items.TryGetByIdentifier("minecraft:bucket", out var bucket) &&
-            _items.TryGetByIdentifier("minecraft:milk_bucket", out var milk) &&
-            held.ItemId == bucket.ProtocolId &&
-            _interactions.TryMilk(hit.EntityId, out var milked) &&
-            player.Inventory.TryConvertHeld(bucket.ProtocolId, milk.ProtocolId))
-        {
-            entity = milked;
-            trigger = "onMilk";
-        }
-        else if (_groundItems is not null &&
-            _items.TryGetByIdentifier("minecraft:shears", out var shears) &&
-            held.ItemId == shears.ProtocolId &&
-            _interactions.TryShear(hit.EntityId, out var sheared))
-        {
-            entity = sheared;
-            // Reward items are entirely Items skills (dropItem ~onShear).
-            // Entities only changes sheep state and exposes the trigger.
-            trigger = "onShear";
-        }
-        if (trigger is null) return;
-        await InventoryProtocol.SendContentAsync(player.Connection, player.Inventory, ct);
+        if (dx * dx + dy * dy + dz * dz > 25 ||
+            !_interactions.TryMilk(hit.EntityId, out var milked))
+            return;
         string? fallback = _entityTypes is not null &&
-            _entityTypes.TryGetById(entity.ProtocolId, out var vanilla)
-            ? vanilla.Identifier : null;
-        await _skills.DispatchAsync(new ShardSkillEvent(entity.DefinitionId,
-            trigger, entity.X, entity.Y, entity.Z, entity.EntityId, fallback), ct);
+            _entityTypes.TryGetById(milked.ProtocolId, out var vanilla)
+                ? vanilla.Identifier : null;
+        var effects = new ShardSkillRuntime();
+        if (_skills is not null)
+            await _skills.DispatchAsync(new ShardSkillEvent(
+                milked.DefinitionId, "onMilk", milked.X, milked.Y, milked.Z,
+                milked.EntityId, fallback, ActorUuid: player.PlayerUuid,
+                ItemId: held.ItemId, Count: held.Count,
+                TargetKind: EnchantmentMobCategory(fallback))
+            {
+                Runtime = effects,
+                PublisherCommitsDrops = true
+            }, ct);
+        if (!effects.IsCancelled &&
+            !player.Inventory.TryConvertSlot(
+                slot, bucket.ProtocolId, milk.ProtocolId))
+            return;
+        // Explicit dropItem Skills still execute when the underlying milk
+        // conversion is cancelled, matching Core's cancelEvent contract.
+        SpawnLoot(effects.Drops, milked.X, milked.Y + 0.3, milked.Z);
+        if (!effects.IsCancelled)
+            await InventoryProtocol.SendContentAsync(
+                player.Connection, player.Inventory, ct);
     }
 
     internal async Task HandleBlockUseAsync(ConnectedPlayer player,
         BlockUseOn hit, CancellationToken ct)
     {
-        if (hit.Hand == 0 && hit.ValidHit &&
-            CanEditAt(player, hit.X, hit.Y, hit.Z))
-            await DispatchItemSkillAsync(player, player.Inventory.Held().ItemId,
-                "onRightClick", ct);
+        // Item skills run even when they cancel the vanilla right-click.
+        // Do not open menus, place blocks, or consume materials if cancelled.
+        if (hit.ValidHit && player.Ready)
+        {
+            ItemStack rightClickStack = hit.Hand == 0 ? player.Inventory.Held() :
+                player.Inventory.Snapshot().Slots[45];
+            var evt = await EnchantmentEventAsync(rightClickStack, "onRightClick", ct,
+                actor: player.PlayerUuid);
+            if (evt.IsCancelled)
+            {
+                if (_blocks is not null && CanEditAt(player, hit.X, hit.Y, hit.Z))
+                    await BlockInteractionProtocol.SendBlockUpdateAsync(
+                        player.Connection, hit.X, hit.Y, hit.Z,
+                        _blocks.GetBlockState(hit.X, hit.Y, hit.Z), ct);
+                var adjacent = BlockInteractionProtocol.Adjacent(hit.X,
+                    hit.Y, hit.Z, hit.Face);
+                if (_blocks is not null && CanEditAt(player,
+                    adjacent.X, adjacent.Y, adjacent.Z))
+                    await BlockInteractionProtocol.SendBlockUpdateAsync(
+                        player.Connection, adjacent.X, adjacent.Y, adjacent.Z,
+                        _blocks.GetBlockState(adjacent.X, adjacent.Y,
+                            adjacent.Z), ct);
+                await BlockInteractionProtocol.SendAckAsync(player.Connection,
+                    hit.Sequence, ct);
+                return;
+            }
+        }
         if (hit.ValidHit && hit.Hand == 0 &&
             CanEditAt(player, hit.X, hit.Y, hit.Z) &&
             WorkstationManager.FromBlockState(
@@ -1017,6 +1183,7 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             await BlockInteractionProtocol.SendAckAsync(player.Connection, hit.Sequence, ct);
             return;
         }
+        if (await TryHandleBucketUseAsync(player, hit, ct)) return;
         if (await TryHandleToolUseAsync(player, hit, ct)) return;
         var (x, y, z) = BlockInteractionProtocol.Adjacent(hit.X, hit.Y, hit.Z, hit.Face);
         ushort selected = 0;
@@ -1153,21 +1320,11 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     internal async Task TickEntitiesAsync(CancellationToken ct)
     {
         if (_entities is null) return;
-        // The Entities Shard reports death exactly once; Core dispatches
-        // the trigger to registered mechanics without understanding item IDs.
-        // The Items Shard owns dropItem and calls Gameplay's world-item sink.
-        if (_skills is not null)
-        {
-            foreach (ShardEntityInstance dead in _entities.DrainDeaths())
-            {
-                string? fallback = _entityTypes is not null &&
-                    _entityTypes.TryGetById(dead.ProtocolId, out var vanilla)
-                        ? vanilla.Identifier : null;
-                await _skills.DispatchAsync(new ShardSkillEvent(
-                    dead.DefinitionId, "onDeath", dead.X, dead.Y, dead.Z,
-                    dead.EntityId, fallback), ct);
-            }
-        }
+        // Plugin/console deaths and natural kills use the same native
+        // loot/skill pipeline as player kills. An attributed melee death is
+        // removed atomically by TryDamageAndTakeDeath and cannot reappear.
+        foreach (ShardEntityInstance dead in _entities.DrainDeaths())
+            await ProcessEntityDeathAsync(dead, null, ItemStack.Empty, ct);
         ShardEntityInstance[] instances = _entities.Snapshot();
         ConnectedPlayer[] viewers = _players.Snapshot().Where(p => p.Ready).ToArray();
         var online = viewers.Select(p => p.ConnectionId).ToHashSet();
@@ -1186,6 +1343,11 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             PlayerPose pose = viewer.Pose;
             foreach (ShardEntityInstance entity in instances)
             {
+                // Sheep are owned by the same Entities manager but require
+                // their dedicated health/color/sheared metadata packet path.
+                // Do not spawn the same EID twice for one client.
+                if (_livingEntities?.TryGet(entity.EntityId, out _) == true)
+                    continue;
                 double dx = entity.X - pose.X, dz = entity.Z - pose.Z;
                 if (dx * dx + dz * dz > 48 * 48 || Math.Abs(entity.Y - pose.Y) > 48)
                     continue;
@@ -1222,6 +1384,7 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     {
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
         while (await ticker.WaitForNextTickAsync(ct))
+        {
             await TickGroundItemsAsync(ct);
             await TickExperienceOrbsAsync(ct);
             await TickLivingEntitiesAsync(ct);
@@ -1229,6 +1392,9 @@ public sealed partial class MinecraftServer : IShardItemDropSink
             await TickFishingAsync(ct);
             await TickWoolRegrowthAsync(ct);
             await TickElytraAsync(ct);
+            await TickConsumablesAsync(ct);
+            await TickActiveEffectsAsync(ct);
+        }
     }
 
     /// <summary>One authoritative 20Hz tick for loose items. Exposed internally
@@ -1302,6 +1468,9 @@ public sealed partial class MinecraftServer : IShardItemDropSink
                     Math.Abs(item.Y - (pose.Y + 0.35)) > 1.6) continue;
                 if (!_itemViews.TryGetValue(collector.ConnectionId, out var collectorView) ||
                     !collectorView.ContainsKey(item.EntityId)) continue;
+                var pickupEvent = await EnchantmentEventAsync(item.ResolvedStack,
+                    "onPickup", ct, actor: collector.PlayerUuid);
+                if (pickupEvent.IsCancelled) continue;
                 int count = _groundItems.TryCollect(item.EntityId, collector.Inventory,
                     out GroundItem remaining);
                 if (count == 0) continue;
@@ -1651,7 +1820,7 @@ public sealed partial class MinecraftServer : IShardItemDropSink
     {
         string[] words = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length is < 2 or > 3)
-            return "Usage: enchant <online-player> <unbreaking|mending> [level]";
+            return "Usage: enchant <online-player> <enchantment-id> [level]";
         ConnectedPlayer? target = FindOnline(words[0]);
         if (target is null) return "Player not found or not fully connected.";
         string enchantment = words[1].ToLowerInvariant();
@@ -1660,18 +1829,14 @@ public sealed partial class MinecraftServer : IShardItemDropSink
         int level = 1;
         if (words.Length == 3 && !int.TryParse(words[2], out level))
             return "Invalid enchantment level.";
-        if ((enchantment == "mending" && level != 1) ||
-            (enchantment == "unbreaking" && level is < 1 or > 3) ||
-            enchantment is not ("mending" or "unbreaking"))
-            return "Supported enchantments: Mending I and Unbreaking I–III.";
-        ItemStack held = target.Inventory.Held();
-        bool applied = enchantment == "mending"
-            ? target.Inventory.ConfigureHeld(
-                held.Unbreaking, true, held.Unbreakable)
-            : target.Inventory.ConfigureHeld(
-                level, held.Mending, held.Unbreakable);
+        if (_enchantments is null ||
+            !_enchantments.TryGet(enchantment, out var selected) ||
+            level < 1 || level > selected.MaxLevel)
+            return "Unknown enchantment or invalid level; use the enchantments command for the 43 registered vanilla enchantments.";
+        bool applied = target.Inventory.EnchantHeld(
+            selected.Identifier, level, _enchantments);
         if (!applied)
-            return "Target must hold a damageable item; the requested enchantment may already be applied.";
+            return "Item is incompatible, a conflicting enchantment exists, or that level is already present.";
         await InventoryProtocol.SendSlotAsync(target.Connection,
             target.Inventory, target.Inventory.SelectedSlot, ct);
         await ReplyAsync(target,

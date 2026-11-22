@@ -23,6 +23,28 @@ public static class CombatRules
         return 1f;
     }
 
+    /// <summary>Strength and Weakness modify the attack-damage attribute
+    /// before the onAttack skill pipeline and the victim's armor mitigation.
+    /// Effect amplifiers are zero-based.</summary>
+    public static float MeleeDamageWithEffects(string heldItem,
+        IEnumerable<PlayerActiveEffects.Active> effects)
+    {
+        float value = MeleeDamage(heldItem);
+        foreach (var effect in effects)
+        {
+            switch (effect.Id)
+            {
+                case "minecraft:strength":
+                    value += 3f * (effect.Amplifier + 1);
+                    break;
+                case "minecraft:weakness":
+                    value -= 4f * (effect.Amplifier + 1);
+                    break;
+            }
+        }
+        return Math.Max(0, value);
+    }
+
     private static float MaterialDamage(string n) =>
         n.StartsWith("wooden_", StringComparison.Ordinal) ||
         n.StartsWith("golden_", StringComparison.Ordinal) ? 1 :

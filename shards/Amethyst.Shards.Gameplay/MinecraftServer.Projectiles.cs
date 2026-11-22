@@ -6,7 +6,7 @@ public sealed partial class MinecraftServer
 {
     private readonly Dictionary<Guid, Dictionary<int, ProjectileEntity>>
         _projectileViews = new();
-    private readonly ProjectileWorld? _projectiles;
+    private readonly IShardProjectileWorld? _projectiles;
 
     internal ProjectileEntity[] ProjectilesForTests =>
         _projectiles?.Snapshot() ?? [];
@@ -56,16 +56,20 @@ public sealed partial class MinecraftServer
                 action.Sequence, ct);
             return true;
         }
+        // Preserve authoritative potion_contents and custom effects for
+        // splash impacts. The projectile carries a copy of one stack, not
+        // the client-provided inventory or an item eligible for pickup.
+        ItemStack payload = kind == ProjectileKind.SplashPotion
+            ? stack with { Count = 1 } : ItemStack.Empty;
         if (_projectiles.TryLaunch(player.PlayerUuid, kind, player.Pose,
-            1.5, kind == ProjectileKind.EnderPearl ? 0 : 0,
-            ItemStack.Empty, out _))
+            1.5, 0, ItemStack.Empty, out _, payload))
         {
             if (!creative)
                 await InventoryProtocol.SendSlotAsync(player.Connection,
                     player.Inventory, slot, ct);
         }
         else if (!creative)
-            player.Inventory.GiveStack(new ItemStack(stack.ItemId, 1));
+            player.Inventory.GiveStack(stack with { Count = 1 });
         await BlockInteractionProtocol.SendAckAsync(player.Connection,
             action.Sequence, ct);
         return true;
@@ -120,15 +124,28 @@ public sealed partial class MinecraftServer
             kind = ProjectileKind.Trident;
             speed = 2.5;
             damage = 8;
-            recoverable = DurabilityRules.ApplyWear(stack,
-                item.MaxDurability, 1);
+            recoverable = creative ? stack : DurabilityRules.ApplyWear(stack,
+                item.MaxDurability, 1,
+                preventsWear: player.Inventory.PreventsDurabilityWear);
         }
         else return;
-        if (_projectiles.Snapshot().Length >= ProjectileWorld.MaximumProjectiles)
+        var projectileEffects = new ShardSkillRuntime();
+        projectileEffects.SetNumber("projectile_damage", damage);
+        projectileEffects.SetNumber("projectile_count", 1);
+        projectileEffects.SetNumber("piercing", 0);
+        await EnchantmentEventAsync(stack, "onProjectileLaunch", ct,
+            projectileEffects, actor: player.PlayerUuid);
+        // All configured launch skills have executed; cancellation prevents
+        // the vanilla launch, ammo consumption, and durability wear.
+        if (projectileEffects.IsCancelled) return;
+        damage = (float)Math.Clamp(projectileEffects.Number(
+            "projectile_damage", damage), 0, 1000);
+        if (_projectiles.Snapshot().Length >= 1024)
             return;
         if (!creative)
         {
-            if (ammoId > 0 && !player.Inventory.TryConsumeItem(ammoId, 1))
+            if (ammoId > 0 && !projectileEffects.HasFlag("infinity") &&
+                !player.Inventory.TryConsumeItem(ammoId, 1))
                 return;
             if (kind == ProjectileKind.Trident &&
                 !player.Inventory.ConsumeSlot(slot, stack.ItemId))
@@ -136,7 +153,7 @@ public sealed partial class MinecraftServer
         }
         if (!_projectiles.TryLaunch(player.PlayerUuid, kind, player.Pose,
             speed, damage, creative ? ItemStack.Empty : recoverable,
-            out _))
+            out _, sourceWeapon: stack))
             return;
         if (kind != ProjectileKind.Trident && !creative &&
             player.Inventory.DamageSlot(slot, stack.ItemId, 1))
@@ -151,13 +168,61 @@ public sealed partial class MinecraftServer
                 player.Inventory, ct);
     }
 
+    /// <summary>Commit splash effects to server-owned player state at the
+    /// projectile's validated impact position. Distance attenuates duration
+    /// and instant healing/damage. No client-reported potion effects are used.</summary>
+    internal async Task ApplySplashPotionAsync(ProjectileEntity potion,
+        Guid directHit, IReadOnlyList<ConnectedPlayer> players,
+        CancellationToken ct)
+    {
+        if (potion.Kind != ProjectileKind.SplashPotion || potion.Payload.Count < 1)
+            return;
+        IReadOnlyList<ShardConsumeEffect> effects;
+        try
+        {
+            effects = ConsumableEffects.ForStack(potion.Payload, []);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or
+            NotSupportedException or System.Text.Json.JsonException)
+        {
+            Console.WriteLine("[items] Rejected invalid splash potion: " +
+                ex.Message);
+            return;
+        }
+        foreach (ConnectedPlayer player in players)
+        {
+            if (!player.Ready || player.GameMode == PlayerGameMode.Spectator ||
+                player.Vitals.Snapshot().Health <= 0) continue;
+            PlayerPose pos = player.Pose;
+            double dx = potion.X - pos.X, dz = potion.Z - pos.Z;
+            double dy = potion.Y - (pos.Y + 0.9);
+            double distance = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+            if (distance > 4) continue;
+            double intensity = directHit == player.PlayerUuid ? 1 :
+                Math.Clamp(1 - distance / 4, 0, 1);
+            if (intensity <= 0) continue;
+            ShardConsumeEffect[] scaled = effects
+                .Select(e => e.DurationTicks > 0
+                    ? e with { DurationTicks =
+                        (int)Math.Floor(e.DurationTicks * intensity) }
+                    : e)
+                .Where(e => e.DurationTicks == 0 ||
+                    e.DurationTicks >= 20)
+                .ToArray();
+            await ApplyConsumedEffectsAsync(player, scaled, ct, intensity);
+            await CombatProtocol.SendHealthAsync(player, ct);
+        }
+    }
+
     internal async Task TickProjectilesAsync(CancellationToken ct)
     {
         if (_projectiles is null || _blocks is null) return;
         ConnectedPlayer[] players = _players.Snapshot()
             .Where(p => p.Ready).ToArray();
-        ProjectileFrame frame = _projectiles.Tick(_blocks, players,
-            _livingEntities?.Snapshot() ?? []);
+        ProjectileFrame frame = _projectiles.Tick(_blocks,
+            players.Where(p => p.Ready && p.GameMode != PlayerGameMode.Spectator)
+                .Select(p => new ProjectilePlayer(p.PlayerUuid, p.Pose)).ToArray(),
+            _entities?.Snapshot() ?? []);
         ProjectileEntity[] present = frame.Moving;
         var online = players.Select(p => p.ConnectionId).ToHashSet();
         foreach (Guid id in _projectileViews.Keys.ToArray())
@@ -199,22 +264,65 @@ public sealed partial class MinecraftServer
             ProjectileEntity p = impact.Projectile;
             ConnectedPlayer? attacker = players.FirstOrDefault(x =>
                 x.PlayerUuid == p.Owner);
+            var hitSkills = new ShardSkillRuntime();
+            hitSkills.SetNumber("damage", p.Damage);
+            string? targetKind = impact.PlayerHit != Guid.Empty ? "player" : null;
+            if (impact.MobHit != 0 && _entities is not null)
+                targetKind = EnchantmentMobCategory(_entities.Snapshot()
+                    .FirstOrDefault(e => e.EntityId == impact.MobHit).DefinitionId);
+            if (_vanillaBlockStates is not null && _blocks is not null &&
+                _vanillaBlockStates.TryGet(_blocks.GetBlockState(
+                    (int)Math.Floor(p.X), (int)Math.Floor(p.Y),
+                    (int)Math.Floor(p.Z)), out string fluid, out _) &&
+                fluid == "minecraft:water")
+                hitSkills.SetFlag("wet_target");
+            await EnchantmentEventAsync(p.SourceWeapon, "onProjectileHit", ct,
+                hitSkills, targetKind: targetKind, actor: attacker?.PlayerUuid);
+            float impactDamage = (float)Math.Clamp(
+                hitSkills.Number("damage", p.Damage), 0, 1000);
+            bool cancelDamage = hitSkills.IsCancelled;
             if (impact.PlayerHit != Guid.Empty)
             {
                 ConnectedPlayer? victim = players.FirstOrDefault(x =>
                     x.PlayerUuid == impact.PlayerHit);
-                if (victim is not null && p.Damage > 0)
-                    await DamagePlayerAsync(victim, p.Damage, attacker, ct,
+                if (victim is not null && !cancelDamage && impactDamage > 0)
+                    await DamagePlayerAsync(victim, impactDamage, attacker, ct,
                         projectile: true);
             }
-            if (impact.MobHit != 0 && _livingEntities is not null &&
-                p.Damage > 0 &&
-                _livingEntities.TryDamage(impact.MobHit, p.Damage,
-                    out var updated, out bool killed) && killed &&
-                _groundItems is not null && _items is not null &&
-                _items.TryGetByIdentifier("minecraft:mutton", out var mutton))
-                _groundItems.TrySpawn(mutton.ProtocolId, 1,
-                    updated.X, updated.Y, updated.Z, out _);
+            if (p.Kind == ProjectileKind.SplashPotion && p.Payload.Count > 0)
+                await ApplySplashPotionAsync(p, impact.PlayerHit, players, ct);
+            // Both livestock and generic YAML mobs are owned by Entities.
+            // Commit the one-shot death through the same loot pipeline as
+            // melee, never a hard-coded sheep reward or duplicate tick drop.
+            if (impact.MobHit != 0 && _entities is not null &&
+                !cancelDamage && impactDamage > 0 &&
+                _entities.TryDamageAndTakeDeath(impact.MobHit, impactDamage,
+                    out ShardEntityInstance injured, out bool killedMob))
+            {
+                if (killedMob)
+                    await ProcessEntityDeathAsync(injured, attacker,
+                        p.SourceWeapon, ct,
+                        damageType: p.Kind switch
+                        {
+                            ProjectileKind.Trident => "minecraft:trident",
+                            ProjectileKind.Arrow or ProjectileKind.SpectralArrow =>
+                                "minecraft:arrow",
+                            _ => null
+                        },
+                        directDamagerKind: p.Kind switch
+                        {
+                            ProjectileKind.Trident => "minecraft:trident",
+                            ProjectileKind.Arrow or ProjectileKind.SpectralArrow =>
+                                "minecraft:arrow",
+                            _ => null
+                        });
+                else
+                    foreach (ConnectedPlayer viewer in players.Where(v =>
+                        _entityViews.TryGetValue(v.ConnectionId, out var seen) &&
+                        seen.ContainsKey(impact.MobHit)))
+                        await CombatProtocol.SendHurtAsync(
+                            viewer.Connection, impact.MobHit, ct);
+            }
             if (p.CanRecover && _groundItems is not null)
                 _groundItems.TrySpawn(p.Recoverable, p.X, p.Y,
                     p.Z, out _);

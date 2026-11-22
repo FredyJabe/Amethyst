@@ -21,10 +21,9 @@ public static class PlayerPackets
             p.WriteByte(ToAngle(pos.Yaw));
             p.WriteVarInt(0); // auxiliary data
         }, ct);
-        ItemStack chest = subject.Inventory.Snapshot().Slots[6];
-        if (chest.Count > 0)
-            await FlightProtocol.SendElytraEquipmentAsync(receiver,
-                subject.EntityId, chest, ct);
+        EntityEquipment[] equipped = EquipmentProtocol.AllSlots(subject.Inventory);
+        await EquipmentProtocol.SendAsync(receiver, subject.EntityId,
+            equipped, subject.Inventory.ItemRegistry, ct);
         if (subject.Flight.IsGliding)
             await FlightProtocol.SendGlidingAsync(receiver,
                 subject.EntityId, true, ct);

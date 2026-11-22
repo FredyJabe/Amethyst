@@ -1,0 +1,4 @@
+[submodule "vendor/minecraft-26.3-data"]
+	path = vendor/minecraft-26.3-data
+	url = https://github.com/mj41/mc26-data.git
+	branch = mc-26.3

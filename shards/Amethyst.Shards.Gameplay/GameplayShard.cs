@@ -22,10 +22,22 @@ public sealed class GameplayShard : IShard, IShardGameplay
         IShardEntityManager entities = context.GetRequiredService<IShardEntityManager>();
         IShardEntityRegistry entityTypes = context.GetRequiredService<IShardEntityRegistry>();
         IShardEntityInteractions interactions = context.GetRequiredService<IShardEntityInteractions>();
-        IShardSkillEngine skills = context.GetRequiredService<IShardSkillEngine>();
+        IShardLivingEntities livestock = context.GetRequiredService<IShardLivingEntities>();
+        IShardExperienceOrbs experienceOrbs = context.GetRequiredService<IShardExperienceOrbs>();
+        IShardFishingWorld fishing = context.GetRequiredService<IShardFishingWorld>();
+        IShardGroundItems groundItems = context.GetRequiredService<IShardGroundItems>();
+        IShardProjectileWorld projectiles = context.GetRequiredService<IShardProjectileWorld>();
         var game = new MinecraftServer(context.Options, world,
             context.GetRequiredService<IShardPacketBus>(), context.GetService<IShardBlockWorld>(),
-            context.DataDirectory, items, recipes, entities, skills, entityTypes, interactions);
+            context.DataDirectory, items, recipes,
+            entities, entityTypes, interactions,
+            context.GetService<IShardEnchantmentRegistry>(),
+            context.GetService<IShardSkillEngine>(),
+            context.GetService<IShardLootRegistry>(),
+            context.GetService<IShardVanillaLootTables>(),
+            context.GetService<IShardVanillaBlockStates>(),
+            context.GetService<IShardConsumableRegistry>(), livestock,
+            experienceOrbs, fishing, groundItems, projectiles);
         game.Start();
         _gameplay = game;
         context.RegisterService<IShardGameplay>(this);

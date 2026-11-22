@@ -44,11 +44,11 @@ public sealed class EntityCatalog : IShardEntityRegistry
             if (string.IsNullOrWhiteSpace(fields.Category) ||
                 fields.Category.Length > 64)
                 throw new InvalidDataException($"Invalid category for entity '{root}'.");
-            var entity = new ShardEntityDefinition(vanilla.Count, name,
+            var entity = ApplyConfig(new ShardEntityDefinition(vanilla.Count, name,
                 Normalize(fields.Category), fields.Width.Value, fields.Height.Value)
             {
                 Spawnable = fields.Category != "misc" && name != "minecraft:player"
-            };
+            }, fields, vanillaFile, root);
             if (_byName.ContainsKey(name))
                 throw new InvalidDataException($"Duplicate vanilla entity '{root}'.");
             vanilla.Add(entity);
@@ -232,6 +232,11 @@ public sealed class EntityCatalog : IShardEntityRegistry
                             throw new InvalidDataException($"Duplicate Health for '{key}'.");
                         fields.Health = Number(property.Value, file);
                         break;
+                    case "experience":
+                        throw new InvalidDataException(
+                            $"Entity '{key}' no longer supports Experience in Entities YAML. " +
+                            "Move experience rewards to Items loot ~onDeath: " +
+                            "dropExperience{amount=5} ?flag{name=killed_by_player}.");
                     case "spawnable":
                         if (fields.Spawnable.HasValue)
                             throw new InvalidDataException($"Duplicate Spawnable for '{key}'.");
@@ -257,6 +262,10 @@ public sealed class EntityCatalog : IShardEntityRegistry
                                     if (fields.Health.HasValue) throw new InvalidDataException($"Duplicate Health for '{key}'.");
                                     fields.Health = Number(option.Value, file);
                                     break;
+                                case "experience":
+                                    throw new InvalidDataException(
+                                        $"Entity '{key}' no longer accepts Options.Experience. " +
+                                        "Define dropExperience in an Items ~onDeath skill.");
                                 case "spawnable":
                                     if (fields.Spawnable.HasValue) throw new InvalidDataException($"Duplicate Spawnable for '{key}'.");
                                     fields.Spawnable = Boolean(option.Value, file);
@@ -278,6 +287,7 @@ public sealed class EntityCatalog : IShardEntityRegistry
         }
     }
 
+    /// <summary>XP may be an exact scalar or a two-element inclusive range.</summary>
     private static string Scalar(YamlNode node, string file) =>
         node is YamlScalarNode { Value: { } s } ? s :
         throw new InvalidDataException($"Expected scalar in {file}.");

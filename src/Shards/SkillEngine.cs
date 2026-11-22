@@ -25,10 +25,33 @@ public sealed class SkillEngine : IShardSkillEngine
     private readonly object _gate = new();
     private readonly Dictionary<string, (string Owner, ShardSkillValidator Validate,
         ShardSkillExecutor Execute)> _mechanics = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (string Owner, ShardSkillConditionValidator Validate,
+        ShardSkillConditionEvaluator Evaluate)> _conditions =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _triggers = new(StringComparer.OrdinalIgnoreCase)
         { ["onDeath"] = "amethyst" };
     private readonly Dictionary<string, Dictionary<string, IReadOnlyList<ShardSkillInstruction>>>
         _packs = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Core-owned cancelEvent mechanic, available to every shard.
+    /// It suppresses the publisher's default action without interrupting
+    /// the remaining skills for this event.</summary>
+    public SkillEngine()
+    {
+        RegisterMechanic("amethyst", "cancelEvent",
+            static instruction =>
+            {
+                if (instruction.Arguments.Count != 0)
+                    throw new InvalidDataException(
+                        "cancelEvent does not accept arguments; use ?conditions.");
+            },
+            static (_, evt, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                evt.Runtime.Cancel();
+                return ValueTask.CompletedTask;
+            });
+    }
 
     public int OwnerCount
     {
@@ -76,6 +99,82 @@ public sealed class SkillEngine : IShardSkillEngine
         }
     }
 
+
+    public void RegisterCondition(string owner, string name,
+        ShardSkillConditionValidator validate, ShardSkillConditionEvaluator evaluate)
+    {
+        if (string.IsNullOrWhiteSpace(owner) || !MechanicName.IsMatch(name))
+            throw new ArgumentException("Invalid skill condition.", nameof(name));
+        ArgumentNullException.ThrowIfNull(validate);
+        ArgumentNullException.ThrowIfNull(evaluate);
+        lock (_gate)
+        {
+            if (_conditions.ContainsKey(name))
+                throw new InvalidOperationException($"Skill condition '?{name}' is registered.");
+            _conditions.Add(name, (owner, validate, evaluate));
+        }
+    }
+
+    /// <summary>Register parsed skill lists from a Shard's richer configuration
+    /// (for example enchantments with max levels, conflicts and categories).
+    /// All triggers, conditions and mechanics must be registered first.</summary>
+    public void RegisterInstructions(string owner, IEnumerable<ShardSkillInstruction> instructions)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentNullException.ThrowIfNull(instructions);
+        var grouped = instructions.GroupBy(s => Normalize(s.OwnerId),
+            StringComparer.OrdinalIgnoreCase).ToArray();
+        lock (_gate)
+        {
+            // The Items Shard supplies an administrator YAML pack and also
+            // generated item/enchantment instructions. Both belong to the
+            // same shard; append generated instructions without overriding
+            // explicit empty YAML skill lists (which disable defaults).
+            var pack = _packs.TryGetValue(owner, out var existing)
+                ? new Dictionary<string, IReadOnlyList<ShardSkillInstruction>>(
+                    existing, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, IReadOnlyList<ShardSkillInstruction>>(
+                    StringComparer.OrdinalIgnoreCase);
+            foreach (var group in grouped)
+            {
+                if (!Identifier.IsMatch(group.Key))
+                    throw new InvalidDataException($"Invalid skill owner '{group.Key}'.");
+                var incoming = group.ToArray();
+                foreach (var skill in incoming)
+                    ValidateRegistered(skill);
+                if (pack.TryGetValue(group.Key, out var previous))
+                {
+                    if (previous.Count == 0) continue; // explicit Skills: []
+                    if (previous.Count + incoming.Length > 128)
+                        throw new InvalidDataException($"Too many skills for '{group.Key}'.");
+                    pack[group.Key] = Array.AsReadOnly(previous.Concat(incoming).ToArray());
+                }
+                else
+                {
+                    if (incoming.Length > 128)
+                        throw new InvalidDataException($"Too many skills for '{group.Key}'.");
+                    pack.Add(group.Key, Array.AsReadOnly(incoming));
+                }
+            }
+            _packs[owner] = pack;
+        }
+    }
+
+    private void ValidateRegistered(ShardSkillInstruction skill)
+    {
+        if (!_triggers.ContainsKey(skill.Trigger))
+            throw new InvalidDataException($"Unregistered trigger ~{skill.Trigger}.");
+        if (!_mechanics.TryGetValue(skill.Mechanic, out var mechanic))
+            throw new InvalidDataException($"Unregistered mechanic {skill.Mechanic}.");
+        mechanic.Validate(skill);
+        foreach (var condition in skill.Conditions)
+        {
+            if (!_conditions.TryGetValue(condition.Name, out var check))
+                throw new InvalidDataException($"Unregistered condition ?{condition.Name}.");
+            check.Validate(condition);
+        }
+    }
+
     /// <summary>Register one source pack per Shard. Bundled defaults can be
     /// replaced by administrator YAML for that Shard; different Shards can add
     /// skills for the same owner without overwriting each other.</summary>
@@ -84,6 +183,7 @@ public sealed class SkillEngine : IShardSkillEngine
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         ArgumentException.ThrowIfNullOrWhiteSpace(bundledFile);
         Dictionary<string, ShardSkillValidator> mechanics;
+        Dictionary<string, ShardSkillConditionValidator> conditions;
         HashSet<string> triggers;
         lock (_gate)
         {
@@ -92,11 +192,13 @@ public sealed class SkillEngine : IShardSkillEngine
             mechanics = _mechanics.ToDictionary(p => p.Key, p => p.Value.Validate,
                 StringComparer.OrdinalIgnoreCase);
             triggers = new HashSet<string>(_triggers.Keys, StringComparer.OrdinalIgnoreCase);
+            conditions = _conditions.ToDictionary(p => p.Key, p => p.Value.Validate,
+                StringComparer.OrdinalIgnoreCase);
         }
 
         var pack = new Dictionary<string, IReadOnlyList<ShardSkillInstruction>>(
             StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, skills) in ReadFile(bundledFile, mechanics, triggers))
+        foreach (var (key, skills) in ReadFile(bundledFile, mechanics, conditions, triggers))
             if (!pack.TryAdd(key, skills))
                 throw new InvalidDataException($"Duplicate bundled skills for '{key}'.");
 
@@ -109,7 +211,7 @@ public sealed class SkillEngine : IShardSkillEngine
                 .Where(x => x.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) ||
                             x.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
                 .Order(StringComparer.Ordinal))
-                foreach (var (key, skills) in ReadFile(file, mechanics, triggers))
+                foreach (var (key, skills) in ReadFile(file, mechanics, conditions, triggers))
                 {
                     if (!modified.Add(key))
                         throw new InvalidDataException(
@@ -154,30 +256,143 @@ public sealed class SkillEngine : IShardSkillEngine
         }
     }
 
+    /// <summary>Alias fallback is scoped to the requested trigger.
+    /// A custom entity with only ~onSpawn skills must still inherit
+    /// minecraft:<type> ~onDeath skills. Explicit Skills: [] suppresses
+    /// fallback; selected administrator loot overrides constrain both
+    /// aliases and canonical owner skill packs.</summary>
+    private bool ResolveEventSkills(ShardSkillEvent context,
+        out IReadOnlyList<ShardSkillInstruction> skills)
+    {
+        bool found = TryGetSkills(context.OwnerId, out skills);
+        bool matching = found && skills.Any(skill =>
+            string.Equals(skill.Trigger, context.Trigger,
+                StringComparison.OrdinalIgnoreCase) &&
+            (context.AllowedSkills is null || context.AllowedSkills.Contains(skill)));
+        if (context.FallbackOwnerId is not null &&
+            (!found || (skills.Count > 0 && !matching)) &&
+            TryGetSkills(context.FallbackOwnerId, out var fallback))
+        {
+            skills = fallback;
+            return true;
+        }
+        return found;
+    }
+
     public async Task<bool> DispatchAsync(ShardSkillEvent context, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         if (string.IsNullOrWhiteSpace(context.Trigger))
             throw new ArgumentException("Skill event needs a trigger.", nameof(context));
-        IReadOnlyList<ShardSkillInstruction> skills;
-        bool found = TryGetSkills(context.OwnerId, out skills);
-        if (!found && context.FallbackOwnerId is not null)
-            found = TryGetSkills(context.FallbackOwnerId, out skills);
-        if (!found) return false;
+        if (!ResolveEventSkills(context, out var skills)) return false;
         foreach (var skill in skills)
         {
             ct.ThrowIfCancellationRequested();
-            if (!string.Equals(skill.Trigger, context.Trigger, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(skill.Trigger, context.Trigger, StringComparison.OrdinalIgnoreCase) ||
+                context.AllowedSkills is { } selectedSkills &&
+                    !selectedSkills.Contains(skill))
                 continue;
             ShardSkillExecutor executor;
+            ShardSkillConditionEvaluator[] checks;
             lock (_gate)
             {
                 if (!_mechanics.TryGetValue(skill.Mechanic, out var mechanic))
                     throw new InvalidOperationException(
                         $"Skill mechanic '{skill.Mechanic}' was unregistered.");
                 executor = mechanic.Execute;
+                checks = skill.Conditions.Select(condition =>
+                    _conditions.TryGetValue(condition.Name, out var registered)
+                        ? registered.Evaluate
+                        : throw new InvalidOperationException(
+                            $"Skill condition '?{condition.Name}' was unregistered."))
+                    .ToArray();
             }
-            await executor(skill, context, ct);
+            bool allowed = true;
+            for (int i = 0; i < checks.Length; i++)
+                if (!checks[i](skill.Conditions[i], context))
+                {
+                    allowed = false;
+                    break;
+                }
+            if (allowed) await executor(skill, context, ct);
+        }
+        return true;
+    }
+
+    public void ValidateConditions(IReadOnlyList<ShardSkillCondition> conditions)
+    {
+        ArgumentNullException.ThrowIfNull(conditions);
+        ShardSkillConditionValidator[] validators;
+        lock (_gate)
+            validators = conditions.Select(c =>
+                _conditions.TryGetValue(c.Name, out var registered)
+                    ? registered.Validate
+                    : throw new InvalidDataException($"Unregistered condition ?{c.Name}."))
+                .ToArray();
+        for (int i = 0; i < validators.Length; i++)
+            validators[i](conditions[i]);
+    }
+
+    public bool CheckConditions(IReadOnlyList<ShardSkillCondition> conditions,
+        ShardSkillEvent context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ValidateConditions(conditions);
+        ShardSkillConditionEvaluator[] evaluators;
+        lock (_gate)
+            evaluators = conditions.Select(c =>
+                _conditions.TryGetValue(c.Name, out var registered)
+                    ? registered.Evaluate
+                    : throw new InvalidOperationException($"Condition ?{c.Name} was unregistered."))
+                .ToArray();
+        for (int i = 0; i < evaluators.Length; i++)
+            if (!evaluators[i](conditions[i], context)) return false;
+        return true;
+    }
+
+    /// <summary>Dispatch synchronously inside server-authoritative transactions.
+    /// Async mechanics cannot safely suspend while an inventory lock is held.</summary>
+    public bool DispatchImmediate(ShardSkillEvent context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (string.IsNullOrWhiteSpace(context.Trigger))
+            throw new ArgumentException("Skill event needs a trigger.", nameof(context));
+        if (!ResolveEventSkills(context, out var skills))
+            return false;
+        foreach (var skill in skills)
+        {
+            if (!string.Equals(skill.Trigger, context.Trigger,
+                    StringComparison.OrdinalIgnoreCase) ||
+                context.AllowedSkills is { } selectedSkills &&
+                    !selectedSkills.Contains(skill))
+                continue;
+            ShardSkillExecutor execute;
+            ShardSkillConditionEvaluator[] checks;
+            lock (_gate)
+            {
+                if (!_mechanics.TryGetValue(skill.Mechanic, out var mechanic))
+                    throw new InvalidOperationException(
+                        $"Mechanic '{skill.Mechanic}' has been unregistered.");
+                execute = mechanic.Execute;
+                checks = skill.Conditions.Select(c =>
+                    _conditions.TryGetValue(c.Name, out var registered)
+                        ? registered.Evaluate
+                        : throw new InvalidOperationException(
+                            $"Condition '?{c.Name}' has been unregistered.")).ToArray();
+            }
+            bool accepted = true;
+            for (int i = 0; i < checks.Length; i++)
+                if (!checks[i](skill.Conditions[i], context))
+                {
+                    accepted = false;
+                    break;
+                }
+            if (!accepted) continue;
+            ValueTask execution = execute(skill, context, CancellationToken.None);
+            if (!execution.IsCompleted)
+                throw new InvalidOperationException(
+                    $"Mechanic '{skill.Mechanic}' must complete synchronously for ~{context.Trigger}.");
+            execution.GetAwaiter().GetResult();
         }
         return true;
     }
@@ -189,6 +404,8 @@ public sealed class SkillEngine : IShardSkillEngine
             _packs.Remove(owner);
             foreach (string name in _mechanics.Where(m => m.Value.Owner == owner)
                 .Select(m => m.Key).ToArray()) _mechanics.Remove(name);
+            foreach (string name in _conditions.Where(c => c.Value.Owner == owner)
+                .Select(c => c.Key).ToArray()) _conditions.Remove(name);
             foreach (string name in _triggers.Where(t => t.Value == owner)
                 .Select(t => t.Key).ToArray()) _triggers.Remove(name);
         }
@@ -196,6 +413,7 @@ public sealed class SkillEngine : IShardSkillEngine
 
     private static IEnumerable<(string Id, IReadOnlyList<ShardSkillInstruction> Skills)>
         ReadFile(string file, IReadOnlyDictionary<string, ShardSkillValidator> mechanics,
+            IReadOnlyDictionary<string, ShardSkillConditionValidator> conditions,
             HashSet<string> triggers)
     {
         var yaml = new YamlStream();
@@ -261,7 +479,17 @@ public sealed class SkillEngine : IShardSkillEngine
                     if (!mechanics.TryGetValue(skill.Mechanic, out var validate))
                         throw new InvalidDataException(
                             $"Unregistered skill mechanic '{skill.Mechanic}' for '{id}' ({file}).");
-                    try { validate(skill); }
+                    try
+                    {
+                        validate(skill);
+                        foreach (var condition in skill.Conditions)
+                        {
+                            if (!conditions.TryGetValue(condition.Name, out var check))
+                                throw new InvalidDataException(
+                                    $"Unregistered condition '?{condition.Name}' for '{id}' ({file}).");
+                            check(condition);
+                        }
+                    }
                     catch (InvalidDataException) { throw; }
                     catch (Exception ex) when (ex is ArgumentException or FormatException
                         or InvalidOperationException)
@@ -279,7 +507,8 @@ public sealed class SkillEngine : IShardSkillEngine
     {
         if (string.IsNullOrWhiteSpace(expression) || expression.Length > 1024)
             throw new InvalidDataException($"Empty or oversized skill for '{owner}' ({file}).");
-        Match match = Expression.Match(expression);
+        string[] segments = Regex.Split(expression.Trim(), @"\s+\?");
+        Match match = Expression.Match(segments[0]);
         if (!match.Success)
             throw new InvalidDataException(
                 $"Invalid skill '{expression}' for '{owner}' ({file}). " +
@@ -303,8 +532,36 @@ public sealed class SkillEngine : IShardSkillEngine
                     throw new InvalidDataException(
                         $"Duplicate or invalid skill parameter '{key}' for '{owner}' ({file}).");
             }
+        var conditions = new List<ShardSkillCondition>();
+        for (int i = 1; i < segments.Length; i++)
+        {
+            Match condition = Regex.Match(segments[i],
+                @"^(?<name>[a-z][a-z0-9_-]*)(?:\{(?<args>[^{}]{0,512})\})?$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!condition.Success || conditions.Count >= 16)
+                throw new InvalidDataException($"Invalid skill condition '?{segments[i]}' ({file}).");
+            var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string value = condition.Groups["args"].Value;
+            if (value.Length > 0)
+                foreach (string pair in value.Split(';'))
+                {
+                    int equals = pair.IndexOf('=');
+                    if (equals < 1 || equals == pair.Length - 1)
+                        throw new InvalidDataException($"Invalid ?condition argument '{pair}'.");
+                    string key = pair[..equals].Trim();
+                    string text = pair[(equals + 1)..].Trim();
+                    if (!MechanicName.IsMatch(key) || text.Length == 0 ||
+                        !parameters.TryAdd(key, text))
+                        throw new InvalidDataException($"Invalid ?condition parameter '{pair}'.");
+                }
+            conditions.Add(new ShardSkillCondition(condition.Groups["name"].Value,
+                new ReadOnlyDictionary<string, string>(parameters)));
+        }
         return new ShardSkillInstruction(owner, mechanic, trigger, target,
-            new ReadOnlyDictionary<string, string>(arguments));
+            new ReadOnlyDictionary<string, string>(arguments))
+        {
+            Conditions = Array.AsReadOnly(conditions.ToArray())
+        };
     }
 
     private static string Normalize(string key)

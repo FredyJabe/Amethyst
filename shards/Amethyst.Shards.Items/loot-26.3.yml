@@ -1,0 +1,447 @@
+# Java 26.3 entity rewards, exclusively triggered by Items-owned ~onDeath skills.
+# No entity has automatic loot-table drops or implicit experience.
+# All entries explicitly select the pinned data-pack table or Items mechanics.
+# Override in shards/data/items/loot/*.yml; Skills: [] means no drops or XP.
+# If a vanilla table is absent or unsupported, the explicit skill logs the
+# unsupported roll and grants nothing. No hidden fallback is performed.
+
+minecraft:allay:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/allay} @self ~onDeath"
+
+minecraft:armadillo:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/armadillo} @self ~onDeath"
+
+minecraft:armor_stand:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/armor_stand} @self ~onDeath"
+
+minecraft:axolotl:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/axolotl} @self ~onDeath"
+
+minecraft:bat:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/bat} @self ~onDeath"
+
+minecraft:bee:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/bee} @self ~onDeath"
+
+minecraft:blaze:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/blaze} @self ~onDeath"
+    - "dropExperience{amount=10} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:bogged:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/bogged} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:breeze:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/breeze} @self ~onDeath"
+
+minecraft:camel:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/camel} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:camel_husk:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/camel_husk} @self ~onDeath"
+
+minecraft:cat:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/cat} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:cave_spider:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/cave_spider} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:chicken:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/chicken} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:cod:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/cod} @self ~onDeath"
+
+minecraft:copper_golem:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/copper_golem} @self ~onDeath"
+
+minecraft:cow:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/cow} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:creaking:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/creaking} @self ~onDeath"
+
+minecraft:creeper:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/creeper} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:dolphin:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/dolphin} @self ~onDeath"
+
+minecraft:donkey:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/donkey} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:drowned:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/drowned} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:elder_guardian:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/elder_guardian} @self ~onDeath"
+    - "dropExperience{amount=10} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:ender_dragon:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/ender_dragon} @self ~onDeath"
+
+minecraft:enderman:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/enderman} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:endermite:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/endermite} @self ~onDeath"
+    - "dropExperience{amount=3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:evoker:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/evoker} @self ~onDeath"
+    - "dropExperience{amount=10} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:fox:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/fox} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:frog:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/frog} @self ~onDeath"
+
+minecraft:ghast:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/ghast} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:giant:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/giant} @self ~onDeath"
+
+minecraft:glow_squid:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/glow_squid} @self ~onDeath"
+
+minecraft:goat:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/goat} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:guardian:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/guardian} @self ~onDeath"
+    - "dropExperience{amount=10} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:happy_ghast:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/happy_ghast} @self ~onDeath"
+
+minecraft:hoglin:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/hoglin} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:horse:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/horse} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:husk:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/husk} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:illusioner:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/illusioner} @self ~onDeath"
+
+minecraft:iron_golem:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/iron_golem} @self ~onDeath"
+
+minecraft:llama:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/llama} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:magma_cube:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/magma_cube} @self ~onDeath"
+
+minecraft:mannequin:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/mannequin} @self ~onDeath"
+
+minecraft:mooshroom:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/mooshroom} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:mule:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/mule} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:nautilus:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/nautilus} @self ~onDeath"
+
+minecraft:ocelot:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/ocelot} @self ~onDeath"
+
+minecraft:panda:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/panda} @self ~onDeath"
+
+minecraft:parched:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/parched} @self ~onDeath"
+
+minecraft:parrot:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/parrot} @self ~onDeath"
+
+minecraft:phantom:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/phantom} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:pig:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/pig} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:piglin:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/piglin} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:piglin_brute:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/piglin_brute} @self ~onDeath"
+    - "dropExperience{amount=20} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:pillager:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/pillager} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:polar_bear:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/polar_bear} @self ~onDeath"
+
+minecraft:pufferfish:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/pufferfish} @self ~onDeath"
+
+minecraft:rabbit:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/rabbit} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:ravager:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/ravager} @self ~onDeath"
+    - "dropExperience{amount=20} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:salmon:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/salmon} @self ~onDeath"
+
+minecraft:sheep:
+  Skills:
+    - "dropItem{item=minecraft:mutton;min=1;max=2;bonus=looting} @self ~onDeath"
+    - "dropItem{item=minecraft:white_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_white}"
+    - "dropItem{item=minecraft:orange_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_orange}"
+    - "dropItem{item=minecraft:magenta_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_magenta}"
+    - "dropItem{item=minecraft:light_blue_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_light_blue}"
+    - "dropItem{item=minecraft:yellow_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_yellow}"
+    - "dropItem{item=minecraft:lime_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_lime}"
+    - "dropItem{item=minecraft:pink_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_pink}"
+    - "dropItem{item=minecraft:gray_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_gray}"
+    - "dropItem{item=minecraft:light_gray_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_light_gray}"
+    - "dropItem{item=minecraft:cyan_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_cyan}"
+    - "dropItem{item=minecraft:purple_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_purple}"
+    - "dropItem{item=minecraft:blue_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_blue}"
+    - "dropItem{item=minecraft:brown_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_brown}"
+    - "dropItem{item=minecraft:green_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_green}"
+    - "dropItem{item=minecraft:red_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_red}"
+    - "dropItem{item=minecraft:black_wool;amount=1} @self ~onDeath ?flag{name=not_sheared} ?flag{name=color_black}"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:shulker:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/shulker} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:silverfish:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/silverfish} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:skeleton:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/skeleton} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:skeleton_horse:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/skeleton_horse} @self ~onDeath"
+
+minecraft:slime:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/slime} @self ~onDeath"
+
+minecraft:sniffer:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/sniffer} @self ~onDeath"
+
+minecraft:snow_golem:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/snow_golem} @self ~onDeath"
+
+minecraft:spider:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/spider} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:squid:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/squid} @self ~onDeath"
+
+minecraft:stray:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/stray} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:strider:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/strider} @self ~onDeath"
+
+minecraft:sulfur_cube:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/sulfur_cube} @self ~onDeath"
+
+minecraft:tadpole:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/tadpole} @self ~onDeath"
+
+minecraft:trader_llama:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/trader_llama} @self ~onDeath"
+
+minecraft:tropical_fish:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/tropical_fish} @self ~onDeath"
+
+minecraft:turtle:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/turtle} @self ~onDeath"
+
+minecraft:vex:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/vex} @self ~onDeath"
+    - "dropExperience{amount=3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:villager:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/villager} @self ~onDeath"
+
+minecraft:vindicator:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/vindicator} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:wandering_trader:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/wandering_trader} @self ~onDeath"
+
+minecraft:warden:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/warden} @self ~onDeath"
+
+minecraft:witch:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/witch} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:wither:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/wither} @self ~onDeath"
+
+minecraft:wither_skeleton:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/wither_skeleton} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:wolf:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/wolf} @self ~onDeath"
+    - "dropExperience{amount=1-3} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:zoglin:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/zoglin} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:zombie:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/zombie} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:zombie_horse:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/zombie_horse} @self ~onDeath"
+
+minecraft:zombie_nautilus:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/zombie_nautilus} @self ~onDeath"
+
+minecraft:zombie_villager:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/zombie_villager} @self ~onDeath"
+    - "dropExperience{amount=5} @self ~onDeath ?flag{name=killed_by_player}"
+
+minecraft:zombified_piglin:
+  Skills:
+    - "dropLootTable{table=minecraft:entities/zombified_piglin} @self ~onDeath"
+
+# Fishing uses a distinct ~onFishing item event, not an entity death.
+minecraft:fishing:
+  Skills:
+    # Starter fishing distribution matches the prior server behavior.
+    # Exact vanilla treasure/junk tables and biome predicates are pending.
+    - "dropItem{item=minecraft:cod;amount=1} @self ~onFishing ?range{name=loot_roll;min=0;max=54}"
+    - "dropItem{item=minecraft:salmon;amount=1} @self ~onFishing ?range{name=loot_roll;min=55;max=79}"
+    - "dropItem{item=minecraft:pufferfish;amount=1} @self ~onFishing ?range{name=loot_roll;min=80;max=88}"
+    - "dropItem{item=minecraft:tropical_fish;amount=1} @self ~onFishing ?range{name=loot_roll;min=89;max=94}"
+    - "dropItem{item=minecraft:bowl;amount=1} @self ~onFishing ?range{name=loot_roll;min=95;max=97}"
+    - "dropItem{item=minecraft:nautilus_shell;amount=1} @self ~onFishing ?range{name=loot_roll;min=98;max=99}"
